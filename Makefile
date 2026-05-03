@@ -8,13 +8,10 @@ release:
 	cargo build --release
 	codesign --sign - --entitlements $(ENTITLEMENTS) --deep --force $(BIN)
 
-sign:
-	codesign --sign - --entitlements $(ENTITLEMENTS) --deep --force $(BIN)
-
 dtb:
-	dtc -I dts -O dtb -o ./artifacts/guest.dtb ./artifacts/guest.dts
+	dtc -I dts -O dtb -o ./artifacts/guest.dtb ./dts/guest.dts
 
-run: release
+run: dtb release
 	$(BIN)
 
 clean:

@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 applevisor = "1.0"
+binrw = "0.15.1"
