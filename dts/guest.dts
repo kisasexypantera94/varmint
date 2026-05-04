@@ -58,6 +58,7 @@
 	
 	uart0: serial@9000000 {
 		compatible = "arm,pl011", "arm,primecell";
+		arm,primecell-periphid = <0x00341011>;// dirty hack, write normal periphid later
 		reg = <0x0 0x09000000 0x0 0x1000>;
 		interrupts = <0 1 4>;
 		clocks = <&clk24m &clk24m>;
