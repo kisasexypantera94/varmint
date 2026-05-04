@@ -4,6 +4,7 @@
 	compatible = "varmint,virt";
 	#address-cells = <2>;
 	#size-cells = <2>;
+	interrupt-parent = <&gic>;
 	
 	aliases {
 		serial0 = &uart0;
@@ -14,7 +15,7 @@
 		stdout-path = "serial0:115200n8";
 		
 		linux,initrd-start = <0x0 0x48000000>;
-		linux,initrd-end   = <0x0 0x4a800000>;
+		linux,initrd-end   = <0x0 0x4a842aad>;
 	};
 	
 	cpus {
@@ -26,6 +27,22 @@
 			compatible = "arm,armv8";
 			reg = <0x0>;
 		};
+	};
+	
+	gic: interrupt-controller@8000000 {
+		compatible = "arm,gic-v3";
+		interrupt-controller;
+		#interrupt-cells = <3>;
+		
+		reg = <0x0 0x08000000 0x0 0x10000>, <0x0 0x080A0000 0x0 0x20000>;
+	};
+	
+	timer {
+		compatible = "arm,armv8-timer";
+		interrupts = <1 13 0xf08>,
+		<1 14 0xf08>,
+		<1 11 0xf08>,
+		<1 10 0xf08>;
 	};
 	
 	memory@40000000 {
@@ -42,6 +59,7 @@
 	uart0: serial@9000000 {
 		compatible = "arm,pl011", "arm,primecell";
 		reg = <0x0 0x09000000 0x0 0x1000>;
+		interrupts = <0 1 4>;
 		clocks = <&clk24m &clk24m>;
 		clock-names = "uartclk", "apb_pclk";
 		status = "okay";

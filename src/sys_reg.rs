@@ -24,6 +24,22 @@ pub const MDSCR_EL1: SysReg = SysReg {
     op2: 2,
 };
 
+pub const OSDLR_EL1: SysReg = SysReg {
+    op0: 2,
+    op1: 0,
+    crn: 1,
+    crm: 3,
+    op2: 4,
+};
+
+pub const OSLAR_EL1: SysReg = SysReg {
+    op0: 2,
+    op1: 0,
+    crn: 1,
+    crm: 0,
+    op2: 4,
+};
+
 pub fn decode_sysreg(esr: u64) -> (SysReg, u64, bool) {
     let iss = esr & 0x01ff_ffff;
 

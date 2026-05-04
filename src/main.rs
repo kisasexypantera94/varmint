@@ -16,7 +16,8 @@ const INITRD_START: u64 = 0x48000000;
 const DTB_START: u64 = 0x4F000000;
 const UART_START: u64 = 0x09000000;
 const UART_SIZE: u64 = 0x1000;
-
+const GICD_START: u64 = 0x08000000;
+const GICR_START: u64 = 0x080A0000;
 const PSTATE_EL1H_DAIF_MASKED: u64 = 0x3c5;
 
 fn read_file(path: &str) -> std::io::Result<Vec<u8>> {
@@ -36,9 +37,25 @@ fn main() -> Result<()> {
 
     println!("Image header: {:?}", image_header);
 
-    let vm = VirtualMachine::new()?;
+    let gicd_size = GicConfig::get_distributor_size()?;
+    let gicr_size = GicConfig::get_redistributor_size()?;
+    let gicr_region_size = GicConfig::get_redistributor_region_size()?;
+    println!(
+        "gicd_size={},
+        gicr_size={},
+        gicr_region_size={}",
+        gicd_size, gicr_size, gicr_region_size
+    );
+    assert!(GICR_START > GICD_START + gicd_size as u64);
+
+    let mut gic_config = GicConfig::new();
+    gic_config.set_distributor_base(GICD_START)?;
+    gic_config.set_redistributor_base(GICR_START)?;
+
+    let vm = VirtualMachine::with_gic(VirtualMachineConfig::default(), gic_config)?;
 
     let vcpu = vm.vcpu_create()?;
+    vcpu.set_sys_reg(SysReg::MPIDR_EL1, 0)?;
 
     let mut mem = vm.memory_create(RAM_SIZE)?;
 
@@ -157,6 +174,24 @@ fn handle_sysreg_trap(vcpu: &Vcpu, esr: u64, pc: u64) -> Result<bool> {
             // Linux may try to configure debug state. Ignore for now.
             let value = helpers::get_rt(vcpu, rt)?;
             println!("ignored MDSCR_EL1 write: 0x{value:x}");
+        }
+
+        (sys_reg::OSDLR_EL1, true) => {
+            helpers::set_rt(vcpu, rt, 0)?;
+        }
+
+        (sys_reg::OSDLR_EL1, false) => {
+            let value = helpers::get_rt(vcpu, rt)?;
+            println!("ignored OSDLR_EL1 write: 0x{value:x}");
+        }
+
+        (sys_reg::OSLAR_EL1, true) => {
+            helpers::set_rt(vcpu, rt, 0)?;
+        }
+
+        (sys_reg::OSLAR_EL1, false) => {
+            let value = helpers::get_rt(vcpu, rt)?;
+            println!("ignored OSLAR_EL1 write: 0x{value:x}");
         }
 
         _ => {

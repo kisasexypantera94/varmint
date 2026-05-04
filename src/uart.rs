@@ -2,9 +2,7 @@ const UART_DR: u64 = 0x00;
 const UART_FR: u64 = 0x18;
 
 const UART_FR_RXFE: u64 = 1 << 4;
-const UART_FR_TXFF: u64 = 1 << 5;
 const UART_FR_TXFE: u64 = 1 << 7;
-const UART_FR_BUSY: u64 = 1 << 3;
 
 pub fn pl011_read(offset: u64) -> u64 {
     match offset {
