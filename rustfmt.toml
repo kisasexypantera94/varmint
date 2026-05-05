@@ -1,0 +1,5 @@
+# rustfmt.toml
+
+reorder_imports = true
+group_imports = "One"
+imports_granularity = "Crate"

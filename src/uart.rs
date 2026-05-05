@@ -1,8 +1,4 @@
-use std::collections::VecDeque;
-use std::io;
-use std::io::Write;
-
-use applevisor::prelude::*;
+use std::{collections::VecDeque, io, io::Write};
 
 const UART_DR: u64 = 0x00;
 const UART_FR: u64 = 0x18;
@@ -29,24 +25,24 @@ pub fn new() -> Uart {
 }
 
 impl Uart {
-    pub fn enqueue(self: &mut Self, value: u8) -> bool {
+    pub fn enqueue(&mut self, value: u8) -> bool {
         self.q.push_back(value);
-        return self.q.len() == 1;
+        self.q.len() == 1
     }
 
-    fn ris(self: &Self) -> u32 {
-        return UART_INT_RX * !self.q.is_empty() as u32;
+    fn ris(&self) -> u32 {
+        UART_INT_RX * !self.q.is_empty() as u32
     }
 
-    fn mis(self: &Self) -> u32 {
-        return self.ris() & self.imsc;
+    fn mis(&self) -> u32 {
+        self.ris() & self.imsc
     }
 
-    pub fn is_asserted(self: &Self) -> bool {
-        return self.mis() != 0;
+    pub fn is_asserted(&self) -> bool {
+        self.mis() != 0
     }
 
-    pub fn pl011_read(self: &mut Self, offset: u64) -> u32 {
+    pub fn pl011_read(&mut self, offset: u64) -> u32 {
         match offset {
             UART_FR => (self.q.is_empty() as u32 * UART_FR_RXFE) | UART_FR_TXFE,
 
@@ -64,7 +60,7 @@ impl Uart {
         }
     }
 
-    pub fn pl011_write(self: &mut Self, offset: u64, value: u32) {
+    pub fn pl011_write(&mut self, offset: u64, value: u32) {
         match offset {
             UART_DR => {
                 io::stdout().write_all(&[value as u8]).unwrap();

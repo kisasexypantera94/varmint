@@ -1,11 +1,11 @@
 use applevisor::prelude::*;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-
-use std::fs::File;
-use std::io::{BufRead, Read, stdin};
-use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
-use std::thread;
+use std::{
+    fs::File,
+    io::Read,
+    sync::{Mutex, mpsc::Sender},
+    thread,
+};
 
 mod helpers;
 mod irq;
@@ -31,7 +31,7 @@ fn read_file(path: &str) -> std::io::Result<Vec<u8>> {
     let mut buf = Vec::new();
     f.read_to_end(&mut buf)?;
 
-    return Ok(buf);
+    Ok(buf)
 }
 
 struct RawModeGuard;

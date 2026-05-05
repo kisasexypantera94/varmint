@@ -8,7 +8,7 @@ pub struct IrqLine {
 impl IrqLine {
     pub fn new(intid: u32, init_level: bool) -> IrqLine {
         IrqLine {
-            intid: intid,
+            intid,
             last_level: init_level,
         }
     }
