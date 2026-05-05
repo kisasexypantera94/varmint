@@ -55,9 +55,14 @@ fn stdin_thread(
     uart: &Mutex<uart::Uart>,
 ) {
     let _raw = RawModeGuard::new().unwrap();
-
     let stdin = std::io::stdin();
     let mut buf = [0u8; 1];
+
+    // Escape sequence: Ctrl-] then 'x' to exit, Ctrl-] then ']' to send literal Ctrl-]
+    const PREFIX: u8 = 0x1d; // Ctrl-]
+    let mut got_prefix = false;
+
+    eprintln!("[VM] Press Ctrl-] x to exit");
 
     loop {
         match stdin.lock().read(&mut buf) {
@@ -65,9 +70,18 @@ fn stdin_thread(
             Ok(_) => {
                 let b = buf[0];
 
-                // Ctrl-C
-                if b == 0x03 {
-                    break;
+                if got_prefix {
+                    got_prefix = false;
+                    match b {
+                        b'x' => break,
+                        _ => eprint!("unknown command: {b:#x}\r\n"),
+                    }
+                    continue;
+                }
+
+                if b == PREFIX {
+                    got_prefix = true;
+                    continue;
                 }
 
                 if uart.lock().unwrap().enqueue(b) {
@@ -88,7 +102,8 @@ fn vmm_thread(
     uart: &Mutex<uart::Uart>,
 ) -> Result<()> {
     let image = read_file("./artifacts/debian-arm64/Image").unwrap();
-    let initrd = read_file("./artifacts/debian-arm64/initrd.gz").unwrap();
+    // let initrd = read_file("./artifacts/debian-arm64/initrd.gz").unwrap();
+    let initrd = read_file("./scripts/busybox/initramfs.cpio.gz").unwrap();
     let dtb = read_file("./artifacts/guest.dtb").unwrap();
 
     let image_header = linux::parse_image_header(&image).unwrap();
