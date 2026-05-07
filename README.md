@@ -1,5 +1,5 @@
 <p align="left">
-  <img src="./assets/logo.png" alt="Screenshot" width="150">
+  <img src="./assets/logo.jpeg" alt="Screenshot" width="150">
 </p>
 
 # varmint

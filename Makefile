@@ -12,7 +12,7 @@ dtb:
 	dtc -I dts -O dtb -o ./artifacts/guest.dtb ./dts/guest.dts
 
 run: dtb release
-	$(BIN)
+	$(BIN) 2> vmm.log
 
 clean:
 	cargo clean

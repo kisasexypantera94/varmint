@@ -1,6 +1,7 @@
 /target
 .DS_Store
 artifacts
-bak
+.bak
 PLAN.md
 scripts/busybox
+vmm.log
