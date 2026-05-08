@@ -28,6 +28,7 @@ const PSTATE_EL1H_DAIF_MASKED: u64 = 0x3c5;
 const UART_SPI_OFFSET: u32 = 1;
 const VIRTBLK_START: u64 = 0x0a000000;
 const VIRTBLK_SIZE: u64 = 0x1000;
+const VIRTBLK_SPI_OFFSET: u32 = 32;
 
 enum MmioRegion {
     Uart(u64),
@@ -158,9 +159,11 @@ fn vmm_thread(
     let mut uart_irq = irq::IrqLine::new(spi_int_start + UART_SPI_OFFSET, false);
 
     let mut virtio_blk = virtio::Blk::new(1024 * 512);
+    let mut virtio_blk_irq = irq::IrqLine::new(spi_int_start + VIRTBLK_SPI_OFFSET, false);
 
     loop {
         uart_irq.sync(vm, uart.lock().unwrap().is_asserted())?;
+        virtio_blk_irq.sync(vm, virtio_blk.is_asserted())?;
 
         vcpu.run()?;
         let exit = vcpu.get_exit_info();
@@ -235,16 +238,6 @@ fn vmm_thread(
                                 continue;
                             }
                             Some(MmioRegion::VirtioBlk(offset)) => {
-                                eprintln!(
-                                    "VirtioBlk access: ec={}, rt={}, {}, esr=0x{:x}, pc=0x{:x}, offset=0x{:x}",
-                                    ec,
-                                    rt,
-                                    if is_write { "write" } else { "read" },
-                                    esr_el2_like,
-                                    pc,
-                                    offset
-                                );
-
                                 if is_write {
                                     let value = match helpers::reg_from_rt(rt) {
                                         Some(reg) => vcpu.get_reg(reg)?,

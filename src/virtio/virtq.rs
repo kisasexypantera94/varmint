@@ -1,18 +1,18 @@
 use applevisor::{error::Result, memory::Memory};
 
 mod flags {
-    const DESC_F_NEXT: u16 = 1;
-    const DESC_F_WRITE: u16 = 2;
-    const DESC_F_INDIRECT: u16 = 4;
+    pub const DESC_F_NEXT: u16 = 1;
+    pub const DESC_F_WRITE: u16 = 2;
+    pub const DESC_F_INDIRECT: u16 = 4;
 }
 
 #[derive(Debug)]
 #[repr(C)]
 pub struct Desc {
-    addr: u64,
-    len: u32,
-    flags: u16,
-    next: u16,
+    pub addr: u64,
+    pub len: u32,
+    pub flags: u16,
+    pub next: u16,
 }
 
 impl Desc {
@@ -23,6 +23,10 @@ impl Desc {
             flags: mem.read_u16(offset + 8 + 4)?,
             next: mem.read_u16(offset + 8 + 4 + 2)?,
         })
+    }
+
+    pub fn next(&self) -> Option<u16> {
+        (self.flags & flags::DESC_F_NEXT != 0).then_some(self.next)
     }
 }
 
@@ -36,6 +40,22 @@ pub struct AvailHeader {
 impl AvailHeader {
     pub fn new(offset: u64, mem: &Memory) -> Result<AvailHeader> {
         Ok(AvailHeader {
+            flags: mem.read_u16(offset)?,
+            idx: mem.read_u16(offset + 2)?,
+        })
+    }
+}
+
+#[derive(Debug)]
+#[repr(C)]
+pub struct UsedHeader {
+    pub flags: u16,
+    pub idx: u16,
+}
+
+impl UsedHeader {
+    pub fn new(offset: u64, mem: &Memory) -> Result<UsedHeader> {
+        Ok(UsedHeader {
             flags: mem.read_u16(offset)?,
             idx: mem.read_u16(offset + 2)?,
         })
