@@ -1,6 +1,10 @@
 use crate::virtio::{mmio, virtq};
 use applevisor::{error::Result, memory::Memory};
 use num_enum::TryFromPrimitive;
+use std::{
+    fs::{File, OpenOptions},
+    os::unix::fs::FileExt,
+};
 
 /// https://docs.oasis-open.org/virtio/virtio/v1.3/csd01/virtio-v1.3-csd01.html#x1-3060001
 const DEVICE_ID: u32 = 2;
@@ -45,6 +49,7 @@ impl RequestHeader {
 
 pub struct Blk {
     host_disk_size: usize,
+    file: File,
 
     device_features_sel: u32,
     driver_features_sel: u32,
@@ -68,15 +73,28 @@ pub struct Blk {
 }
 
 impl Blk {
-    pub fn new(host_disk_size: usize) -> Blk {
+    pub fn new(path: &str, host_disk_size: usize) -> Blk {
         assert_eq!(
             host_disk_size % 512,
             0,
             "disk size must be a multiple of 512"
         );
 
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(path)
+            .unwrap();
+
+        let cur_len = file.metadata().unwrap().len();
+        if cur_len < host_disk_size as u64 {
+            file.set_len(host_disk_size as u64).unwrap();
+        }
+
         Blk {
             host_disk_size,
+            file,
 
             device_features_sel: 0,
             driver_features_sel: 0,
@@ -184,6 +202,7 @@ impl Blk {
 
         let head_desc = virtq::Desc::new(desc_addr + head_idx * DESC_SIZE, mem).unwrap();
         let request_header = RequestHeader::new(head_desc.addr, mem).unwrap();
+        let disk_offset = request_header.sector * 512;
 
         let req_type = RequestType::try_from(request_header.r#type).unwrap();
 
@@ -207,6 +226,11 @@ impl Blk {
             let next = cur_desc.next();
             let is_status_desc = next.is_none();
 
+            eprintln!(
+                "req: type={:?}, sector={}, disk_offset={}, len={}",
+                req_type, request_header.sector, disk_offset, cur_desc.len
+            );
+
             if is_status_desc {
                 if cur_desc.len < 1 || cur_desc.flags & virtq::flags::DESC_F_WRITE == 0 {
                     panic!("bad virtio-blk status descriptor: {:?}", cur_desc);
@@ -222,10 +246,9 @@ impl Blk {
                     if !cur_desc.is_writable() {
                         status = S_IOERR;
                     } else if status == S_OK {
-                        let zeros = vec![0u8; cur_desc.len as usize];
-                        mem.write(cur_desc.addr, &zeros).unwrap();
-
-                        // todo!();
+                        let mut buf = vec![0u8; cur_desc.len as usize];
+                        self.file.read_at(&mut buf, disk_offset).unwrap();
+                        mem.write(cur_desc.addr, &buf).unwrap();
 
                         written_len += cur_desc.len;
                     }
@@ -235,7 +258,9 @@ impl Blk {
                     if cur_desc.is_writable() {
                         status = S_IOERR;
                     } else if status == S_OK {
-                        // todo!();
+                        let mut buf = vec![0u8; cur_desc.len as usize];
+                        mem.read(cur_desc.addr, &mut buf).unwrap();
+                        self.file.write_at(&buf, disk_offset).unwrap();
                     }
                 }
 

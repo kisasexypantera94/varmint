@@ -30,7 +30,7 @@ impl Desc {
     }
 
     pub fn is_writable(&self) -> bool {
-        (self.flags * flags::DESC_F_WRITE) != 0
+        (self.flags & flags::DESC_F_WRITE) != 0
     }
 }
 
