@@ -1,6 +1,6 @@
 use applevisor::{error::Result, memory::Memory};
 
-mod flags {
+pub mod flags {
     pub const DESC_F_NEXT: u16 = 1;
     pub const DESC_F_WRITE: u16 = 2;
     pub const DESC_F_INDIRECT: u16 = 4;
@@ -27,6 +27,10 @@ impl Desc {
 
     pub fn next(&self) -> Option<u16> {
         (self.flags & flags::DESC_F_NEXT != 0).then_some(self.next)
+    }
+
+    pub fn is_writable(&self) -> bool {
+        (self.flags * flags::DESC_F_WRITE) != 0
     }
 }
 
