@@ -67,7 +67,7 @@ impl UsedHeader {
 }
 
 #[derive(Default, Clone)]
-pub struct VirtQueue {
+pub struct Queue {
     queue_size: u16,
 
     desc_addr: u64,
@@ -78,9 +78,9 @@ pub struct VirtQueue {
     last_used_idx: u16,
 }
 
-impl VirtQueue {
-    pub fn new(queue_size: u16, desc_addr: u64, avail_addr: u64, used_addr: u64) -> VirtQueue {
-        VirtQueue {
+impl Queue {
+    pub fn new(queue_size: u16, desc_addr: u64, avail_addr: u64, used_addr: u64) -> Queue {
+        Queue {
             queue_size,
             desc_addr,
             avail_addr,

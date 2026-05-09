@@ -1,4 +1,4 @@
-use crate::virtio::virtq::VirtQueue;
+use crate::virtio::virtq::Queue;
 use applevisor::memory::Memory;
 
 pub trait Device {
@@ -6,5 +6,5 @@ pub trait Device {
     fn features(&self) -> u64;
     fn config(&self) -> u32;
     fn num_queues(&self) -> u16;
-    fn handle_request(&mut self, queue: &VirtQueue, head_idx: u16, mem: &mut Memory) -> u32;
+    fn handle_request(&mut self, queue: &Queue, head_idx: u16, mem: &mut Memory) -> u32;
 }

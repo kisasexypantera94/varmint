@@ -93,7 +93,7 @@ impl Device for Blk {
         1
     }
 
-    fn handle_request(&mut self, queue: &virtq::VirtQueue, head_idx: u16, mem: &mut Memory) -> u32 {
+    fn handle_request(&mut self, queue: &virtq::Queue, head_idx: u16, mem: &mut Memory) -> u32 {
         let head_desc = queue.read_desc(head_idx, mem);
         let request_header = RequestHeader::new(head_desc.addr, mem).unwrap();
         let disk_offset = request_header.sector * 512;

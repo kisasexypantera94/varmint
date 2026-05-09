@@ -2,7 +2,7 @@
 
 use crate::virtio::{
     device,
-    virtq::{self, VirtQueue},
+    virtq::{self, Queue},
 };
 use applevisor::memory::Memory;
 use num_enum::TryFromPrimitive;
@@ -50,7 +50,7 @@ pub const INT_VRING: u32 = 1 << 0;
 pub const INT_CONFIG: u32 = 1 << 1;
 
 pub struct Transport<D: device::Device> {
-    queues: Vec<virtq::VirtQueue>,
+    queues: Vec<virtq::Queue>,
     device: D,
 
     device_features_sel: u32,
@@ -74,7 +74,7 @@ pub struct Transport<D: device::Device> {
 impl<D: device::Device> Transport<D> {
     pub fn new(device: D) -> Transport<D> {
         Transport {
-            queues: vec![VirtQueue::default(); device.num_queues() as usize],
+            queues: vec![Queue::default(); device.num_queues() as usize],
             device,
             device_features_sel: 0,
             driver_features_sel: 0,
@@ -140,7 +140,7 @@ impl<D: device::Device> Transport<D> {
             Reg::QueueSel => self.queue_sel = value as u16,
             Reg::QueueReady => {
                 if value == 1 {
-                    self.queues[self.queue_sel as usize] = VirtQueue::new(
+                    self.queues[self.queue_sel as usize] = Queue::new(
                         self.queue_size,
                         queue_addr(self.queue_desc_lo, self.queue_desc_hi),
                         queue_addr(self.queue_driver_lo, self.queue_driver_hi),
