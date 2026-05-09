@@ -1,5 +1,4 @@
 use applevisor::{error::Result, memory::Memory};
-use num_enum::TryFromPrimitive;
 
 pub mod flags {
     pub const DESC_F_NEXT: u16 = 1;

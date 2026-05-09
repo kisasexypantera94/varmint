@@ -74,6 +74,24 @@ impl Blk {
             file,
         }
     }
+}
+
+impl Device for Blk {
+    fn id(&self) -> u32 {
+        DEVICE_ID
+    }
+
+    fn features(&self) -> u64 {
+        common::F_VERSION_1
+    }
+
+    fn config(&self) -> u32 {
+        (self.host_disk_size / 512) as u32
+    }
+
+    fn num_queues(&self) -> u16 {
+        1
+    }
 
     fn handle_request(&mut self, queue: &virtq::VirtQueue, head_idx: u16, mem: &mut Memory) -> u32 {
         let head_desc = queue.read_desc(head_idx, mem);
@@ -139,33 +157,5 @@ impl Blk {
         }
 
         written_len
-    }
-}
-
-impl Device for Blk {
-    fn id(&self) -> u32 {
-        DEVICE_ID
-    }
-
-    fn features(&self) -> u64 {
-        common::F_VERSION_1
-    }
-
-    fn config(&self) -> u32 {
-        (self.host_disk_size / 512) as u32
-    }
-
-    fn num_queues(&self) -> u16 {
-        1
-    }
-
-    fn process_queue(&mut self, queue: &mut virtq::VirtQueue, mem: &mut Memory) -> bool {
-        let mut raised = false;
-        while let Some(head_idx) = queue.pop_chain(mem) {
-            let written = self.handle_request(queue, head_idx, mem);
-            queue.push_used(mem, head_idx, written);
-            raised = true;
-        }
-        raised
     }
 }

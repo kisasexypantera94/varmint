@@ -151,8 +151,13 @@ impl<D: device::Device> Transport<D> {
             Reg::QueueNotify => {
                 let q = &mut self.queues[value as usize];
 
-                let raised = self.device.process_queue(q, mem);
+                let mut raised = false;
 
+                while let Some(head_idx) = q.pop_chain(mem) {
+                    let written = self.device.handle_request(q, head_idx, mem);
+                    q.push_used(mem, head_idx, written);
+                    raised = true;
+                }
                 if raised {
                     self.interrupt_status |= INT_VRING;
                 }
