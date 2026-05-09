@@ -159,7 +159,7 @@ fn vmm_thread(
     let mut uart_irq = irq::IrqLine::new(spi_int_start + UART_SPI_OFFSET, false);
 
     let virtio_blk_dev = virtio::Blk::new("dev0.img", 1024 * 512);
-    let mut virtio_blk = virtio::mmio::Transport::new(virtio_blk_dev);
+    let mut virtio_blk = virtio::MmioTransport::new(virtio_blk_dev);
     let mut virtio_blk_irq = irq::IrqLine::new(spi_int_start + VIRTBLK_SPI_OFFSET, false);
 
     loop {

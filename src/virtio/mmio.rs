@@ -139,6 +139,8 @@ impl<D: device::Device> Transport<D> {
             Reg::QueueNum => self.queue_size = value as u16,
             Reg::QueueSel => self.queue_sel = value as u16,
             Reg::QueueReady => {
+                self.queue_ready = value;
+
                 if value == 1 {
                     self.queues[self.queue_sel as usize] = Queue::new(
                         self.queue_size,
@@ -163,7 +165,13 @@ impl<D: device::Device> Transport<D> {
                 }
             }
             Reg::InterruptAck => self.interrupt_status &= !value,
-            Reg::Status => self.status = value,
+            Reg::Status => {
+                if value == 0 {
+                    // self.reset();
+                } else {
+                    self.status = value;
+                }
+            }
             Reg::QueueDescLow => self.queue_desc_lo = value,
             Reg::QueueDescHigh => self.queue_desc_hi = value,
             Reg::QueueDriverLow => self.queue_driver_lo = value,

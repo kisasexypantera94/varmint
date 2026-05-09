@@ -3,7 +3,8 @@
 mod blk;
 mod common;
 mod device;
-pub mod mmio;
+mod mmio;
 mod virtq;
 
 pub use blk::Blk;
+pub type MmioTransport<D> = mmio::Transport<D>;
