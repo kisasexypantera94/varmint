@@ -2,7 +2,7 @@ use applevisor::prelude::*;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use std::{
     fs::File,
-    io::Read,
+    io::{self, Read, Write},
     sync::{Mutex, mpsc::Sender},
     thread,
 };
@@ -12,6 +12,7 @@ mod irq;
 mod linux;
 mod sys_reg;
 mod uart;
+mod virtio;
 
 const RAM_START: u64 = 0x40000000;
 const RAM_SIZE: usize = 0x20000000;
@@ -25,6 +26,26 @@ const GICD_START: u64 = 0x08000000;
 const GICR_START: u64 = 0x080A0000;
 const PSTATE_EL1H_DAIF_MASKED: u64 = 0x3c5;
 const UART_SPI_OFFSET: u32 = 1;
+const VIRTBLK_START: u64 = 0x0a000000;
+const VIRTBLK_SIZE: u64 = 0x1000;
+const VIRTBLK_SPI_OFFSET: u32 = 32;
+
+enum MmioRegion {
+    Uart(u64),
+    VirtioBlk(u64),
+}
+
+fn classify(phys_addr: u64) -> Option<MmioRegion> {
+    const REGIONS: &[(u64, u64, fn(u64) -> MmioRegion)] = &[
+        (UART_START, UART_SIZE, MmioRegion::Uart),
+        (VIRTBLK_START, VIRTBLK_SIZE, MmioRegion::VirtioBlk),
+    ];
+    REGIONS.iter().find_map(|&(base, size, ctor)| {
+        (base..base + size)
+            .contains(&phys_addr)
+            .then(|| ctor(phys_addr - base))
+    })
+}
 
 fn read_file(path: &str) -> std::io::Result<Vec<u8>> {
     let mut f = File::open(path)?;
@@ -73,7 +94,10 @@ fn stdin_thread(
                 if got_prefix {
                     got_prefix = false;
                     match b {
-                        b'x' => break,
+                        b'x' => {
+                            eprintln!("Received break command");
+                            break;
+                        }
                         _ => eprint!("unknown command: {b:#x}\r\n"),
                     }
                     continue;
@@ -108,7 +132,7 @@ fn vmm_thread(
 
     let image_header = linux::parse_image_header(&image).unwrap();
 
-    println!("Image header: {:?}", image_header);
+    eprintln!("Image header: {:?}", image_header);
 
     let vcpu = vm.vcpu_create()?;
     vcpu.set_sys_reg(SysReg::MPIDR_EL1, 0)?;
@@ -134,13 +158,34 @@ fn vmm_thread(
 
     let mut uart_irq = irq::IrqLine::new(spi_int_start + UART_SPI_OFFSET, false);
 
+    let virtio_blk_dev = virtio::Blk::new("dev0.img", 1024 * 512);
+    let mut virtio_blk = virtio::MmioTransport::new(virtio_blk_dev);
+    let mut virtio_blk_irq = irq::IrqLine::new(spi_int_start + VIRTBLK_SPI_OFFSET, false);
+
     loop {
         uart_irq.sync(vm, uart.lock().unwrap().is_asserted())?;
+        virtio_blk_irq.sync(vm, virtio_blk.is_asserted())?;
 
         vcpu.run()?;
         let exit = vcpu.get_exit_info();
 
         match exit.reason {
+            // exception
+            // ├── synchronous exception
+            // │   ├── undefined instruction
+            // │   ├── data abort / instruction abort
+            // │   ├── SVC syscall
+            // │   ├── trapped MRS/MSR
+            // │   └── MMIO/data abort trap в VMM
+            // │
+            // ├── IRQ
+            // │   └── interrupt request, timer/UART/virtio/etc
+            // │
+            // ├── FIQ
+            // │   └── fast interrupt request, high priority
+            // │
+            // └── SError
+            //     └── async error of system, memory, bus, etc
             ExitReason::EXCEPTION => {
                 // https://developer.arm.com/documentation/ddi0601/2026-03/AArch64-Registers/ESR-EL2--Exception-Syndrome-Register--EL2-
                 let esr_el2_like = exit.exception.syndrome;
@@ -170,35 +215,58 @@ fn vmm_thread(
                         let is_write = ((esr_el2_like >> 6) & 1) == 1;
                         let rt = (esr_el2_like >> 16) & 0b11111;
 
-                        if (UART_START..UART_START + UART_SIZE).contains(&phys_addr) {
-                            let offset = phys_addr - UART_START;
+                        match classify(phys_addr) {
+                            Some(MmioRegion::Uart(offset)) => {
+                                if is_write {
+                                    let value = match helpers::reg_from_rt(rt) {
+                                        Some(reg) => vcpu.get_reg(reg)?,
+                                        None => 0,
+                                    };
 
-                            if is_write {
-                                let value = match helpers::reg_from_rt(rt) {
-                                    Some(reg) => vcpu.get_reg(reg)?,
-                                    None => 0,
-                                };
+                                    uart.lock().unwrap().write(offset, value as u32, |value| {
+                                        io::stdout().write_all(&[value as u8]).unwrap();
+                                        io::stdout().flush().unwrap();
+                                    });
+                                } else {
+                                    let value = uart.lock().unwrap().read(offset);
 
-                                uart.lock().unwrap().pl011_write(offset, value as u32);
-                            } else {
-                                let value = uart.lock().unwrap().pl011_read(offset);
-
-                                if let Some(reg) = helpers::reg_from_rt(rt) {
-                                    vcpu.set_reg(reg, value as u64)?;
+                                    if let Some(reg) = helpers::reg_from_rt(rt) {
+                                        vcpu.set_reg(reg, value as u64)?;
+                                    }
                                 }
-                            }
 
-                            vcpu.set_reg(Reg::PC, pc + 4)?;
-                            continue;
-                        } else {
-                            panic!(
-                                "unhandled data abort trap: ec={}, rt={}, {}, esr=0x{:x}, pc=0x{:x}",
-                                ec,
-                                rt,
-                                if is_write { "write" } else { "read" },
-                                esr_el2_like,
-                                pc
-                            );
+                                vcpu.set_reg(Reg::PC, pc + 4)?;
+                                continue;
+                            }
+                            Some(MmioRegion::VirtioBlk(offset)) => {
+                                if is_write {
+                                    let value = match helpers::reg_from_rt(rt) {
+                                        Some(reg) => vcpu.get_reg(reg)?,
+                                        None => 0,
+                                    };
+
+                                    virtio_blk.write(offset, value as u32, &mut mem);
+                                } else {
+                                    let value = virtio_blk.read(offset);
+
+                                    if let Some(reg) = helpers::reg_from_rt(rt) {
+                                        vcpu.set_reg(reg, value as u64)?;
+                                    }
+                                }
+
+                                vcpu.set_reg(Reg::PC, pc + 4)?;
+                            }
+                            None => {
+                                panic!(
+                                    "unhandled data abort trap: ec={}, rt={}, {}, esr=0x{:x}, pc=0x{:x}, addr=0x{:x}",
+                                    ec,
+                                    rt,
+                                    if is_write { "write" } else { "read" },
+                                    esr_el2_like,
+                                    pc,
+                                    phys_addr,
+                                );
+                            }
                         }
                     }
 
@@ -218,7 +286,7 @@ fn vmm_thread(
                 }
             }
             ExitReason::CANCELED => (),
-            _ => println!("unexpected exit reason: {:?}", exit),
+            _ => eprintln!("unexpected exit reason: {:?}", exit),
         }
     }
 }
@@ -226,7 +294,7 @@ fn vmm_thread(
 fn handle_sysreg_trap(vcpu: &Vcpu, esr: u64, pc: u64) -> Result<bool> {
     let (sysreg, rt, is_read) = sys_reg::decode_sysreg(esr);
 
-    println!(
+    eprintln!(
         "sysreg trap: {:?}, rt={}, {}",
         sysreg,
         rt,
@@ -247,7 +315,7 @@ fn handle_sysreg_trap(vcpu: &Vcpu, esr: u64, pc: u64) -> Result<bool> {
         (sys_reg::MDSCR_EL1, false) => {
             // Linux may try to configure debug state. Ignore for now.
             let value = helpers::get_rt(vcpu, rt)?;
-            println!("ignored MDSCR_EL1 write: 0x{value:x}");
+            eprintln!("ignored MDSCR_EL1 write: 0x{value:x}");
         }
 
         (sys_reg::OSDLR_EL1, true) => {
@@ -256,7 +324,7 @@ fn handle_sysreg_trap(vcpu: &Vcpu, esr: u64, pc: u64) -> Result<bool> {
 
         (sys_reg::OSDLR_EL1, false) => {
             let value = helpers::get_rt(vcpu, rt)?;
-            println!("ignored OSDLR_EL1 write: 0x{value:x}");
+            eprintln!("ignored OSDLR_EL1 write: 0x{value:x}");
         }
 
         (sys_reg::OSLAR_EL1, true) => {
@@ -265,7 +333,7 @@ fn handle_sysreg_trap(vcpu: &Vcpu, esr: u64, pc: u64) -> Result<bool> {
 
         (sys_reg::OSLAR_EL1, false) => {
             let value = helpers::get_rt(vcpu, rt)?;
-            println!("ignored OSLAR_EL1 write: 0x{value:x}");
+            eprintln!("ignored OSLAR_EL1 write: 0x{value:x}");
         }
 
         _ => {
@@ -281,7 +349,7 @@ fn main() -> Result<()> {
     let gicd_size = GicConfig::get_distributor_size()?;
     let gicr_size = GicConfig::get_redistributor_size()?;
     let gicr_region_size = GicConfig::get_redistributor_region_size()?;
-    println!(
+    eprintln!(
         "gicd_size={},
         gicr_size={},
         gicr_region_size={}",
@@ -295,7 +363,7 @@ fn main() -> Result<()> {
 
     let vm = VirtualMachine::with_gic(VirtualMachineConfig::default(), gic_config)?;
 
-    let uart = Mutex::new(uart::new());
+    let uart = Mutex::new(uart::Uart::new());
 
     let (handle_tx, handle_rx) = std::sync::mpsc::channel();
 
