@@ -17,7 +17,7 @@
 		linux,initrd-start = <0x0 0x48000000>;
 		// linux,initrd-end   = <0x0 0x4a842aad>; //debian
 		// linux,initrd-end   = <0x0 0x480b83cb>;// busybox
-		linux,initrd-end   = <0x0 0x480bd629>;// busybox
+		linux,initrd-end   = <0x0 0x480cdc8e>;// busybox
 	};
 
 	cpus {
@@ -72,5 +72,11 @@
 		compatible = "virtio,mmio";
 		reg = <0x0 0x0a000000 0x0 0x1000>;
 		interrupts = <0 32 4>;
+	};
+
+	virtio_net@a001000 {
+		compatible = "virtio,mmio";
+		reg = <0x0 0x0a001000 0x0 0x1000>;
+		interrupts = <0 33 4>;
 	};
 };

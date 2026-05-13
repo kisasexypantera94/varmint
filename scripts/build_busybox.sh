@@ -113,7 +113,7 @@ ln -sf busybox _initramfs/bin/sh
 
 # --- 4. copy ONLY the modules we need, decompressing on the fly -------------
 # Keep this list minimal — full initramfs must fit into VMM's initrd memory area.
-WANTED='virtio virtio_ring virtio_mmio virtio_pci virtio_pci_modern_dev virtio_pci_legacy_dev virtio_blk'
+WANTED='virtio virtio_ring virtio_mmio virtio_pci virtio_pci_modern_dev virtio_pci_legacy_dev virtio_blk virtio_net net_failover failover'
 for m in $WANTED; do
     # find any of: foo.ko, foo.ko.xz, foo.ko.zst
     src="$(find "$ABS_MODDIR" -type f \
@@ -158,7 +158,8 @@ echo "-----------------------------"
 # Load order matters: core -> ring -> transport -> class driver.
 for m in virtio virtio_ring virtio_mmio \
          virtio_pci_modern_dev virtio_pci_legacy_dev virtio_pci \
-         virtio_blk; do
+         failover net_failover \
+         virtio_blk virtio_net; do
     f=$(find /lib/modules -name "${m}.ko" 2>/dev/null | head -1)
     if [ -n "$f" ]; then
         echo "insmod $m"

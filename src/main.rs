@@ -29,16 +29,21 @@ const UART_SPI_OFFSET: u32 = 1;
 const VIRTBLK_START: u64 = 0x0a000000;
 const VIRTBLK_SIZE: u64 = 0x1000;
 const VIRTBLK_SPI_OFFSET: u32 = 32;
+const VIRTNET_START: u64 = 0x0a001000;
+const VIRTNET_SIZE: u64 = 0x1000;
+const VIRTNET_SPI_OFFSET: u32 = 33;
 
 enum MmioRegion {
     Uart(u64),
     VirtioBlk(u64),
+    VirtioNet(u64),
 }
 
 fn classify(phys_addr: u64) -> Option<MmioRegion> {
     const REGIONS: &[(u64, u64, fn(u64) -> MmioRegion)] = &[
         (UART_START, UART_SIZE, MmioRegion::Uart),
         (VIRTBLK_START, VIRTBLK_SIZE, MmioRegion::VirtioBlk),
+        (VIRTNET_START, VIRTNET_SIZE, MmioRegion::VirtioNet),
     ];
     REGIONS.iter().find_map(|&(base, size, ctor)| {
         (base..base + size)
@@ -162,9 +167,14 @@ fn vmm_thread(
     let mut virtio_blk = virtio::MmioTransport::new(virtio_blk_dev);
     let mut virtio_blk_irq = irq::IrqLine::new(spi_int_start + VIRTBLK_SPI_OFFSET, false);
 
+    let virtio_net_dev = virtio::Net::new();
+    let mut virtio_net = virtio::MmioTransport::new(virtio_net_dev);
+    let mut virtio_net_irq = irq::IrqLine::new(spi_int_start + VIRTNET_SPI_OFFSET, false);
+
     loop {
         uart_irq.sync(vm, uart.lock().unwrap().is_asserted())?;
         virtio_blk_irq.sync(vm, virtio_blk.is_asserted())?;
+        virtio_net_irq.sync(vm, virtio_net.is_asserted())?;
 
         vcpu.run()?;
         let exit = vcpu.get_exit_info();
@@ -248,6 +258,24 @@ fn vmm_thread(
                                     virtio_blk.write(offset, value as u32, &mut mem);
                                 } else {
                                     let value = virtio_blk.read(offset);
+
+                                    if let Some(reg) = helpers::reg_from_rt(rt) {
+                                        vcpu.set_reg(reg, value as u64)?;
+                                    }
+                                }
+
+                                vcpu.set_reg(Reg::PC, pc + 4)?;
+                            }
+                            Some(MmioRegion::VirtioNet(offset)) => {
+                                if is_write {
+                                    let value = match helpers::reg_from_rt(rt) {
+                                        Some(reg) => vcpu.get_reg(reg)?,
+                                        None => 0,
+                                    };
+
+                                    virtio_net.write(offset, value as u32, &mut mem);
+                                } else {
+                                    let value = virtio_net.read(offset);
 
                                     if let Some(reg) = helpers::reg_from_rt(rt) {
                                         vcpu.set_reg(reg, value as u64)?;

@@ -9,9 +9,11 @@ use std::{
 /// https://docs.oasis-open.org/virtio/virtio/v1.3/csd01/virtio-v1.3-csd01.html#x1-3060001
 const DEVICE_ID: u32 = 2;
 
-const S_OK: u8 = 0;
-const S_IOERR: u8 = 1;
-const S_UNSUPP: u8 = 2;
+mod status {
+    pub const OK: u8 = 0;
+    pub const IOERR: u8 = 1;
+    pub const UNSUPP: u8 = 2;
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, TryFromPrimitive)]
 #[repr(u32)]
@@ -45,7 +47,7 @@ impl RequestHeader {
 }
 
 pub struct Blk {
-    host_disk_size: usize,
+    sectors: u64,
     file: File,
 }
 
@@ -70,7 +72,7 @@ impl Blk {
         }
 
         Blk {
-            host_disk_size,
+            sectors: (host_disk_size / 512) as u64,
             file,
         }
     }
@@ -82,18 +84,28 @@ impl Device for Blk {
     }
 
     fn features(&self) -> u64 {
-        common::F_VERSION_1
+        common::feature::VERSION_1
     }
 
-    fn config(&self) -> u32 {
-        (self.host_disk_size / 512) as u32
+    fn config(&self, offset: u64) -> u32 {
+        match offset {
+            0 => self.sectors as u32,
+            4 => (self.sectors >> 32) as u32,
+            _ => 0,
+        }
     }
 
     fn num_queues(&self) -> u16 {
         1
     }
 
-    fn handle_request(&mut self, queue: &virtq::Queue, head_idx: u16, mem: &mut Memory) -> u32 {
+    fn process_chain(
+        &mut self,
+        _q_idx: usize,
+        queue: &virtq::Queue,
+        head_idx: u16,
+        mem: &mut Memory,
+    ) -> u32 {
         let head_desc = queue.read_desc(head_idx, mem);
         let request_header = RequestHeader::new(head_desc.addr, mem).unwrap();
         let mut disk_offset = request_header.sector * 512;
@@ -102,7 +114,7 @@ impl Device for Blk {
 
         let mut cur = head_desc.next();
         let mut written_len: u32 = 0;
-        let mut status = S_OK;
+        let mut status = status::OK;
 
         while let Some(cur_desc_idx) = cur {
             let cur_desc = queue.read_desc(cur_desc_idx, mem);
@@ -128,8 +140,8 @@ impl Device for Blk {
             match req_type {
                 RequestType::In => {
                     if !cur_desc.is_writable() {
-                        status = S_IOERR;
-                    } else if status == S_OK {
+                        status = status::IOERR;
+                    } else if status == status::OK {
                         let mut buf = vec![0u8; cur_desc.len as usize];
                         self.file.read_at(&mut buf, disk_offset).unwrap();
                         mem.write(cur_desc.addr, &buf).unwrap();
@@ -140,8 +152,8 @@ impl Device for Blk {
 
                 RequestType::Out => {
                     if cur_desc.is_writable() {
-                        status = S_IOERR;
-                    } else if status == S_OK {
+                        status = status::IOERR;
+                    } else if status == status::OK {
                         let mut buf = vec![0u8; cur_desc.len as usize];
                         mem.read(cur_desc.addr, &mut buf).unwrap();
                         self.file.write_at(&buf, disk_offset).unwrap();
@@ -149,7 +161,7 @@ impl Device for Blk {
                 }
 
                 _ => {
-                    status = S_UNSUPP;
+                    status = status::UNSUPP;
                 }
             }
 
