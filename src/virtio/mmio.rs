@@ -165,9 +165,10 @@ impl<D: device::Device> Transport<D> {
                 let mut raised = false;
 
                 while let Some(head_idx) = q.pop_chain(mem) {
-                    let written = self.device.process_chain(q_idx, q, head_idx, mem);
-                    q.push_used(mem, head_idx, written);
-                    raised = true;
+                    if let Some(written) = self.device.process_chain(q_idx, q, head_idx, mem) {
+                        q.push_used(mem, head_idx, written);
+                        raised = true;
+                    }
                 }
                 if raised {
                     self.interrupt_status |= INT_VRING;
@@ -189,6 +190,22 @@ impl<D: device::Device> Transport<D> {
             Reg::QueueDeviceHigh => self.current_pending_queue().device_hi = value,
             _ => {}
         }
+    }
+
+    pub fn deliver_external(&mut self, data: &[u8], mem: &mut Memory) {
+        if let Some(completion) = self.device.handle_external(&mut self.queues, data, mem) {
+            self.queues[completion.queue_idx as usize].push_used(
+                mem,
+                completion.head_idx,
+                completion.used_len,
+            );
+
+            self.interrupt_status |= INT_VRING;
+        }
+    }
+
+    pub fn pop_external(&mut self) -> Option<Vec<u8>> {
+        self.device.pop_external()
     }
 }
 

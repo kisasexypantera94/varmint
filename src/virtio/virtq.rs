@@ -66,6 +66,12 @@ impl UsedHeader {
     }
 }
 
+pub struct Completion {
+    pub queue_idx: u16,
+    pub head_idx: u16,
+    pub used_len: u32,
+}
+
 #[derive(Default, Clone)]
 pub struct Queue {
     pub ready: bool,

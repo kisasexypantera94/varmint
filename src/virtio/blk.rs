@@ -105,7 +105,7 @@ impl Device for Blk {
         queue: &virtq::Queue,
         head_idx: u16,
         mem: &mut Memory,
-    ) -> u32 {
+    ) -> Option<u32> {
         let head_desc = queue.read_desc(head_idx, mem);
         let request_header = RequestHeader::new(head_desc.addr, mem).unwrap();
         let mut disk_offset = request_header.sector * 512;
@@ -169,6 +169,19 @@ impl Device for Blk {
             cur = next;
         }
 
-        written_len
+        Some(written_len)
+    }
+
+    fn handle_external(
+        &mut self,
+        _queues: &[virtq::Queue],
+        _data: &[u8],
+        _mem: &mut Memory,
+    ) -> Option<virtq::Completion> {
+        None
+    }
+
+    fn pop_external(&mut self) -> Option<Vec<u8>> {
+        None
     }
 }

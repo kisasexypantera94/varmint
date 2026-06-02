@@ -177,11 +177,32 @@ echo "=== /dev/vd* ==="
 ls /dev/vd* 2>/dev/null || echo "(none)"
 
 echo "Welcome to Linux"
+echo "=== network setup ==="
+ip link set eth0 up
+udhcpc -i eth0 -n -q
 exec /bin/sh
 INIT
 chmod +x _initramfs/init
 
-# --- 6. pack ----------------------------------------------------------------
+# --- 6. udhcpc script ------------------------------------------------------
+mkdir -p _initramfs/usr/share/udhcpc
+cat > _initramfs/usr/share/udhcpc/default.script << 'UDHCPC'
+#!/bin/sh
+case "$1" in
+    bound|renew)
+        ip addr flush dev "$interface"
+        ip addr add "$ip/$mask" dev "$interface"
+        [ -n "$router" ] && ip route add default via "$router" dev "$interface"
+        [ -n "$dns" ] && printf 'nameserver %s\n' $dns > /etc/resolv.conf
+        ;;
+    deconfig)
+        ip addr flush dev "$interface"
+        ;;
+esac
+UDHCPC
+chmod +x _initramfs/usr/share/udhcpc/default.script
+
+# --- 7. pack ----------------------------------------------------------------
 rm -rf _pkg
 ( cd _initramfs && find . -print0 | cpio --null -o -H newc --quiet ) \
   | gzip -9 > /src/initramfs.cpio.gz

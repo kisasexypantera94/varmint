@@ -10,6 +10,7 @@ use std::{
 mod helpers;
 mod irq;
 mod linux;
+mod net;
 mod sys_reg;
 mod uart;
 mod virtio;
@@ -130,9 +131,11 @@ fn vmm_thread(
     handle_tx: Sender<VcpuHandle>,
     uart: &Mutex<uart::Uart>,
 ) -> Result<()> {
-    let image = read_file("./artifacts/debian-arm64/Image").unwrap();
+    // let image = read_file("./artifacts/debian-arm64/Image").unwrap();
     // let initrd = read_file("./artifacts/debian-arm64/initrd.gz").unwrap();
-    let initrd = read_file("./scripts/busybox/initramfs.cpio.gz").unwrap();
+    let image = read_file("./artifacts/debian-arm64/installed-vmlinuz").unwrap();
+    let initrd = read_file("./artifacts/debian-arm64/installed-initrd.gz").unwrap();
+    // let initrd = read_file("./scripts/busybox/initramfs.cpio.gz").unwrap();
     let dtb = read_file("./artifacts/guest.dtb").unwrap();
 
     let image_header = linux::parse_image_header(&image).unwrap();
@@ -163,160 +166,179 @@ fn vmm_thread(
 
     let mut uart_irq = irq::IrqLine::new(spi_int_start + UART_SPI_OFFSET, false);
 
-    let virtio_blk_dev = virtio::Blk::new("dev0.img", 1024 * 512);
+    let virtio_blk_dev = virtio::Blk::new("dev0.img", 8 * 1024 * 1024 * 1024);
     let mut virtio_blk = virtio::MmioTransport::new(virtio_blk_dev);
     let mut virtio_blk_irq = irq::IrqLine::new(spi_int_start + VIRTBLK_SPI_OFFSET, false);
 
-    let virtio_net_dev = virtio::Net::new();
+    let mut iface = net::VmnetBackend::new().unwrap();
+    let virtio_net_dev = virtio::Net::new(iface.mac());
     let mut virtio_net = virtio::MmioTransport::new(virtio_net_dev);
     let mut virtio_net_irq = irq::IrqLine::new(spi_int_start + VIRTNET_SPI_OFFSET, false);
 
-    loop {
-        uart_irq.sync(vm, uart.lock().unwrap().is_asserted())?;
-        virtio_blk_irq.sync(vm, virtio_blk.is_asserted())?;
-        virtio_net_irq.sync(vm, virtio_net.is_asserted())?;
+    thread::scope(|s| -> Result<()> {
+        let vmnet_vcpu_handle = vcpu.get_handle();
+        let (signal_tx, signal_rx) = std::sync::mpsc::sync_channel::<()>(1);
 
-        vcpu.run()?;
-        let exit = vcpu.get_exit_info();
+        s.spawn(move || {
+            while signal_rx.recv().is_ok() {
+                vm.vcpus_exit(&[vmnet_vcpu_handle.clone()]).unwrap();
+            }
+        });
 
-        match exit.reason {
-            // exception
-            // ├── synchronous exception
-            // │   ├── undefined instruction
-            // │   ├── data abort / instruction abort
-            // │   ├── SVC syscall
-            // │   ├── trapped MRS/MSR
-            // │   └── MMIO/data abort trap в VMM
-            // │
-            // ├── IRQ
-            // │   └── interrupt request, timer/UART/virtio/etc
-            // │
-            // ├── FIQ
-            // │   └── fast interrupt request, high priority
-            // │
-            // └── SError
-            //     └── async error of system, memory, bus, etc
-            ExitReason::EXCEPTION => {
-                // https://developer.arm.com/documentation/ddi0601/2026-03/AArch64-Registers/ESR-EL2--Exception-Syndrome-Register--EL2-
-                let esr_el2_like = exit.exception.syndrome;
-                let phys_addr = exit.exception.physical_address;
-                let pc = vcpu.get_reg(Reg::PC)?;
+        iface
+            .set_event_callback(move || {
+                let _ = signal_tx.try_send(());
+            })
+            .unwrap();
 
-                let ec = (esr_el2_like >> 26) & 0b111111;
+        let mut net_buf = vec![0; iface.max_packet_size() as usize];
 
-                match ec {
-                    0x18 => {
-                        if handle_sysreg_trap(&vcpu, esr_el2_like, pc)? {
-                            continue;
-                        }
-
-                        let (sysreg, rt, is_read) = sys_reg::decode_sysreg(esr_el2_like);
-                        panic!(
-                            "unhandled sysreg trap: {:?}, rt={}, {}, esr=0x{:x}, pc=0x{:x}",
-                            sysreg,
-                            rt,
-                            if is_read { "read/MRS" } else { "write/MSR" },
-                            esr_el2_like,
-                            pc
-                        );
-                    }
-
-                    0x24 | 0x25 => {
-                        let is_write = ((esr_el2_like >> 6) & 1) == 1;
-                        let rt = (esr_el2_like >> 16) & 0b11111;
-
-                        match classify(phys_addr) {
-                            Some(MmioRegion::Uart(offset)) => {
-                                if is_write {
-                                    let value = match helpers::reg_from_rt(rt) {
-                                        Some(reg) => vcpu.get_reg(reg)?,
-                                        None => 0,
-                                    };
-
-                                    uart.lock().unwrap().write(offset, value as u32, |value| {
-                                        io::stdout().write_all(&[value as u8]).unwrap();
-                                        io::stdout().flush().unwrap();
-                                    });
-                                } else {
-                                    let value = uart.lock().unwrap().read(offset);
-
-                                    if let Some(reg) = helpers::reg_from_rt(rt) {
-                                        vcpu.set_reg(reg, value as u64)?;
-                                    }
-                                }
-
-                                vcpu.set_reg(Reg::PC, pc + 4)?;
-                                continue;
-                            }
-                            Some(MmioRegion::VirtioBlk(offset)) => {
-                                if is_write {
-                                    let value = match helpers::reg_from_rt(rt) {
-                                        Some(reg) => vcpu.get_reg(reg)?,
-                                        None => 0,
-                                    };
-
-                                    virtio_blk.write(offset, value as u32, &mut mem);
-                                } else {
-                                    let value = virtio_blk.read(offset);
-
-                                    if let Some(reg) = helpers::reg_from_rt(rt) {
-                                        vcpu.set_reg(reg, value as u64)?;
-                                    }
-                                }
-
-                                vcpu.set_reg(Reg::PC, pc + 4)?;
-                            }
-                            Some(MmioRegion::VirtioNet(offset)) => {
-                                if is_write {
-                                    let value = match helpers::reg_from_rt(rt) {
-                                        Some(reg) => vcpu.get_reg(reg)?,
-                                        None => 0,
-                                    };
-
-                                    virtio_net.write(offset, value as u32, &mut mem);
-                                } else {
-                                    let value = virtio_net.read(offset);
-
-                                    if let Some(reg) = helpers::reg_from_rt(rt) {
-                                        vcpu.set_reg(reg, value as u64)?;
-                                    }
-                                }
-
-                                vcpu.set_reg(Reg::PC, pc + 4)?;
-                            }
-                            None => {
-                                panic!(
-                                    "unhandled data abort trap: ec={}, rt={}, {}, esr=0x{:x}, pc=0x{:x}, addr=0x{:x}",
-                                    ec,
-                                    rt,
-                                    if is_write { "write" } else { "read" },
-                                    esr_el2_like,
-                                    pc,
-                                    phys_addr,
-                                );
-                            }
-                        }
-                    }
-
-                    0x20 | 0x21 => {
-                        panic!(
-                            "instruction abort: fault=0x{:x}, esr=0x{:x}, pc=0x{:x}",
-                            exit.exception.physical_address, esr_el2_like, pc
-                        );
-                    }
-
-                    _ => {
-                        panic!(
-                            "unexpected exception ec=0x{:x}, esr=0x{:x}, pc=0x{:x}",
-                            ec, esr_el2_like, pc
-                        );
-                    }
+        loop {
+            loop {
+                let n_read = iface.read(&mut net_buf).unwrap();
+                if n_read > 0 {
+                    virtio_net.deliver_external(&net_buf[..n_read], &mut mem);
+                } else {
+                    break;
                 }
             }
-            ExitReason::CANCELED => (),
-            _ => eprintln!("unexpected exit reason: {:?}", exit),
+
+            uart_irq.sync(vm, uart.lock().unwrap().is_asserted())?;
+            virtio_blk_irq.sync(vm, virtio_blk.is_asserted())?;
+            virtio_net_irq.sync(vm, virtio_net.is_asserted())?;
+
+            vcpu.run()?;
+            let exit = vcpu.get_exit_info();
+
+            match exit.reason {
+                ExitReason::EXCEPTION => {
+                    // https://developer.arm.com/documentation/ddi0601/2026-03/AArch64-Registers/ESR-EL2--Exception-Syndrome-Register--EL2-
+                    let esr_el2_like = exit.exception.syndrome;
+                    let phys_addr = exit.exception.physical_address;
+                    let pc = vcpu.get_reg(Reg::PC)?;
+
+                    let ec = (esr_el2_like >> 26) & 0b111111;
+
+                    match ec {
+                        0x18 => {
+                            if handle_sysreg_trap(&vcpu, esr_el2_like, pc)? {
+                                continue;
+                            }
+
+                            let (sysreg, rt, is_read) = sys_reg::decode_sysreg(esr_el2_like);
+                            panic!(
+                                "unhandled sysreg trap: {:?}, rt={}, {}, esr=0x{:x}, pc=0x{:x}",
+                                sysreg,
+                                rt,
+                                if is_read { "read/MRS" } else { "write/MSR" },
+                                esr_el2_like,
+                                pc
+                            );
+                        }
+
+                        0x24 | 0x25 => {
+                            let is_write = ((esr_el2_like >> 6) & 1) == 1;
+                            let rt = (esr_el2_like >> 16) & 0b11111;
+
+                            match classify(phys_addr) {
+                                Some(MmioRegion::Uart(offset)) => {
+                                    if is_write {
+                                        let value = match helpers::reg_from_rt(rt) {
+                                            Some(reg) => vcpu.get_reg(reg)?,
+                                            None => 0,
+                                        };
+
+                                        uart.lock().unwrap().write(offset, value as u32, |value| {
+                                            io::stdout().write_all(&[value as u8]).unwrap();
+                                            io::stdout().flush().unwrap();
+                                        });
+                                    } else {
+                                        let value = uart.lock().unwrap().read(offset);
+
+                                        if let Some(reg) = helpers::reg_from_rt(rt) {
+                                            vcpu.set_reg(reg, value as u64)?;
+                                        }
+                                    }
+
+                                    vcpu.set_reg(Reg::PC, pc + 4)?;
+                                    continue;
+                                }
+                                Some(MmioRegion::VirtioBlk(offset)) => {
+                                    if is_write {
+                                        let value = match helpers::reg_from_rt(rt) {
+                                            Some(reg) => vcpu.get_reg(reg)?,
+                                            None => 0,
+                                        };
+
+                                        virtio_blk.write(offset, value as u32, &mut mem);
+                                    } else {
+                                        let value = virtio_blk.read(offset);
+
+                                        if let Some(reg) = helpers::reg_from_rt(rt) {
+                                            vcpu.set_reg(reg, value as u64)?;
+                                        }
+                                    }
+
+                                    vcpu.set_reg(Reg::PC, pc + 4)?;
+                                }
+                                Some(MmioRegion::VirtioNet(offset)) => {
+                                    if is_write {
+                                        let value = match helpers::reg_from_rt(rt) {
+                                            Some(reg) => vcpu.get_reg(reg)?,
+                                            None => 0,
+                                        };
+
+                                        virtio_net.write(offset, value as u32, &mut mem);
+
+                                        while let Some(frame) = virtio_net.pop_external() {
+                                            iface.write(&frame).unwrap();
+                                        }
+                                    } else {
+                                        let value = virtio_net.read(offset);
+
+                                        if let Some(reg) = helpers::reg_from_rt(rt) {
+                                            vcpu.set_reg(reg, value as u64)?;
+                                        }
+                                    }
+
+                                    vcpu.set_reg(Reg::PC, pc + 4)?;
+                                }
+                                None => {
+                                    panic!(
+                                        "unhandled data abort trap: ec={}, rt={}, {}, esr=0x{:x}, pc=0x{:x}, addr=0x{:x}",
+                                        ec,
+                                        rt,
+                                        if is_write { "write" } else { "read" },
+                                        esr_el2_like,
+                                        pc,
+                                        phys_addr,
+                                    );
+                                }
+                            }
+                        }
+
+                        0x20 | 0x21 => {
+                            panic!(
+                                "instruction abort: fault=0x{:x}, esr=0x{:x}, pc=0x{:x}",
+                                exit.exception.physical_address, esr_el2_like, pc
+                            );
+                        }
+
+                        _ => {
+                            panic!(
+                                "unexpected exception ec=0x{:x}, esr=0x{:x}, pc=0x{:x}",
+                                ec, esr_el2_like, pc
+                            );
+                        }
+                    }
+                }
+                ExitReason::CANCELED => (),
+                _ => eprintln!("unexpected exit reason: {:?}", exit),
+            }
         }
-    }
+    })?;
+
+    Ok(())
 }
 
 fn handle_sysreg_trap(vcpu: &Vcpu, esr: u64, pc: u64) -> Result<bool> {

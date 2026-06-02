@@ -1,6 +1,7 @@
-use crate::virtio::{common, device::Device};
+use crate::virtio::{common, device::Device, virtq};
 use applevisor::{error::Result, memory::Memory};
 use num_enum::TryFromPrimitive;
+use std::collections::VecDeque;
 
 mod feature {
     pub const MAC: u64 = 1 << 5;
@@ -48,11 +49,19 @@ impl NetHeader {
     }
 }
 
-pub struct Net {}
+pub struct Net {
+    mac: [u8; 6],
+    free_rx_buffers: Vec<u16>,
+    tx_frames: VecDeque<Vec<u8>>,
+}
 
 impl Net {
-    pub fn new() -> Net {
-        Net {}
+    pub fn new(mac: [u8; 6]) -> Net {
+        Net {
+            mac,
+            free_rx_buffers: Vec::new(),
+            tx_frames: VecDeque::new(),
+        }
     }
 }
 
@@ -67,7 +76,7 @@ impl Device for Net {
 
     fn config(&self, offset: u64) -> u32 {
         let v = match offset {
-            0..MAC_LEN => MAC[offset as usize] as u32,
+            0..6 => self.mac[offset as usize] as u32,
             _ => 0,
         };
         eprintln!("net config read: offset={}, value=0x{:08x}", offset, v);
@@ -81,34 +90,103 @@ impl Device for Net {
     fn process_chain(
         &mut self,
         q_idx: usize,
-        queue: &super::virtq::Queue,
+        queue: &virtq::Queue,
         head_idx: u16,
         mem: &mut Memory,
-    ) -> u32 {
-        let head_desc = queue.read_desc(head_idx, mem);
-        let net_header = NetHeader::new(head_desc.addr, mem).unwrap();
+    ) -> Option<u32> {
         let queue_type = QueueType::try_from(q_idx).unwrap();
+        match queue_type {
+            QueueType::Rx => self.handle_rx(head_idx),
+            QueueType::Tx => self.handle_tx(queue, head_idx, mem),
+        }
+    }
 
-        let mut cur = head_desc.next();
-        let mut written_len: u32 = 0;
+    fn handle_external(
+        &mut self,
+        queues: &[virtq::Queue],
+        frame: &[u8],
+        mem: &mut Memory,
+    ) -> Option<virtq::Completion> {
+        let head_idx = self.free_rx_buffers.pop()?;
+        let queue = &queues[QueueType::Rx as usize];
 
-        while let Some(cur_desc_idx) = cur {
-            let cur_desc = queue.read_desc(cur_desc_idx, mem);
+        let mut packet = Vec::with_capacity(size_of::<NetHeader>() + frame.len());
+        packet.extend_from_slice(&self.plain_rx_hdr());
+        packet.extend_from_slice(frame);
 
-            let next = cur_desc.next();
+        let written = self.write_chain(queue, head_idx, &packet, mem);
 
-            match queue_type {
-                QueueType::Rx => {}
-                QueueType::Tx => {
-                    let mut buf = vec![0u8; cur_desc.len as usize];
-                    mem.read(cur_desc.addr, &mut buf).unwrap();
-                    eprintln!("TX: buf=[{:?}]", buf);
-                }
-            }
+        Some(virtq::Completion {
+            queue_idx: QueueType::Rx as u16,
+            head_idx,
+            used_len: written as u32,
+        })
+    }
 
-            cur = next;
+    fn pop_external(&mut self) -> Option<Vec<u8>> {
+        self.tx_frames.pop_back()
+    }
+}
+
+impl Net {
+    fn handle_rx(&mut self, head_idx: u16) -> Option<u32> {
+        self.free_rx_buffers.push(head_idx);
+        None
+    }
+
+    fn handle_tx(&mut self, queue: &virtq::Queue, head_idx: u16, mem: &mut Memory) -> Option<u32> {
+        let mut frame = Vec::new();
+        let mut cur = Some(head_idx);
+        while let Some(idx) = cur {
+            let desc = queue.read_desc(idx, mem);
+            let mut buf = vec![0u8; desc.len as usize];
+            mem.read(desc.addr, &mut buf).unwrap();
+            frame.extend_from_slice(&buf);
+            cur = desc.next();
         }
 
-        written_len
+        if frame.len() < 12 {
+            eprintln!("TX: chain too short, {} bytes", frame.len());
+            return Some(0);
+        }
+
+        let eth = &frame[12..];
+
+        self.tx_frames.push_front(eth.to_vec());
+
+        Some(0)
+    }
+
+    fn plain_rx_hdr(&self) -> [u8; size_of::<NetHeader>()] {
+        let mut out = [0u8; size_of::<NetHeader>()];
+
+        out[10..12].copy_from_slice(&1u16.to_le_bytes());
+
+        out
+    }
+
+    fn write_chain(
+        &self,
+        queue: &virtq::Queue,
+        head_idx: u16,
+        data: &[u8],
+        mem: &mut Memory,
+    ) -> usize {
+        let mut written = 0usize;
+        let mut cur = Some(head_idx);
+
+        while written < data.len() {
+            let idx = cur.unwrap();
+            let desc = queue.read_desc(idx, mem);
+
+            let n = (data.len() - written).min(desc.len as usize);
+
+            mem.write(desc.addr, &data[written..written + n]).unwrap();
+
+            written += n;
+            cur = desc.next();
+        }
+
+        written
     }
 }
