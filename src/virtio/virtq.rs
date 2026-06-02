@@ -66,9 +66,17 @@ impl UsedHeader {
     }
 }
 
+pub struct Completion {
+    pub queue_idx: u16,
+    pub head_idx: u16,
+    pub used_len: u32,
+}
+
 #[derive(Default, Clone)]
 pub struct Queue {
-    queue_size: u16,
+    pub ready: bool,
+
+    size: u16,
 
     desc_addr: u64,
     avail_addr: u64,
@@ -79,9 +87,10 @@ pub struct Queue {
 }
 
 impl Queue {
-    pub fn new(queue_size: u16, desc_addr: u64, avail_addr: u64, used_addr: u64) -> Queue {
+    pub fn new(ready: bool, size: u16, desc_addr: u64, avail_addr: u64, used_addr: u64) -> Queue {
         Queue {
-            queue_size,
+            ready,
+            size,
             desc_addr,
             avail_addr,
             used_addr,
@@ -89,6 +98,7 @@ impl Queue {
             last_used_idx: 0,
         }
     }
+
     pub fn pop_chain(&mut self, mem: &Memory) -> Option<u16> {
         const AVAIL_HEADER_SIZE: u64 = size_of::<AvailHeader>() as u64;
 
@@ -97,7 +107,7 @@ impl Queue {
             return None;
         }
 
-        let ring_idx = self.last_avail_idx % self.queue_size;
+        let ring_idx = self.last_avail_idx % self.size;
         let head_idx = mem
             .read_u16(self.avail_addr + AVAIL_HEADER_SIZE + (ring_idx * 2) as u64)
             .ok()?;
@@ -107,14 +117,14 @@ impl Queue {
     }
 
     pub fn read_desc(&self, idx: u16, mem: &Memory) -> Desc {
-        assert!(idx < self.queue_size, "bad descriptor index: {}", idx);
+        assert!(idx < self.size, "bad descriptor index: {}", idx);
         Desc::new(self.desc_addr + idx as u64 * size_of::<Desc>() as u64, mem).unwrap()
     }
 
     pub fn push_used(&mut self, mem: &mut Memory, head_idx: u16, written_len: u32) {
         const USED_HEADER_SIZE: u64 = size_of::<UsedHeader>() as u64;
 
-        let ring_idx = self.last_used_idx % self.queue_size;
+        let ring_idx = self.last_used_idx % self.size;
         let ring_addr = self.used_addr + USED_HEADER_SIZE + (ring_idx * 8) as u64;
         mem.write_u32(ring_addr, head_idx as u32).unwrap();
         mem.write_u32(ring_addr + 4, written_len).unwrap();

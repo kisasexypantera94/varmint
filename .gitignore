@@ -5,3 +5,4 @@ artifacts
 PLAN.md
 scripts/busybox
 vmm.log
+dev0.img
