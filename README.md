@@ -7,7 +7,7 @@ dd if=/dev/zero of=test bs=1M count=64
 varmint – a tiny Virtual Machine Manager for Apple Silicon, built on top of the Hypervisor framework.
 
 <p align="left">
-  <img src="./assets/demo.gif" width="800">
+  <img src="./assets/demo.gif" width="500">
 </p>
 
 ## Resources
