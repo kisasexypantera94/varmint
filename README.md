@@ -1,7 +1,6 @@
 <p align="left">
   <img src="./assets/logo.jpeg" width="150">
 </p>
-dd if=/dev/zero of=test bs=1M count=64
 
 # varmint
 varmint – a tiny Virtual Machine Manager for Apple Silicon, built on top of the Hypervisor framework.
