@@ -145,12 +145,12 @@ impl Net {
             cur = desc.next();
         }
 
-        if frame.len() < 12 {
+        if frame.len() < size_of::<NetHeader>() {
             eprintln!("TX: chain too short, {} bytes", frame.len());
             return Some(0);
         }
 
-        let eth = &frame[12..];
+        let eth = &frame[size_of::<NetHeader>()..];
 
         self.tx_frames.push_front(eth.to_vec());
 
