@@ -1,3 +1,9 @@
+use crate::helpers;
+use applevisor::{
+    error::Result,
+    vcpu::{Reg, Vcpu},
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SysReg {
     op0: u64,
@@ -64,4 +70,58 @@ pub fn decode_sysreg(esr: u64) -> (SysReg, u64, bool) {
         rt,
         is_read,
     )
+}
+
+pub fn handle_trap(vcpu: &Vcpu, esr: u64, pc: u64) -> Result<bool> {
+    let (sysreg, rt, is_read) = decode_sysreg(esr);
+
+    eprintln!(
+        "sysreg trap: {:?}, rt={}, {}",
+        sysreg,
+        rt,
+        if is_read { "read/MRS" } else { "write/MSR" }
+    );
+
+    match (sysreg, is_read) {
+        (ID_AA64ISAR2_EL1, true) => {
+            // Conservative value: expose no optional ISAR2 features.
+            helpers::set_rt(vcpu, rt, 0)?;
+        }
+
+        (MDSCR_EL1, true) => {
+            // Debug control register. For bring-up, report debug disabled.
+            helpers::set_rt(vcpu, rt, 0)?;
+        }
+
+        (MDSCR_EL1, false) => {
+            // Linux may try to configure debug state. Ignore for now.
+            let value = helpers::get_rt(vcpu, rt)?;
+            eprintln!("ignored MDSCR_EL1 write: 0x{value:x}");
+        }
+
+        (OSDLR_EL1, true) => {
+            helpers::set_rt(vcpu, rt, 0)?;
+        }
+
+        (OSDLR_EL1, false) => {
+            let value = helpers::get_rt(vcpu, rt)?;
+            eprintln!("ignored OSDLR_EL1 write: 0x{value:x}");
+        }
+
+        (OSLAR_EL1, true) => {
+            helpers::set_rt(vcpu, rt, 0)?;
+        }
+
+        (OSLAR_EL1, false) => {
+            let value = helpers::get_rt(vcpu, rt)?;
+            eprintln!("ignored OSLAR_EL1 write: 0x{value:x}");
+        }
+
+        _ => {
+            return Ok(false);
+        }
+    }
+
+    vcpu.set_reg(Reg::PC, pc + 4)?;
+    Ok(true)
 }

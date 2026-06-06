@@ -122,11 +122,6 @@ impl Device for Blk {
             let next = cur_desc.next();
             let is_status_desc = next.is_none();
 
-            eprintln!(
-                "req: type={:?}, sector={}, disk_offset={}, len={}",
-                req_type, request_header.sector, disk_offset, cur_desc.len
-            );
-
             if is_status_desc {
                 if cur_desc.len < 1 || cur_desc.flags & virtq::flags::DESC_F_WRITE == 0 {
                     panic!("bad virtio-blk status descriptor: {:?}", cur_desc);

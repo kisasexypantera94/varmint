@@ -1,10 +1,12 @@
 use applevisor::prelude::*;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+use minifb::{Window, WindowOptions};
 use std::{
     fs::File,
     io::{self, Read, Write},
-    sync::{Mutex, mpsc::Sender},
+    sync::{Arc, Mutex, mpsc::Sender},
     thread,
+    time::Duration,
 };
 
 mod helpers;
@@ -17,27 +19,36 @@ mod virtio;
 
 const RAM_START: u64 = 0x40000000;
 const RAM_SIZE: usize = 0x20000000;
+
 const KERNEL_TEXT_OFFSET: u64 = 0x0;
 const IMAGE_START: u64 = RAM_START + KERNEL_TEXT_OFFSET;
 const INITRD_START: u64 = 0x48000000;
 const DTB_START: u64 = 0x4F000000;
-const UART_START: u64 = 0x09000000;
-const UART_SIZE: u64 = 0x1000;
 const GICD_START: u64 = 0x08000000;
 const GICR_START: u64 = 0x080A0000;
 const PSTATE_EL1H_DAIF_MASKED: u64 = 0x3c5;
+
+const UART_START: u64 = 0x09000000;
+const UART_SIZE: u64 = 0x1000;
 const UART_SPI_OFFSET: u32 = 1;
+
 const VIRTBLK_START: u64 = 0x0a000000;
 const VIRTBLK_SIZE: u64 = 0x1000;
 const VIRTBLK_SPI_OFFSET: u32 = 32;
+
 const VIRTNET_START: u64 = 0x0a001000;
 const VIRTNET_SIZE: u64 = 0x1000;
 const VIRTNET_SPI_OFFSET: u32 = 33;
+
+const VIRTGPU_START: u64 = 0x0a002000;
+const VIRTGPU_SIZE: u64 = 0x1000;
+const VIRTGPU_SPI_OFFSET: u32 = 34;
 
 enum MmioRegion {
     Uart(u64),
     VirtioBlk(u64),
     VirtioNet(u64),
+    VirtioGpu(u64),
 }
 
 fn classify(phys_addr: u64) -> Option<MmioRegion> {
@@ -45,6 +56,7 @@ fn classify(phys_addr: u64) -> Option<MmioRegion> {
         (UART_START, UART_SIZE, MmioRegion::Uart),
         (VIRTBLK_START, VIRTBLK_SIZE, MmioRegion::VirtioBlk),
         (VIRTNET_START, VIRTNET_SIZE, MmioRegion::VirtioNet),
+        (VIRTGPU_START, VIRTGPU_SIZE, MmioRegion::VirtioGpu),
     ];
     REGIONS.iter().find_map(|&(base, size, ctor)| {
         (base..base + size)
@@ -139,6 +151,33 @@ fn mmio_write_reg(vcpu: &Vcpu, rt: u64, value: u64) -> Result<()> {
     Ok(())
 }
 
+fn window_thread(display: &Mutex<virtio::gpu::DisplayBuffer>) {
+    let gpu_width = 1024usize;
+    let gpu_height = 768usize;
+
+    let mut window = Window::new(
+        "varmint virtio-gpu",
+        gpu_width,
+        gpu_height,
+        WindowOptions::default(),
+    )
+    .unwrap();
+
+    while window.is_open() {
+        {
+            let mut display = display.lock().unwrap();
+
+            window
+                .update_with_buffer(&display.pixels, display.width, display.height)
+                .unwrap();
+
+            display.dirty = false;
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
 fn run_loop(
     vm: &VirtualMachineInstance<GicEnabled>,
     vcpu: &Vcpu,
@@ -150,6 +189,8 @@ fn run_loop(
     virtio_net: &mut virtio::MmioTransport<virtio::Net>,
     virtio_net_irq: &mut irq::IrqLine,
     iface: &mut net::VmnetBackend,
+    virtio_gpu: &mut virtio::MmioTransport<virtio::Gpu>,
+    virtio_gpu_irq: &mut irq::IrqLine,
 ) -> Result<()> {
     let mut net_buf = vec![0; iface.max_packet_size() as usize];
 
@@ -166,6 +207,7 @@ fn run_loop(
         uart_irq.sync(vm, uart.lock().unwrap().is_asserted())?;
         virtio_blk_irq.sync(vm, virtio_blk.is_asserted())?;
         virtio_net_irq.sync(vm, virtio_net.is_asserted())?;
+        virtio_gpu_irq.sync(vm, virtio_gpu.is_asserted())?;
 
         vcpu.run()?;
         let exit = vcpu.get_exit_info();
@@ -181,7 +223,7 @@ fn run_loop(
 
                 match ec {
                     0x18 => {
-                        if handle_sysreg_trap(vcpu, esr_el2_like, pc)? {
+                        if sys_reg::handle_trap(vcpu, esr_el2_like, pc)? {
                             continue;
                         }
 
@@ -234,6 +276,15 @@ fn run_loop(
                                     mmio_write_reg(vcpu, rt, value as u64)?;
                                 }
                             }
+                            Some(MmioRegion::VirtioGpu(offset)) => {
+                                if is_write {
+                                    let value = mmio_read_reg(vcpu, rt)?;
+                                    virtio_gpu.write(offset, value, mem);
+                                } else {
+                                    let value = virtio_gpu.read(offset);
+                                    mmio_write_reg(vcpu, rt, value as u64)?;
+                                }
+                            }
                             None => {
                                 panic!(
                                     "unhandled data abort trap: ec={}, rt={}, {}, esr=0x{:x}, pc=0x{:x}, addr=0x{:x}",
@@ -273,8 +324,9 @@ fn run_loop(
 
 fn vmm_thread(
     vm: &VirtualMachineInstance<GicEnabled>,
-    handle_tx: Sender<VcpuHandle>,
+    uart_handle_tx: Sender<VcpuHandle>,
     uart: &Mutex<uart::Uart>,
+    display: &Mutex<virtio::gpu::DisplayBuffer>,
 ) -> Result<()> {
     let image = read_file("./artifacts/debian-arm64/installed-vmlinuz").unwrap();
     let initrd = read_file("./artifacts/debian-arm64/installed-initrd.gz").unwrap();
@@ -286,7 +338,7 @@ fn vmm_thread(
     let vcpu = vm.vcpu_create()?;
     vcpu.set_sys_reg(SysReg::MPIDR_EL1, 0)?;
 
-    handle_tx.send(vcpu.get_handle()).unwrap();
+    uart_handle_tx.send(vcpu.get_handle()).unwrap();
 
     let (spi_int_start, _) = GicConfig::get_spi_interrupt_range()?;
 
@@ -313,6 +365,10 @@ fn vmm_thread(
     let virtio_net_dev = virtio::Net::new(iface.mac());
     let mut virtio_net = virtio::MmioTransport::new(virtio_net_dev);
     let mut virtio_net_irq = irq::IrqLine::new(spi_int_start + VIRTNET_SPI_OFFSET, false);
+
+    let virtio_gpu_dev = virtio::Gpu::new(display);
+    let mut virtio_gpu = virtio::MmioTransport::new(virtio_gpu_dev);
+    let mut virtio_gpu_irq = irq::IrqLine::new(spi_int_start + VIRTGPU_SPI_OFFSET, false);
 
     thread::scope(|s| -> Result<()> {
         let vmnet_vcpu_handle = vcpu.get_handle();
@@ -341,74 +397,16 @@ fn vmm_thread(
             &mut virtio_net,
             &mut virtio_net_irq,
             &mut iface,
+            &mut virtio_gpu,
+            &mut virtio_gpu_irq,
         )
     })?;
 
     Ok(())
 }
 
-fn handle_sysreg_trap(vcpu: &Vcpu, esr: u64, pc: u64) -> Result<bool> {
-    let (sysreg, rt, is_read) = sys_reg::decode_sysreg(esr);
-
-    eprintln!(
-        "sysreg trap: {:?}, rt={}, {}",
-        sysreg,
-        rt,
-        if is_read { "read/MRS" } else { "write/MSR" }
-    );
-
-    match (sysreg, is_read) {
-        (sys_reg::ID_AA64ISAR2_EL1, true) => {
-            // Conservative value: expose no optional ISAR2 features.
-            helpers::set_rt(vcpu, rt, 0)?;
-        }
-
-        (sys_reg::MDSCR_EL1, true) => {
-            // Debug control register. For bring-up, report debug disabled.
-            helpers::set_rt(vcpu, rt, 0)?;
-        }
-
-        (sys_reg::MDSCR_EL1, false) => {
-            // Linux may try to configure debug state. Ignore for now.
-            let value = helpers::get_rt(vcpu, rt)?;
-            eprintln!("ignored MDSCR_EL1 write: 0x{value:x}");
-        }
-
-        (sys_reg::OSDLR_EL1, true) => {
-            helpers::set_rt(vcpu, rt, 0)?;
-        }
-
-        (sys_reg::OSDLR_EL1, false) => {
-            let value = helpers::get_rt(vcpu, rt)?;
-            eprintln!("ignored OSDLR_EL1 write: 0x{value:x}");
-        }
-
-        (sys_reg::OSLAR_EL1, true) => {
-            helpers::set_rt(vcpu, rt, 0)?;
-        }
-
-        (sys_reg::OSLAR_EL1, false) => {
-            let value = helpers::get_rt(vcpu, rt)?;
-            eprintln!("ignored OSLAR_EL1 write: 0x{value:x}");
-        }
-
-        _ => {
-            return Ok(false);
-        }
-    }
-
-    vcpu.set_reg(Reg::PC, pc + 4)?;
-    Ok(true)
-}
-
 fn main() -> Result<()> {
     let gicd_size = GicConfig::get_distributor_size()?;
-    let gicr_size = GicConfig::get_redistributor_size()?;
-    let gicr_region_size = GicConfig::get_redistributor_region_size()?;
-    eprintln!(
-        "gicd_size={}, gicr_size={}, gicr_region_size={}",
-        gicd_size, gicr_size, gicr_region_size
-    );
     assert!(GICR_START > GICD_START + gicd_size as u64);
 
     let mut gic_config = GicConfig::new();
@@ -419,14 +417,23 @@ fn main() -> Result<()> {
 
     let uart = Mutex::new(uart::Uart::new());
 
-    let (handle_tx, handle_rx) = std::sync::mpsc::channel();
+    let (uart_handle_tx, uart_handle_rx) = std::sync::mpsc::channel();
+
+    let display = Mutex::new(virtio::gpu::DisplayBuffer::new(1024, 768));
 
     thread::scope(|s| {
-        s.spawn(|| vmm_thread(&vm, handle_tx, &uart));
+        let vm_ref = &vm;
+        let uart_ref = &uart;
+        let display = &display;
 
-        let handle = handle_rx.recv().unwrap();
+        s.spawn(move || vmm_thread(vm_ref, uart_handle_tx, uart_ref, display));
 
-        s.spawn(|| stdin_thread(&vm, handle, &uart));
+        let handle = uart_handle_rx.recv().unwrap();
+
+        s.spawn(move || stdin_thread(vm_ref, handle, uart_ref));
+
+        // has to run in main thread
+        window_thread(&display);
     });
 
     Ok(())
