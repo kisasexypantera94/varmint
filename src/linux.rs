@@ -1,5 +1,4 @@
-use binrw::{BinRead, BinReaderExt};
-use std::io::Cursor;
+use zerocopy::FromBytes;
 
 pub const ARM64_IMAGE_MAGIC: u32 = 0x644d5241;
 
@@ -15,9 +14,9 @@ pub const ARM64_IMAGE_MAGIC: u32 = 0x644d5241;
 /// u64 res4      = 0;            /* reserved */
 /// u32 magic     = 0x644d5241;   /* Magic number, little endian, "ARM\x64" */
 /// u32 res5;                     /* reserved (used for PE COFF offset) */
-#[derive(Debug, BinRead)]
-#[br(little)]
-#[allow(dead_code)]
+
+#[derive(Debug, FromBytes)]
+#[repr(C, packed)]
 pub struct ImageHeader {
     code0: u32,
     code1: u32,
@@ -31,11 +30,9 @@ pub struct ImageHeader {
     res5: u32,
 }
 
-pub fn parse_image_header(image: &[u8]) -> binrw::BinResult<ImageHeader> {
-    let mut cursor = Cursor::new(image);
-    let header: ImageHeader = cursor.read_le()?;
-
-    assert_eq!(header.magic, ARM64_IMAGE_MAGIC, "bad ARM64 Image magic");
-
-    Ok(header)
+pub fn parse_image_header(image: &[u8]) -> Option<ImageHeader> {
+    let (header, _rest) = ImageHeader::read_from_prefix(image).ok()?;
+    let magic = header.magic;
+    assert_eq!(magic, ARM64_IMAGE_MAGIC, "bad ARM64 Image magic");
+    Some(header)
 }

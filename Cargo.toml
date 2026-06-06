@@ -5,7 +5,8 @@ edition = "2024"
 
 [dependencies]
 applevisor = "1.0"
-binrw = "0.15.1"
 crossterm = "0.29.0"
+minifb = "0.28.0"
 num_enum = "0.7.6"
 vmnet = "0.5.1"
+zerocopy = { version = "0.8.50", features = ["derive"] }

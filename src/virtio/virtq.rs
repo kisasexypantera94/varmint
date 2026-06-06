@@ -72,6 +72,36 @@ pub struct Completion {
     pub used_len: u32,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct WritableDesc {
+    pub addr: u64,
+    pub len: u32,
+}
+
+#[derive(Debug)]
+pub struct ChainData {
+    pub readable: Vec<u8>,
+    pub writable: Vec<WritableDesc>,
+}
+
+impl ChainData {
+    pub fn write_response(&self, bytes: &[u8], mem: &mut Memory) -> u32 {
+        let mut written = 0usize;
+
+        for desc in &self.writable {
+            if written == bytes.len() {
+                break;
+            }
+
+            let n = (desc.len as usize).min(bytes.len() - written);
+            mem.write(desc.addr, &bytes[written..written + n]).unwrap();
+            written += n;
+        }
+
+        written as u32
+    }
+}
+
 #[derive(Default, Clone)]
 pub struct Queue {
     pub ready: bool,
@@ -132,5 +162,52 @@ impl Queue {
         self.last_used_idx = self.last_used_idx.wrapping_add(1);
         mem.write_u16(self.used_addr + 2, self.last_used_idx)
             .unwrap();
+    }
+
+    pub fn collect_chain(&self, head_idx: u16, mem: &Memory) -> Option<ChainData> {
+        let mut out = ChainData {
+            readable: Vec::new(),
+            writable: Vec::new(),
+        };
+
+        let mut cur = Some(head_idx);
+        let mut seen_writable = false;
+        let mut count = 0usize;
+
+        while let Some(idx) = cur {
+            if count >= self.size as usize {
+                eprintln!("virtq: descriptor chain is too long or loops");
+                return None;
+            }
+            count += 1;
+
+            let desc = self.read_desc(idx, mem);
+
+            if desc.flags & flags::DESC_F_INDIRECT != 0 {
+                eprintln!("virtq: indirect descriptors are not supported");
+                return None;
+            }
+
+            if desc.flags & flags::DESC_F_WRITE != 0 {
+                seen_writable = true;
+                out.writable.push(WritableDesc {
+                    addr: desc.addr,
+                    len: desc.len,
+                });
+            } else {
+                if seen_writable {
+                    eprintln!("virtq: readable descriptor after writable descriptor");
+                    return None;
+                }
+
+                let old_len = out.readable.len();
+                out.readable.resize(old_len + desc.len as usize, 0);
+                mem.read(desc.addr, &mut out.readable[old_len..]).ok()?;
+            }
+
+            cur = desc.next();
+        }
+
+        Some(out)
     }
 }

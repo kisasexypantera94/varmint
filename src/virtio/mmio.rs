@@ -33,6 +33,11 @@ pub enum Reg {
     QueueDeviceLow = 0x0a0,
     QueueDeviceHigh = 0x0a4,
     ConfigGeneration = 0x0fc,
+    SHMSel = 0x0ac,
+    SHMLenLow = 0x0b0,
+    SHMLenHigh = 0x0b4,
+    SHMBaseLow = 0x0b8,
+    SHMBaseHigh = 0x0bc,
 }
 
 pub const CONFIG_BASE: u64 = 0x100;
@@ -107,8 +112,6 @@ impl<D: device::Device> Transport<D> {
             return 0;
         };
 
-        eprintln!("virtio: read, reg={:?}, offset={}", reg, offset);
-
         match reg {
             Reg::MagicValue => MAGIC,
             Reg::Version => VERSION,
@@ -119,6 +122,10 @@ impl<D: device::Device> Transport<D> {
             Reg::QueueReady => self.queues[self.queue_sel as usize].ready as u32,
             Reg::InterruptStatus => self.interrupt_status,
             Reg::Status => self.status,
+            Reg::SHMLenLow => u32::MAX,
+            Reg::SHMLenHigh => u32::MAX,
+            Reg::SHMBaseLow => u32::MAX,
+            Reg::SHMBaseHigh => u32::MAX,
             _ => 0,
         }
     }
@@ -131,11 +138,6 @@ impl<D: device::Device> Transport<D> {
         let Ok(reg) = Reg::try_from(offset) else {
             return;
         };
-
-        eprintln!(
-            "virtio: write, reg={:?}, value={}, offset={}",
-            reg, value, offset
-        );
 
         match reg {
             Reg::DeviceFeaturesSel => self.device_features_sel = value,

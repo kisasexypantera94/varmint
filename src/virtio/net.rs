@@ -1,7 +1,8 @@
 use crate::virtio::{common, device::Device, virtq};
-use applevisor::{error::Result, memory::Memory};
+use applevisor::memory::Memory;
 use num_enum::TryFromPrimitive;
 use std::collections::VecDeque;
+use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes};
 
 mod feature {
     pub const MAC: u64 = 1 << 5;
@@ -24,6 +25,7 @@ enum QueueType {
 }
 
 /// https://docs.oasis-open.org/virtio/virtio/v1.3/csd01/virtio-v1.3-csd01.html#x1-2450006
+#[derive(IntoBytes, FromBytes, Immutable)]
 #[repr(C, packed)]
 struct NetHeader {
     flags: u8,
@@ -33,20 +35,6 @@ struct NetHeader {
     csum_start: u16,
     csum_offset: u16,
     num_buffers: u16,
-}
-
-impl NetHeader {
-    fn new(addr: u64, mem: &mut Memory) -> Result<NetHeader> {
-        Ok(NetHeader {
-            flags: mem.read_u8(addr)?,
-            gso_type: mem.read_u8(addr + 1)?,
-            hdr_len: mem.read_u16(addr + 2)?,
-            gso_size: mem.read_u16(addr + 4)?,
-            csum_start: mem.read_u16(addr + 6)?,
-            csum_offset: mem.read_u16(addr + 8)?,
-            num_buffers: mem.read_u16(addr + 10)?,
-        })
-    }
 }
 
 pub struct Net {
@@ -75,12 +63,10 @@ impl Device for Net {
     }
 
     fn config(&self, offset: u64) -> u32 {
-        let v = match offset {
+        match offset {
             0..6 => self.mac[offset as usize] as u32,
             _ => 0,
-        };
-        eprintln!("net config read: offset={}, value=0x{:08x}", offset, v);
-        v
+        }
     }
 
     fn num_queues(&self) -> u16 {
@@ -111,7 +97,7 @@ impl Device for Net {
         let queue = &queues[QueueType::Rx as usize];
 
         let mut packet = Vec::with_capacity(size_of::<NetHeader>() + frame.len());
-        packet.extend_from_slice(&self.plain_rx_hdr());
+        packet.extend_from_slice(Net::plain_rx_hdr().as_bytes());
         packet.extend_from_slice(frame);
 
         let written = self.write_chain(queue, head_idx, &packet, mem);
@@ -135,34 +121,24 @@ impl Net {
     }
 
     fn handle_tx(&mut self, queue: &virtq::Queue, head_idx: u16, mem: &mut Memory) -> Option<u32> {
-        let mut frame = Vec::new();
-        let mut cur = Some(head_idx);
-        while let Some(idx) = cur {
-            let desc = queue.read_desc(idx, mem);
-            let mut buf = vec![0u8; desc.len as usize];
-            mem.read(desc.addr, &mut buf).unwrap();
-            frame.extend_from_slice(&buf);
-            cur = desc.next();
-        }
+        let virtq::ChainData { readable, .. } = queue.collect_chain(head_idx, mem)?;
 
-        if frame.len() < size_of::<NetHeader>() {
-            eprintln!("TX: chain too short, {} bytes", frame.len());
+        if readable.len() < size_of::<NetHeader>() {
+            eprintln!("TX: chain too short, {} bytes", readable.len());
             return Some(0);
         }
 
-        let eth = &frame[size_of::<NetHeader>()..];
+        let (_, eth) = NetHeader::read_from_prefix(&readable).ok()?;
 
         self.tx_frames.push_front(eth.to_vec());
 
         Some(0)
     }
 
-    fn plain_rx_hdr(&self) -> [u8; size_of::<NetHeader>()] {
-        let mut out = [0u8; size_of::<NetHeader>()];
-
-        out[10..12].copy_from_slice(&1u16.to_le_bytes());
-
-        out
+    fn plain_rx_hdr() -> NetHeader {
+        let mut hdr = NetHeader::new_zeroed();
+        hdr.num_buffers = 1;
+        hdr
     }
 
     fn write_chain(
