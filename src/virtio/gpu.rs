@@ -227,6 +227,15 @@ impl DisplayBuffer {
     }
 }
 
+#[repr(C)]
+#[derive(Default, zerocopy::IntoBytes, zerocopy::Immutable)]
+struct Config {
+    events_read: u32,
+    events_clear: u32,
+    num_scanouts: u32,
+    num_capsets: u32,
+}
+
 pub struct Gpu<'a> {
     resources: HashMap<u32, Resource>,
     scanout_resource: Option<u32>,
@@ -254,18 +263,14 @@ impl<'a> Device for Gpu<'a> {
         common::feature::VERSION_1
     }
 
-    // offset 0  -> events_read = 0
-    // offset 4  -> events_clear = 0
-    // offset 8  -> num_scanouts = 1
-    // offset 12 -> num_capsets = 0
-    fn config(&self, offset: u64) -> u32 {
-        match offset {
-            0 => 0,
-            4 => 0,
-            8 => 1,
-            12 => 0,
-            _ => 0,
-        }
+    fn read_config(&self, offset: u64, data: &mut [u8]) {
+        let cfg = Config {
+            num_scanouts: 1,
+            ..Default::default()
+        };
+
+        let offset = offset as usize;
+        data.copy_from_slice(&cfg.as_bytes()[offset..offset + data.len()]);
     }
 
     fn num_queues(&self) -> u16 {

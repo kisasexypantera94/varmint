@@ -62,11 +62,9 @@ impl Device for Net {
         common::feature::VERSION_1 | feature::MAC
     }
 
-    fn config(&self, offset: u64) -> u32 {
-        match offset {
-            0..6 => self.mac[offset as usize] as u32,
-            _ => 0,
-        }
+    fn read_config(&self, offset: u64, data: &mut [u8]) {
+        let offset = offset as usize;
+        data.copy_from_slice(&self.mac[offset..offset + data.len()]);
     }
 
     fn num_queues(&self) -> u16 {
@@ -95,12 +93,13 @@ impl Device for Net {
     ) -> Option<virtq::Completion> {
         let head_idx = self.free_rx_buffers.pop()?;
         let queue = &queues[QueueType::Rx as usize];
+        let chain = queue.collect_chain(head_idx, mem).unwrap();
 
         let mut packet = Vec::with_capacity(size_of::<NetHeader>() + frame.len());
         packet.extend_from_slice(Net::plain_rx_hdr().as_bytes());
         packet.extend_from_slice(frame);
 
-        let written = self.write_chain(queue, head_idx, &packet, mem);
+        let written = chain.write_response(&packet, mem);
 
         Some(virtq::Completion {
             queue_idx: QueueType::Rx as u16,
@@ -139,30 +138,5 @@ impl Net {
         let mut hdr = NetHeader::new_zeroed();
         hdr.num_buffers = 1;
         hdr
-    }
-
-    fn write_chain(
-        &self,
-        queue: &virtq::Queue,
-        head_idx: u16,
-        data: &[u8],
-        mem: &mut Memory,
-    ) -> usize {
-        let mut written = 0usize;
-        let mut cur = Some(head_idx);
-
-        while written < data.len() {
-            let idx = cur.unwrap();
-            let desc = queue.read_desc(idx, mem);
-
-            let n = (data.len() - written).min(desc.len as usize);
-
-            mem.write(desc.addr, &data[written..written + n]).unwrap();
-
-            written += n;
-            cur = desc.next();
-        }
-
-        written
     }
 }

@@ -103,16 +103,23 @@ impl<D: device::Device> Transport<D> {
         return self.interrupt_status != 0;
     }
 
-    pub fn read(&mut self, offset: u64) -> u32 {
-        let Ok(reg) = Reg::try_from(offset) else {
-            if offset >= CONFIG_BASE {
-                return self.device.config(offset - CONFIG_BASE);
-            }
+    pub fn read(&mut self, offset: u64, size: usize) -> u64 {
+        assert!(matches!(size, 1 | 2 | 4 | 8));
 
+        if offset >= CONFIG_BASE {
+            let mut buf = [0u8; 8];
+            let cfg_offset = offset - CONFIG_BASE;
+            self.device.read_config(cfg_offset, &mut buf[..size]);
+            return u64::from_le_bytes(buf);
+        }
+
+        let Ok(reg) = Reg::try_from(offset) else {
             return 0;
         };
 
-        match reg {
+        assert_eq!(size, 4, "virtio-mmio register access must be 32-bit");
+
+        (match reg {
             Reg::MagicValue => MAGIC,
             Reg::Version => VERSION,
             Reg::DeviceId => self.device.id(),
@@ -127,17 +134,29 @@ impl<D: device::Device> Transport<D> {
             Reg::SHMBaseLow => u32::MAX,
             Reg::SHMBaseHigh => u32::MAX,
             _ => 0,
-        }
+        }) as u64
     }
 
     fn current_pending_queue(&mut self) -> &mut QueuePending {
         &mut self.queues_pending[self.queue_sel as usize]
     }
 
-    pub fn write(&mut self, offset: u64, value: u32, mem: &mut Memory) {
+    pub fn write(&mut self, offset: u64, size: usize, value: u64, mem: &mut Memory) {
+        assert!(matches!(size, 1 | 2 | 4 | 8));
+
+        if offset >= CONFIG_BASE {
+            let bytes = value.to_le_bytes();
+            let cfg_offset = offset - CONFIG_BASE;
+            self.device.write_config(cfg_offset, &bytes[..size]);
+            return;
+        }
+
         let Ok(reg) = Reg::try_from(offset) else {
             return;
         };
+
+        assert_eq!(size, 4, "virtio-mmio register access must be 32-bit");
+        let value = value as u32;
 
         match reg {
             Reg::DeviceFeaturesSel => self.device_features_sel = value,

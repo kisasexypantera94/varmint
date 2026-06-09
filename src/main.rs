@@ -1,12 +1,14 @@
 use applevisor::prelude::*;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use minifb::{Window, WindowOptions};
+use minifb::{Key, KeyRepeat, Window, WindowOptions};
 use std::{
     fs::File,
     io::{self, Read, Write},
-    sync::{Arc, Mutex, mpsc::Sender},
+    sync::{
+        Mutex,
+        mpsc::{Receiver, Sender},
+    },
     thread,
-    time::Duration,
 };
 
 mod helpers;
@@ -44,11 +46,16 @@ const VIRTGPU_START: u64 = 0x0a002000;
 const VIRTGPU_SIZE: u64 = 0x1000;
 const VIRTGPU_SPI_OFFSET: u32 = 34;
 
+const VIRTINPUT_START: u64 = 0x0a003000;
+const VIRTINPUT_SIZE: u64 = 0x1000;
+const VIRTINPUT_SPI_OFFSET: u32 = 35;
+
 enum MmioRegion {
     Uart(u64),
     VirtioBlk(u64),
     VirtioNet(u64),
     VirtioGpu(u64),
+    VirtioInput(u64),
 }
 
 fn classify(phys_addr: u64) -> Option<MmioRegion> {
@@ -57,6 +64,7 @@ fn classify(phys_addr: u64) -> Option<MmioRegion> {
         (VIRTBLK_START, VIRTBLK_SIZE, MmioRegion::VirtioBlk),
         (VIRTNET_START, VIRTNET_SIZE, MmioRegion::VirtioNet),
         (VIRTGPU_START, VIRTGPU_SIZE, MmioRegion::VirtioGpu),
+        (VIRTINPUT_START, VIRTINPUT_SIZE, MmioRegion::VirtioInput),
     ];
     REGIONS.iter().find_map(|&(base, size, ctor)| {
         (base..base + size)
@@ -151,7 +159,18 @@ fn mmio_write_reg(vcpu: &Vcpu, rt: u64, value: u64) -> Result<()> {
     Ok(())
 }
 
-fn window_thread(display: &Mutex<virtio::gpu::DisplayBuffer>) {
+#[derive(Debug, Copy, Clone)]
+struct HostKeyEvent {
+    code: u16,
+    pressed: bool,
+}
+
+fn window_thread(
+    vm: &VirtualMachineInstance<GicEnabled>,
+    handle: VcpuHandle,
+    display: &Mutex<virtio::gpu::DisplayBuffer>,
+    input_tx: Sender<HostKeyEvent>,
+) {
     let gpu_width = 1024usize;
     let gpu_height = 768usize;
 
@@ -174,6 +193,26 @@ fn window_thread(display: &Mutex<virtio::gpu::DisplayBuffer>) {
             display.dirty = false;
         }
 
+        for key in window.get_keys_pressed(KeyRepeat::No) {
+            if let Some(code) = helpers::minifb_to_linux_key(key) {
+                let _ = input_tx.send(HostKeyEvent {
+                    code,
+                    pressed: true,
+                });
+                vm.vcpus_exit(&[handle.clone()]).unwrap();
+            }
+        }
+
+        for key in window.get_keys_released() {
+            if let Some(code) = helpers::minifb_to_linux_key(key) {
+                let _ = input_tx.send(HostKeyEvent {
+                    code,
+                    pressed: false,
+                });
+                vm.vcpus_exit(&[handle.clone()]).unwrap();
+            }
+        }
+
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
@@ -191,6 +230,9 @@ fn run_loop(
     iface: &mut net::VmnetBackend,
     virtio_gpu: &mut virtio::MmioTransport<virtio::Gpu>,
     virtio_gpu_irq: &mut irq::IrqLine,
+    virtio_input: &mut virtio::MmioTransport<virtio::Input>,
+    virtio_input_irq: &mut irq::IrqLine,
+    input_rx: &Receiver<HostKeyEvent>,
 ) -> Result<()> {
     let mut net_buf = vec![0; iface.max_packet_size() as usize];
 
@@ -204,10 +246,15 @@ fn run_loop(
             }
         }
 
+        while let Ok(event) = input_rx.try_recv() {
+            virtio_input.push_key(event.code, event.pressed, mem);
+        }
+
         uart_irq.sync(vm, uart.lock().unwrap().is_asserted())?;
         virtio_blk_irq.sync(vm, virtio_blk.is_asserted())?;
         virtio_net_irq.sync(vm, virtio_net.is_asserted())?;
         virtio_gpu_irq.sync(vm, virtio_gpu.is_asserted())?;
+        virtio_input_irq.sync(vm, virtio_input.is_asserted())?;
 
         vcpu.run()?;
         let exit = vcpu.get_exit_info();
@@ -241,6 +288,7 @@ fn run_loop(
                     0x24 | 0x25 => {
                         let is_write = ((esr_el2_like >> 6) & 1) == 1;
                         let rt = (esr_el2_like >> 16) & 0b11111;
+                        let size = 1usize << ((esr_el2_like >> 22) & 0b11);
 
                         match classify(phys_addr) {
                             Some(MmioRegion::Uart(offset)) => {
@@ -258,31 +306,40 @@ fn run_loop(
                             Some(MmioRegion::VirtioBlk(offset)) => {
                                 if is_write {
                                     let value = mmio_read_reg(vcpu, rt)?;
-                                    virtio_blk.write(offset, value, mem);
+                                    virtio_blk.write(offset, size, value as u64, mem);
                                 } else {
-                                    let value = virtio_blk.read(offset);
-                                    mmio_write_reg(vcpu, rt, value as u64)?;
+                                    let value = virtio_blk.read(offset, size);
+                                    mmio_write_reg(vcpu, rt, value)?;
                                 }
                             }
                             Some(MmioRegion::VirtioNet(offset)) => {
                                 if is_write {
                                     let value = mmio_read_reg(vcpu, rt)?;
-                                    virtio_net.write(offset, value, mem);
+                                    virtio_net.write(offset, size, value as u64, mem);
                                     while let Some(frame) = virtio_net.pop_external() {
                                         iface.write(&frame).unwrap();
                                     }
                                 } else {
-                                    let value = virtio_net.read(offset);
-                                    mmio_write_reg(vcpu, rt, value as u64)?;
+                                    let value = virtio_net.read(offset, size);
+                                    mmio_write_reg(vcpu, rt, value)?;
                                 }
                             }
                             Some(MmioRegion::VirtioGpu(offset)) => {
                                 if is_write {
                                     let value = mmio_read_reg(vcpu, rt)?;
-                                    virtio_gpu.write(offset, value, mem);
+                                    virtio_gpu.write(offset, size, value as u64, mem);
                                 } else {
-                                    let value = virtio_gpu.read(offset);
-                                    mmio_write_reg(vcpu, rt, value as u64)?;
+                                    let value = virtio_gpu.read(offset, size);
+                                    mmio_write_reg(vcpu, rt, value)?;
+                                }
+                            }
+                            Some(MmioRegion::VirtioInput(offset)) => {
+                                if is_write {
+                                    let value = mmio_read_reg(vcpu, rt)?;
+                                    virtio_input.write(offset, size, value as u64, mem);
+                                } else {
+                                    let value = virtio_input.read(offset, size);
+                                    mmio_write_reg(vcpu, rt, value)?;
                                 }
                             }
                             None => {
@@ -324,9 +381,10 @@ fn run_loop(
 
 fn vmm_thread(
     vm: &VirtualMachineInstance<GicEnabled>,
-    uart_handle_tx: Sender<VcpuHandle>,
+    handle_tx: Sender<VcpuHandle>,
     uart: &Mutex<uart::Uart>,
     display: &Mutex<virtio::gpu::DisplayBuffer>,
+    input_rx: Receiver<HostKeyEvent>,
 ) -> Result<()> {
     let image = read_file("./artifacts/debian-arm64/installed-vmlinuz").unwrap();
     let initrd = read_file("./artifacts/debian-arm64/installed-initrd.gz").unwrap();
@@ -338,7 +396,7 @@ fn vmm_thread(
     let vcpu = vm.vcpu_create()?;
     vcpu.set_sys_reg(SysReg::MPIDR_EL1, 0)?;
 
-    uart_handle_tx.send(vcpu.get_handle()).unwrap();
+    handle_tx.send(vcpu.get_handle()).unwrap();
 
     let (spi_int_start, _) = GicConfig::get_spi_interrupt_range()?;
 
@@ -370,6 +428,10 @@ fn vmm_thread(
     let mut virtio_gpu = virtio::MmioTransport::new(virtio_gpu_dev);
     let mut virtio_gpu_irq = irq::IrqLine::new(spi_int_start + VIRTGPU_SPI_OFFSET, false);
 
+    let virtio_input_dev = virtio::Input::new();
+    let mut virtio_input = virtio::MmioTransport::new(virtio_input_dev);
+    let mut virtio_input_irq = irq::IrqLine::new(spi_int_start + VIRTINPUT_SPI_OFFSET, false);
+
     thread::scope(|s| -> Result<()> {
         let vmnet_vcpu_handle = vcpu.get_handle();
         let (signal_tx, signal_rx) = std::sync::mpsc::sync_channel::<()>(1);
@@ -399,6 +461,9 @@ fn vmm_thread(
             &mut iface,
             &mut virtio_gpu,
             &mut virtio_gpu_irq,
+            &mut virtio_input,
+            &mut virtio_input_irq,
+            &input_rx,
         )
     })?;
 
@@ -417,23 +482,26 @@ fn main() -> Result<()> {
 
     let uart = Mutex::new(uart::Uart::new());
 
-    let (uart_handle_tx, uart_handle_rx) = std::sync::mpsc::channel();
+    let (handle_tx, handle_rx) = std::sync::mpsc::channel();
 
     let display = Mutex::new(virtio::gpu::DisplayBuffer::new(1024, 768));
+
+    let (input_tx, input_rx) = std::sync::mpsc::channel();
 
     thread::scope(|s| {
         let vm_ref = &vm;
         let uart_ref = &uart;
         let display = &display;
 
-        s.spawn(move || vmm_thread(vm_ref, uart_handle_tx, uart_ref, display));
+        s.spawn(move || vmm_thread(vm_ref, handle_tx, uart_ref, display, input_rx));
 
-        let handle = uart_handle_rx.recv().unwrap();
+        let handle = handle_rx.recv().unwrap();
 
-        s.spawn(move || stdin_thread(vm_ref, handle, uart_ref));
+        let stdin_handle = handle.clone();
+        s.spawn(move || stdin_thread(vm_ref, stdin_handle, uart_ref));
 
         // has to run in main thread
-        window_thread(&display);
+        window_thread(vm_ref, handle, display, input_tx);
     });
 
     Ok(())

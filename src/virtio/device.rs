@@ -4,8 +4,9 @@ use applevisor::memory::Memory;
 pub trait Device {
     fn id(&self) -> u32;
     fn features(&self) -> u64;
-    fn config(&self, offset: u64) -> u32;
     fn num_queues(&self) -> u16;
+    fn read_config(&self, offset: u64, data: &mut [u8]);
+    fn write_config(&mut self, _offset: u64, _data: &[u8]) {}
 
     fn process_chain(
         &mut self,
@@ -17,10 +18,14 @@ pub trait Device {
 
     fn handle_external(
         &mut self,
-        queues: &[Queue],
-        data: &[u8],
-        mem: &mut Memory,
-    ) -> Option<Completion>;
+        _queues: &[Queue],
+        _data: &[u8],
+        _mem: &mut Memory,
+    ) -> Option<Completion> {
+        None
+    }
 
-    fn pop_external(&mut self) -> Option<Vec<u8>>;
+    fn pop_external(&mut self) -> Option<Vec<u8>> {
+        None
+    }
 }
