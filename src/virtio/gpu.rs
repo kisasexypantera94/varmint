@@ -2,10 +2,7 @@
 use crate::virtio::{common, device::Device, virtq};
 use applevisor::{error::Result, memory::Memory};
 use num_enum::TryFromPrimitive;
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use std::{collections::HashMap, sync::Mutex};
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, Ref};
 
 const DEVICE_ID: u32 = 16;
@@ -207,6 +204,7 @@ struct Resource {
     width: u32,
     height: u32,
     backing: Vec<MemEntry>,
+    framebuffer: Vec<u8>,
 }
 
 pub struct DisplayBuffer {
@@ -239,7 +237,6 @@ struct Config {
 pub struct Gpu<'a> {
     resources: HashMap<u32, Resource>,
     scanout_resource: Option<u32>,
-    framebuffer: Vec<u8>,
     display: &'a Mutex<DisplayBuffer>,
 }
 
@@ -248,7 +245,6 @@ impl<'a> Gpu<'a> {
         Gpu {
             resources: HashMap::new(),
             scanout_resource: None,
-            framebuffer: Vec::new(),
             display,
         }
     }
@@ -330,6 +326,7 @@ impl<'a> Device for Gpu<'a> {
                                 width: val.width,
                                 height: val.height,
                                 backing: Vec::new(),
+                                framebuffer: Vec::new(),
                             },
                         );
 
@@ -397,34 +394,35 @@ impl<'a> Device for Gpu<'a> {
                         let (val, _) = TransferToHost2d::read_from_prefix(payload).unwrap();
 
                         let resource_id = val.resource_id;
-                        let resource = self.resources.get(&resource_id)?;
+                        let resource = self.resources.get_mut(&resource_id)?;
 
-                        let bytes_per_pixel = 4;
+                        let width = resource.width as usize;
+                        let height = resource.height as usize;
+                        let stride = width * BYTES_PER_PIXEL;
 
-                        let fb_len =
-                            resource.width as usize * resource.height as usize * bytes_per_pixel;
+                        let fb_len = height * stride;
 
-                        if self.framebuffer.len() != fb_len {
-                            self.framebuffer.resize(fb_len, 0);
+                        if resource.framebuffer.len() != fb_len {
+                            resource.framebuffer.resize(fb_len, 0);
                         }
 
-                        let mut dst_off = 0usize;
+                        let rect_x = val.r.x as usize;
+                        let rect_y = val.r.y as usize;
+                        let rect_width = val.r.width as usize;
+                        let rect_height = val.r.height as usize;
+                        let transfer_offset = val.offset as usize;
 
-                        for entry in &resource.backing {
-                            if dst_off >= fb_len {
-                                break;
-                            }
+                        for row in 0..rect_height {
+                            let src_offset = transfer_offset + row * stride;
+                            let dst_offset = (rect_y + row) * stride + rect_x * BYTES_PER_PIXEL;
+                            let row_len = rect_width * BYTES_PER_PIXEL;
 
-                            let entry_len = entry.length as usize;
-                            let copy_len = entry_len.min(fb_len - dst_off); // backing might be bigger than actual fb
-
-                            mem.read(
-                                entry.addr,
-                                &mut self.framebuffer[dst_off..dst_off + copy_len],
-                            )
-                            .ok()?;
-
-                            dst_off += copy_len;
+                            Gpu::read_backing(
+                                &resource.backing,
+                                src_offset,
+                                &mut resource.framebuffer[dst_offset..dst_offset + row_len],
+                                mem,
+                            )?;
                         }
 
                         Gpu::write_ok_nodata(&chain_data, mem)
@@ -432,8 +430,11 @@ impl<'a> Device for Gpu<'a> {
                     Ok(CtrlType::ResourceFlush) => {
                         let (val, _) = ResourceFlush::read_from_prefix(payload).unwrap();
 
+                        let resource_id = val.resource_id;
+
                         if self.scanout_resource == Some(val.resource_id) {
-                            self.publish_display();
+                            let resource = self.resources.get(&resource_id)?;
+                            self.publish_display(&resource.framebuffer);
                         }
 
                         Gpu::write_ok_nodata(&chain_data, mem)
@@ -457,26 +458,18 @@ impl<'a> Device for Gpu<'a> {
         }
     }
 
-    fn handle_external(
-        &mut self,
-        _queues: &[super::virtq::Queue],
-        _data: &[u8],
-        _mem: &mut applevisor::prelude::Memory,
-    ) -> Option<super::virtq::Completion> {
-        None
-    }
-
-    fn pop_external(&mut self) -> Option<Vec<u8>> {
-        None
+    fn reset(&mut self) {
+        self.resources.clear();
+        self.scanout_resource = None;
     }
 }
 
 impl<'a> Gpu<'a> {
-    fn publish_display(&mut self) {
+    fn publish_display(&self, framebuffer: &[u8]) {
         let mut display = self.display.lock().unwrap();
 
         let pixels = display.width * display.height;
-        if self.framebuffer.len() < pixels * BYTES_PER_PIXEL {
+        if framebuffer.len() < pixels * BYTES_PER_PIXEL {
             return;
         }
 
@@ -487,9 +480,9 @@ impl<'a> Gpu<'a> {
         for i in 0..pixels {
             let j = i * BYTES_PER_PIXEL;
 
-            let b = self.framebuffer[j] as u32;
-            let g = self.framebuffer[j + 1] as u32;
-            let r = self.framebuffer[j + 2] as u32;
+            let b = framebuffer[j] as u32;
+            let g = framebuffer[j + 1] as u32;
+            let r = framebuffer[j + 2] as u32;
 
             display.pixels[i] = (r << 16) | (g << 8) | b;
         }
@@ -505,5 +498,43 @@ impl<'a> Gpu<'a> {
         let mut resp = CtrlHeader::new_zeroed();
         resp.r#type = r#type as u32;
         chain_data.write_response(resp.as_bytes(), mem)
+    }
+
+    fn read_backing(
+        backing: &[MemEntry],
+        mut src_offset: usize,
+        dst: &mut [u8],
+        mem: &mut Memory,
+    ) -> Option<()> {
+        let mut written = 0usize;
+
+        for entry in backing {
+            let entry_len = entry.length as usize;
+
+            if src_offset >= entry_len {
+                src_offset -= entry_len;
+                continue;
+            }
+
+            let in_entry_off = src_offset;
+            let available = entry_len - in_entry_off;
+            let need = dst.len() - written;
+            let copy_len = available.min(need);
+
+            mem.read(
+                entry.addr + in_entry_off as u64,
+                &mut dst[written..written + copy_len],
+            )
+            .ok()?;
+
+            written += copy_len;
+            src_offset = 0;
+
+            if written == dst.len() {
+                return Some(());
+            }
+        }
+
+        None
     }
 }

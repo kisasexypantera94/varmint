@@ -48,7 +48,7 @@
 
 	memory@40000000 {
 		device_type = "memory";
-		reg = <0x0 0x40000000 0x0 0x20000000>;
+		reg = <0x0 0x40000000 0x0 0x80000000>;
 	};
 
 	clk24m: clk24m {
@@ -85,9 +85,15 @@
 		interrupts = <0 34 4>;
 	};
 
-	virtio_input@a003000 {
+	virtio_input_keyboard@a003000 {
 		compatible = "virtio,mmio";
 		reg = <0x0 0x0a003000 0x0 0x1000>;
 		interrupts = <0 35 4>;
+	};
+
+	virtio_input_tablet@a004000 {
+		compatible = "virtio,mmio";
+		reg = <0x0 0x0a004000 0x0 0x1000>;
+		interrupts = <0 36 4>;
 	};
 };

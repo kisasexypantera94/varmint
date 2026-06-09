@@ -6,7 +6,7 @@
 varmint – a tiny Virtual Machine Manager for Apple Silicon, built on top of the Hypervisor framework.
 
 <p align="left">
-  <img src="./assets/demo.gif" width="500">
+  <img src="./assets/demo_gui.png">
 </p>
 
 ## Resources

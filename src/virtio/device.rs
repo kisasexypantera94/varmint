@@ -28,4 +28,6 @@ pub trait Device {
     fn pop_external(&mut self) -> Option<Vec<u8>> {
         None
     }
+
+    fn reset(&mut self) {}
 }

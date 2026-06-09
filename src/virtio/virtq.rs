@@ -210,4 +210,14 @@ impl Queue {
 
         Some(out)
     }
+
+    pub fn reset(&mut self) {
+        self.ready = false;
+        self.size = 0;
+        self.desc_addr = 0;
+        self.avail_addr = 0;
+        self.used_addr = 0;
+        self.last_avail_idx = 0;
+        self.last_used_idx = 0;
+    }
 }

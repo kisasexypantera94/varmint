@@ -111,6 +111,11 @@ impl Device for Net {
     fn pop_external(&mut self) -> Option<Vec<u8>> {
         self.tx_frames.pop_back()
     }
+
+    fn reset(&mut self) {
+        self.free_rx_buffers.clear();
+        self.tx_frames.clear();
+    }
 }
 
 impl Net {

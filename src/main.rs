@@ -1,6 +1,7 @@
+use crate::virtio::input::keys::*;
 use applevisor::prelude::*;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use minifb::{Key, KeyRepeat, Window, WindowOptions};
+use minifb::{KeyRepeat, MouseButton, MouseMode, Window, WindowOptions};
 use std::{
     fs::File,
     io::{self, Read, Write},
@@ -20,7 +21,7 @@ mod uart;
 mod virtio;
 
 const RAM_START: u64 = 0x40000000;
-const RAM_SIZE: usize = 0x20000000;
+const RAM_SIZE: usize = 0x80000000;
 
 const KERNEL_TEXT_OFFSET: u64 = 0x0;
 const IMAGE_START: u64 = RAM_START + KERNEL_TEXT_OFFSET;
@@ -46,16 +47,21 @@ const VIRTGPU_START: u64 = 0x0a002000;
 const VIRTGPU_SIZE: u64 = 0x1000;
 const VIRTGPU_SPI_OFFSET: u32 = 34;
 
-const VIRTINPUT_START: u64 = 0x0a003000;
-const VIRTINPUT_SIZE: u64 = 0x1000;
-const VIRTINPUT_SPI_OFFSET: u32 = 35;
+const VIRTINPUT_KEYBOARD_START: u64 = 0x0a003000;
+const VIRTINPUT_KEYBOARD_SIZE: u64 = 0x1000;
+const VIRTINPUT_KEYBOARD_SPI_OFFSET: u32 = 35;
+
+const VIRTINPUT_TABLET_START: u64 = 0x0a004000;
+const VIRTINPUT_TABLET_SIZE: u64 = 0x1000;
+const VIRTINPUT_TABLET_SPI_OFFSET: u32 = 36;
 
 enum MmioRegion {
     Uart(u64),
     VirtioBlk(u64),
     VirtioNet(u64),
     VirtioGpu(u64),
-    VirtioInput(u64),
+    VirtioInputKeyboard(u64),
+    VirtioInputTablet(u64),
 }
 
 fn classify(phys_addr: u64) -> Option<MmioRegion> {
@@ -64,7 +70,16 @@ fn classify(phys_addr: u64) -> Option<MmioRegion> {
         (VIRTBLK_START, VIRTBLK_SIZE, MmioRegion::VirtioBlk),
         (VIRTNET_START, VIRTNET_SIZE, MmioRegion::VirtioNet),
         (VIRTGPU_START, VIRTGPU_SIZE, MmioRegion::VirtioGpu),
-        (VIRTINPUT_START, VIRTINPUT_SIZE, MmioRegion::VirtioInput),
+        (
+            VIRTINPUT_KEYBOARD_START,
+            VIRTINPUT_KEYBOARD_SIZE,
+            MmioRegion::VirtioInputKeyboard,
+        ),
+        (
+            VIRTINPUT_TABLET_START,
+            VIRTINPUT_TABLET_SIZE,
+            MmioRegion::VirtioInputTablet,
+        ),
     ];
     REGIONS.iter().find_map(|&(base, size, ctor)| {
         (base..base + size)
@@ -159,25 +174,27 @@ fn mmio_write_reg(vcpu: &Vcpu, rt: u64, value: u64) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Copy, Clone)]
-struct HostKeyEvent {
-    code: u16,
-    pressed: bool,
+enum HostInputEvent {
+    Key { code: u16, pressed: bool },
+    PointerMove { x: u32, y: u32 },
+    PointerButton { button: u16, pressed: bool },
 }
 
 fn window_thread(
     vm: &VirtualMachineInstance<GicEnabled>,
     handle: VcpuHandle,
     display: &Mutex<virtio::gpu::DisplayBuffer>,
-    input_tx: Sender<HostKeyEvent>,
+    input_tx: Sender<HostInputEvent>,
 ) {
-    let gpu_width = 1024usize;
-    let gpu_height = 768usize;
+    let mut last_mouse_pos: Option<(u32, u32)> = None;
+    let mut last_left = false;
+    let mut last_right = false;
+    let mut last_middle = false;
 
     let mut window = Window::new(
         "varmint virtio-gpu",
-        gpu_width,
-        gpu_height,
+        virtio::gpu::WIDTH,
+        virtio::gpu::HEIGHT,
         WindowOptions::default(),
     )
     .unwrap();
@@ -195,7 +212,7 @@ fn window_thread(
 
         for key in window.get_keys_pressed(KeyRepeat::No) {
             if let Some(code) = helpers::minifb_to_linux_key(key) {
-                let _ = input_tx.send(HostKeyEvent {
+                let _ = input_tx.send(HostInputEvent::Key {
                     code,
                     pressed: true,
                 });
@@ -205,12 +222,56 @@ fn window_thread(
 
         for key in window.get_keys_released() {
             if let Some(code) = helpers::minifb_to_linux_key(key) {
-                let _ = input_tx.send(HostKeyEvent {
+                let _ = input_tx.send(HostInputEvent::Key {
                     code,
                     pressed: false,
                 });
                 vm.vcpus_exit(&[handle.clone()]).unwrap();
             }
+        }
+
+        if let Some((x, y)) = window.get_mouse_pos(MouseMode::Clamp) {
+            let x = x as u32;
+            let y = y as u32;
+
+            let pos = Some((x, y));
+
+            if pos != last_mouse_pos {
+                let _ = input_tx.send(HostInputEvent::PointerMove { x, y });
+                vm.vcpus_exit(&[handle.clone()]).unwrap();
+
+                last_mouse_pos = pos;
+            }
+        }
+
+        let left = window.get_mouse_down(MouseButton::Left);
+        if left != last_left {
+            let _ = input_tx.send(HostInputEvent::PointerButton {
+                button: BTN_LEFT,
+                pressed: left,
+            });
+            vm.vcpus_exit(&[handle.clone()]).unwrap();
+            last_left = left;
+        }
+
+        let right = window.get_mouse_down(MouseButton::Right);
+        if right != last_right {
+            let _ = input_tx.send(HostInputEvent::PointerButton {
+                button: BTN_RIGHT,
+                pressed: right,
+            });
+            vm.vcpus_exit(&[handle.clone()]).unwrap();
+            last_right = right;
+        }
+
+        let middle = window.get_mouse_down(MouseButton::Middle);
+        if middle != last_middle {
+            let _ = input_tx.send(HostInputEvent::PointerButton {
+                button: BTN_MIDDLE,
+                pressed: middle,
+            });
+            vm.vcpus_exit(&[handle.clone()]).unwrap();
+            last_middle = middle;
         }
 
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -230,9 +291,11 @@ fn run_loop(
     iface: &mut net::VmnetBackend,
     virtio_gpu: &mut virtio::MmioTransport<virtio::Gpu>,
     virtio_gpu_irq: &mut irq::IrqLine,
-    virtio_input: &mut virtio::MmioTransport<virtio::Input>,
-    virtio_input_irq: &mut irq::IrqLine,
-    input_rx: &Receiver<HostKeyEvent>,
+    virtio_input_keyboard: &mut virtio::MmioTransport<virtio::Input>,
+    virtio_input_keyboard_irq: &mut irq::IrqLine,
+    virtio_input_tablet: &mut virtio::MmioTransport<virtio::Input>,
+    virtio_input_tablet_irq: &mut irq::IrqLine,
+    input_rx: &Receiver<HostInputEvent>,
 ) -> Result<()> {
     let mut net_buf = vec![0; iface.max_packet_size() as usize];
 
@@ -246,15 +309,38 @@ fn run_loop(
             }
         }
 
+        let mut last_pointer_move: Option<(u32, u32)> = None;
+
         while let Ok(event) = input_rx.try_recv() {
-            virtio_input.push_key(event.code, event.pressed, mem);
+            match event {
+                HostInputEvent::Key { code, pressed } => {
+                    virtio_input_keyboard.push_key(code, pressed, mem);
+                }
+
+                HostInputEvent::PointerMove { x, y } => {
+                    last_pointer_move = Some((x, y));
+                }
+
+                HostInputEvent::PointerButton { button, pressed } => {
+                    if let Some((x, y)) = last_pointer_move.take() {
+                        virtio_input_tablet.push_abs_position(x, y, mem);
+                    }
+
+                    virtio_input_tablet.push_pointer_button(button, pressed, mem);
+                }
+            }
+        }
+
+        if let Some((x, y)) = last_pointer_move {
+            virtio_input_tablet.push_abs_position(x, y, mem);
         }
 
         uart_irq.sync(vm, uart.lock().unwrap().is_asserted())?;
         virtio_blk_irq.sync(vm, virtio_blk.is_asserted())?;
         virtio_net_irq.sync(vm, virtio_net.is_asserted())?;
         virtio_gpu_irq.sync(vm, virtio_gpu.is_asserted())?;
-        virtio_input_irq.sync(vm, virtio_input.is_asserted())?;
+        virtio_input_keyboard_irq.sync(vm, virtio_input_keyboard.is_asserted())?;
+        virtio_input_tablet_irq.sync(vm, virtio_input_tablet.is_asserted())?;
 
         vcpu.run()?;
         let exit = vcpu.get_exit_info();
@@ -333,12 +419,21 @@ fn run_loop(
                                     mmio_write_reg(vcpu, rt, value)?;
                                 }
                             }
-                            Some(MmioRegion::VirtioInput(offset)) => {
+                            Some(MmioRegion::VirtioInputKeyboard(offset)) => {
                                 if is_write {
                                     let value = mmio_read_reg(vcpu, rt)?;
-                                    virtio_input.write(offset, size, value as u64, mem);
+                                    virtio_input_keyboard.write(offset, size, value as u64, mem);
                                 } else {
-                                    let value = virtio_input.read(offset, size);
+                                    let value = virtio_input_keyboard.read(offset, size);
+                                    mmio_write_reg(vcpu, rt, value)?;
+                                }
+                            }
+                            Some(MmioRegion::VirtioInputTablet(offset)) => {
+                                if is_write {
+                                    let value = mmio_read_reg(vcpu, rt)?;
+                                    virtio_input_tablet.write(offset, size, value as u64, mem);
+                                } else {
+                                    let value = virtio_input_tablet.read(offset, size);
                                     mmio_write_reg(vcpu, rt, value)?;
                                 }
                             }
@@ -384,7 +479,7 @@ fn vmm_thread(
     handle_tx: Sender<VcpuHandle>,
     uart: &Mutex<uart::Uart>,
     display: &Mutex<virtio::gpu::DisplayBuffer>,
-    input_rx: Receiver<HostKeyEvent>,
+    input_rx: Receiver<HostInputEvent>,
 ) -> Result<()> {
     let image = read_file("./artifacts/debian-arm64/installed-vmlinuz").unwrap();
     let initrd = read_file("./artifacts/debian-arm64/installed-initrd.gz").unwrap();
@@ -428,9 +523,16 @@ fn vmm_thread(
     let mut virtio_gpu = virtio::MmioTransport::new(virtio_gpu_dev);
     let mut virtio_gpu_irq = irq::IrqLine::new(spi_int_start + VIRTGPU_SPI_OFFSET, false);
 
-    let virtio_input_dev = virtio::Input::new();
-    let mut virtio_input = virtio::MmioTransport::new(virtio_input_dev);
-    let mut virtio_input_irq = irq::IrqLine::new(spi_int_start + VIRTINPUT_SPI_OFFSET, false);
+    let virtio_input_keyboard_dev = virtio::Input::keyboard();
+    let mut virtio_input_keyboard = virtio::MmioTransport::new(virtio_input_keyboard_dev);
+    let mut virtio_input_keyboard_irq =
+        irq::IrqLine::new(spi_int_start + VIRTINPUT_KEYBOARD_SPI_OFFSET, false);
+
+    let virtio_input_tablet_dev =
+        virtio::Input::tablet(virtio::gpu::WIDTH as u32, virtio::gpu::HEIGHT as u32);
+    let mut virtio_input_tablet = virtio::MmioTransport::new(virtio_input_tablet_dev);
+    let mut virtio_input_tablet_irq =
+        irq::IrqLine::new(spi_int_start + VIRTINPUT_TABLET_SPI_OFFSET, false);
 
     thread::scope(|s| -> Result<()> {
         let vmnet_vcpu_handle = vcpu.get_handle();
@@ -461,8 +563,10 @@ fn vmm_thread(
             &mut iface,
             &mut virtio_gpu,
             &mut virtio_gpu_irq,
-            &mut virtio_input,
-            &mut virtio_input_irq,
+            &mut virtio_input_keyboard,
+            &mut virtio_input_keyboard_irq,
+            &mut virtio_input_tablet,
+            &mut virtio_input_tablet_irq,
             &input_rx,
         )
     })?;
@@ -484,7 +588,10 @@ fn main() -> Result<()> {
 
     let (handle_tx, handle_rx) = std::sync::mpsc::channel();
 
-    let display = Mutex::new(virtio::gpu::DisplayBuffer::new(1024, 768));
+    let display = Mutex::new(virtio::gpu::DisplayBuffer::new(
+        virtio::gpu::WIDTH,
+        virtio::gpu::HEIGHT,
+    ));
 
     let (input_tx, input_rx) = std::sync::mpsc::channel();
 

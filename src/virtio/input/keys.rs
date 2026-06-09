@@ -3,6 +3,16 @@
 // Event types.
 pub const EV_SYN: u16 = 0x00;
 pub const EV_KEY: u16 = 0x01;
+pub const EV_ABS: u16 = 0x03;
+
+pub const ABS_X: u16 = 0x00;
+pub const ABS_Y: u16 = 0x01;
+
+pub const BTN_LEFT: u16 = 0x110;
+pub const BTN_RIGHT: u16 = 0x111;
+pub const BTN_MIDDLE: u16 = 0x112;
+
+pub const INPUT_PROP_POINTER: u16 = 0x00;
 
 // Synchronization event codes.
 pub const SYN_REPORT: u16 = 0;

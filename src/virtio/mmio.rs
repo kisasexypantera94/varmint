@@ -198,10 +198,11 @@ impl<D: device::Device> Transport<D> {
             Reg::InterruptAck => self.interrupt_status &= !value,
             Reg::Status => {
                 if value == 0 {
-                    // self.reset();
-                } else {
-                    self.status = value;
+                    self.reset();
+                    return;
                 }
+
+                self.status = value;
             }
             Reg::QueueDescLow => self.current_pending_queue().desc_lo = value,
             Reg::QueueDescHigh => self.current_pending_queue().desc_hi = value,
@@ -213,7 +214,7 @@ impl<D: device::Device> Transport<D> {
         }
     }
 
-    pub fn deliver_external(&mut self, data: &[u8], mem: &mut Memory) {
+    pub fn deliver_external(&mut self, data: &[u8], mem: &mut Memory) -> bool {
         if let Some(completion) = self.device.handle_external(&mut self.queues, data, mem) {
             self.queues[completion.queue_idx as usize].push_used(
                 mem,
@@ -222,11 +223,33 @@ impl<D: device::Device> Transport<D> {
             );
 
             self.interrupt_status |= INT_VRING;
+            true
+        } else {
+            false
         }
     }
 
     pub fn pop_external(&mut self) -> Option<Vec<u8>> {
         self.device.pop_external()
+    }
+
+    fn reset(&mut self) {
+        self.status = 0;
+        self.interrupt_status = 0;
+
+        self.device_features_sel = 0;
+        self.driver_features_sel = 0;
+        self.queue_sel = 0;
+
+        for queue in &mut self.queues {
+            queue.reset();
+        }
+
+        for pending in &mut self.queues_pending {
+            *pending = QueuePending::default();
+        }
+
+        self.device.reset();
     }
 }
 
