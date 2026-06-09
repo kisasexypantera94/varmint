@@ -87,12 +87,10 @@ impl Device for Blk {
         common::feature::VERSION_1
     }
 
-    fn config(&self, offset: u64) -> u32 {
-        match offset {
-            0 => self.sectors as u32,
-            4 => (self.sectors >> 32) as u32,
-            _ => 0,
-        }
+    fn read_config(&self, offset: u64, data: &mut [u8]) {
+        let cfg = self.sectors.to_le_bytes();
+        let offset = offset as usize;
+        data.copy_from_slice(&cfg[offset..offset + data.len()]);
     }
 
     fn num_queues(&self) -> u16 {
@@ -165,18 +163,5 @@ impl Device for Blk {
         }
 
         Some(written_len)
-    }
-
-    fn handle_external(
-        &mut self,
-        _queues: &[virtq::Queue],
-        _data: &[u8],
-        _mem: &mut Memory,
-    ) -> Option<virtq::Completion> {
-        None
-    }
-
-    fn pop_external(&mut self) -> Option<Vec<u8>> {
-        None
     }
 }
