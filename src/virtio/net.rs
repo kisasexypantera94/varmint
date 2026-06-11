@@ -1,4 +1,8 @@
-use crate::virtio::{common, device::Device, virtq};
+use crate::virtio::{
+    common,
+    device::{Device, ExternalInputHandler},
+    virtq,
+};
 use applevisor::memory::Memory;
 use num_enum::TryFromPrimitive;
 use std::collections::VecDeque;
@@ -33,7 +37,6 @@ struct NetHeader {
 
 pub struct Net {
     mac: [u8; 6],
-    free_rx_buffers: Vec<u16>,
     tx_frames: VecDeque<Vec<u8>>,
 }
 
@@ -41,7 +44,6 @@ impl Net {
     pub fn new(mac: [u8; 6]) -> Net {
         Net {
             mac,
-            free_rx_buffers: Vec::new(),
             tx_frames: VecDeque::new(),
         }
     }
@@ -65,6 +67,10 @@ impl Device for Net {
         2
     }
 
+    fn async_queues(&self) -> &[u16] {
+        &[QueueType::Rx as u16]
+    }
+
     fn process_chain(
         &mut self,
         q_idx: usize,
@@ -72,34 +78,10 @@ impl Device for Net {
         head_idx: u16,
         mem: &mut Memory,
     ) -> Option<u32> {
-        let queue_type = QueueType::try_from(q_idx).unwrap();
-        match queue_type {
-            QueueType::Rx => self.handle_rx(head_idx),
+        match QueueType::try_from(q_idx).unwrap() {
+            QueueType::Rx => None,
             QueueType::Tx => self.handle_tx(queue, head_idx, mem),
         }
-    }
-
-    fn handle_external(
-        &mut self,
-        queues: &[virtq::Queue],
-        frame: &[u8],
-        mem: &mut Memory,
-    ) -> Option<virtq::Completion> {
-        let head_idx = self.free_rx_buffers.pop()?;
-        let queue = &queues[QueueType::Rx as usize];
-        let chain = queue.collect_chain(head_idx, mem).unwrap();
-
-        let mut packet = Vec::with_capacity(size_of::<NetHeader>() + frame.len());
-        packet.extend_from_slice(Net::plain_rx_hdr().as_bytes());
-        packet.extend_from_slice(frame);
-
-        let written = chain.write_response(&packet, mem);
-
-        Some(virtq::Completion {
-            queue_idx: QueueType::Rx as u16,
-            head_idx,
-            used_len: written as u32,
-        })
     }
 
     fn pop_external(&mut self) -> Option<Vec<u8>> {
@@ -107,17 +89,11 @@ impl Device for Net {
     }
 
     fn reset(&mut self) {
-        self.free_rx_buffers.clear();
         self.tx_frames.clear();
     }
 }
 
 impl Net {
-    fn handle_rx(&mut self, head_idx: u16) -> Option<u32> {
-        self.free_rx_buffers.push(head_idx);
-        None
-    }
-
     fn handle_tx(&mut self, queue: &virtq::Queue, head_idx: u16, mem: &mut Memory) -> Option<u32> {
         let virtq::ChainData { readable, .. } = queue.collect_chain(head_idx, mem)?;
 
@@ -137,5 +113,16 @@ impl Net {
         let mut hdr = NetHeader::new_zeroed();
         hdr.num_buffers = 1;
         hdr
+    }
+}
+
+impl ExternalInputHandler for Net {
+    type Input<'a> = &'a [u8];
+
+    fn encode(&mut self, frame: Self::Input<'_>, mut emit: impl FnMut(usize, &[&[u8]])) {
+        emit(
+            QueueType::Rx as usize,
+            &[Net::plain_rx_hdr().as_bytes(), frame],
+        )
     }
 }

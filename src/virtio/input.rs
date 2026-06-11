@@ -1,4 +1,9 @@
-use crate::virtio::{MmioTransport, common, device::Device, input::keys::*, virtq};
+use crate::virtio::{
+    common,
+    device::{Device, ExternalInputHandler},
+    input::keys::*,
+    virtq,
+};
 use applevisor::memory::Memory;
 use num_enum::TryFromPrimitive;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
@@ -75,7 +80,6 @@ pub struct Input {
     kind: InputKind,
     select: u8,
     subsel: u8,
-    free_rx_buffers: Vec<u16>,
 }
 
 fn set_bit(bitmap: &mut [u8], bit: usize) {
@@ -88,7 +92,6 @@ impl Input {
             kind: InputKind::Keyboard,
             select: 0,
             subsel: 0,
-            free_rx_buffers: Vec::new(),
         }
     }
 
@@ -97,7 +100,6 @@ impl Input {
             kind: InputKind::Tablet,
             select: 0,
             subsel: 0,
-            free_rx_buffers: Vec::new(),
         }
     }
 
@@ -250,98 +252,101 @@ impl Device for Input {
         2
     }
 
+    fn async_queues(&self) -> &[u16] {
+        // eventq наполняется драйвером впрок, потребляется по хост-событию.
+        &[QueueType::Event as u16]
+    }
+
     fn process_chain(
         &mut self,
         q_idx: usize,
         _queue: &virtq::Queue,
-        head_idx: u16,
+        _head_idx: u16,
         _mem: &mut Memory,
     ) -> Option<u32> {
-        let queue_type = QueueType::try_from(q_idx).unwrap();
-        match queue_type {
-            QueueType::Event => {
-                self.free_rx_buffers.push(head_idx);
-                None
-            }
+        match QueueType::try_from(q_idx).unwrap() {
+            // eventq — async, потребляется в encode()/supply(); сюда не приходит.
+            QueueType::Event => None,
             QueueType::Status => Some(0),
         }
-    }
-
-    fn handle_external(
-        &mut self,
-        queues: &[virtq::Queue],
-        data: &[u8],
-        mem: &mut Memory,
-    ) -> Option<virtq::Completion> {
-        let head_idx = self.free_rx_buffers.pop()?;
-        let queue = &queues[QueueType::Event as usize];
-
-        let chain = queue.collect_chain(head_idx, mem).unwrap();
-
-        let written = chain.write_response(data, mem);
-
-        Some(virtq::Completion {
-            queue_idx: QueueType::Event as u16,
-            head_idx,
-            used_len: written as u32,
-        })
     }
 
     fn reset(&mut self) {
         self.select = 0;
         self.subsel = 0;
-        self.free_rx_buffers.clear();
     }
 }
 
-impl MmioTransport<Input> {
-    fn push_event(&mut self, r#type: u16, code: u16, value: u32, mem: &mut Memory) -> bool {
-        let event = Event {
-            r#type,
-            code,
-            value,
-        };
+pub enum ExternalInput {
+    Key {
+        code: u16,
+        pressed: bool,
+    },
+    PointerButton {
+        button: u16,
+        pressed: bool,
+    },
+    AbsPosition {
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+    },
+    Scroll {
+        horizontal: bool,
+        value: i32,
+    },
+    RawEvent {
+        ty: u16,
+        code: u16,
+        value: u32,
+    },
+}
 
-        let ok = self.deliver_external(event.as_bytes(), mem);
+impl ExternalInputHandler for Input {
+    type Input<'a> = ExternalInput;
 
-        if !ok {
-            eprintln!(
-                "virtio-input: dropped event type={} code={} value={}",
-                r#type, code, value
+    fn encode(&mut self, input: ExternalInput, mut emit: impl FnMut(usize, &[&[u8]])) {
+        let q = QueueType::Event as usize;
+        let mut ev = |t: u16, c: u16, v: u32| {
+            emit(
+                q,
+                &[Event {
+                    r#type: t,
+                    code: c,
+                    value: v,
+                }
+                .as_bytes()],
             );
-        }
-
-        ok
-    }
-
-    pub fn push_key(&mut self, code: u16, pressed: bool, mem: &mut Memory) {
-        let value = if pressed { 1 } else { 0 };
-
-        self.push_event(EV_KEY, code, value, mem);
-        self.push_event(EV_SYN, SYN_REPORT, 0, mem);
-    }
-
-    pub fn push_abs_position(&mut self, x: u32, y: u32, width: u32, height: u32, mem: &mut Memory) {
-        let x = (x as u64 * TABLET_ABS_MAX_X as u64) / (width as u64 - 1);
-        let y = (y as u64 * TABLET_ABS_MAX_Y as u64) / (height as u64 - 1);
-        self.push_event(EV_ABS, ABS_X, x as u32, mem);
-        self.push_event(EV_ABS, ABS_Y, y as u32, mem);
-        self.push_event(EV_SYN, SYN_REPORT, 0, mem);
-    }
-
-    pub fn push_pointer_button(&mut self, button: u16, pressed: bool, mem: &mut Memory) {
-        let value = if pressed { 1 } else { 0 };
-
-        self.push_event(EV_KEY, button, value, mem);
-        self.push_event(EV_SYN, SYN_REPORT, 0, mem);
-    }
-
-    pub fn push_scroll(&mut self, horisontal: bool, value: i32, mem: &mut Memory) {
-        let code = match horisontal {
-            false => REL_WHEEL,
-            true => REL_HWHEEL,
         };
-        self.push_event(EV_REL, code, value as u32, mem);
-        self.push_event(EV_SYN, SYN_REPORT, 0, mem);
+
+        match input {
+            ExternalInput::Key { code, pressed } => {
+                ev(EV_KEY, code, pressed as u32);
+                ev(EV_SYN, SYN_REPORT, 0);
+            }
+            ExternalInput::PointerButton { button, pressed } => {
+                ev(EV_KEY, button, pressed as u32);
+                ev(EV_SYN, SYN_REPORT, 0);
+            }
+            ExternalInput::AbsPosition {
+                x,
+                y,
+                width,
+                height,
+            } => {
+                let x = (x as u64 * TABLET_ABS_MAX_X as u64) / (width as u64 - 1);
+                let y = (y as u64 * TABLET_ABS_MAX_Y as u64) / (height as u64 - 1);
+                ev(EV_ABS, ABS_X, x as u32);
+                ev(EV_ABS, ABS_Y, y as u32);
+                ev(EV_SYN, SYN_REPORT, 0);
+            }
+            ExternalInput::Scroll { horizontal, value } => {
+                let code = if horizontal { REL_HWHEEL } else { REL_WHEEL };
+                ev(EV_REL, code, value as u32);
+                ev(EV_SYN, SYN_REPORT, 0);
+            }
+            ExternalInput::RawEvent { ty, code, value } => ev(ty, code, value),
+        }
     }
 }

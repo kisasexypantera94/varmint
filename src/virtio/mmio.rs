@@ -1,7 +1,7 @@
 //! https://docs.oasis-open.org/virtio/virtio/v1.3/csd01/virtio-v1.3-csd01.html#x1-1820002
 
 use crate::virtio::{
-    device,
+    device::{self, Device, ExternalInputHandler},
     virtq::{self, Queue},
 };
 use applevisor::memory::Memory;
@@ -65,7 +65,7 @@ struct QueuePending {
     size: u16,
 }
 
-pub struct Transport<D: device::Device> {
+pub struct Transport<D: Device> {
     queues: Vec<virtq::Queue>,
     queues_pending: Vec<QueuePending>,
     device: D,
@@ -180,18 +180,22 @@ impl<D: device::Device> Transport<D> {
             }
             Reg::QueueNotify => {
                 let q_idx = value as usize;
-                let q = &mut self.queues[q_idx];
 
-                let mut raised = false;
+                if self.device.async_queues().contains(&(q_idx as u16)) {
+                    // TODO: flush pending
+                } else {
+                    let q = &mut self.queues[q_idx];
 
-                while let Some(head_idx) = q.pop_chain(mem) {
-                    if let Some(written) = self.device.process_chain(q_idx, q, head_idx, mem) {
-                        q.push_used(mem, head_idx, written);
-                        raised = true;
+                    let mut raised = false;
+                    while let Some(head_idx) = q.pop_chain(mem) {
+                        if let Some(written) = self.device.process_chain(q_idx, q, head_idx, mem) {
+                            q.push_used(mem, head_idx, written);
+                            raised = true;
+                        }
                     }
-                }
-                if raised {
-                    self.interrupt_status |= INT_VRING;
+                    if raised {
+                        self.interrupt_status |= INT_VRING;
+                    }
                 }
             }
             Reg::InterruptAck => self.interrupt_status &= !value,
@@ -210,21 +214,6 @@ impl<D: device::Device> Transport<D> {
             Reg::QueueDeviceLow => self.current_pending_queue().device_lo = value,
             Reg::QueueDeviceHigh => self.current_pending_queue().device_hi = value,
             _ => {}
-        }
-    }
-
-    pub fn deliver_external(&mut self, data: &[u8], mem: &mut Memory) -> bool {
-        if let Some(completion) = self.device.handle_external(&mut self.queues, data, mem) {
-            self.queues[completion.queue_idx as usize].push_used(
-                mem,
-                completion.head_idx,
-                completion.used_len,
-            );
-
-            self.interrupt_status |= INT_VRING;
-            true
-        } else {
-            false
         }
     }
 
@@ -262,4 +251,18 @@ impl<D: device::Device> Transport<D> {
 
 pub fn queue_addr(lo: u32, hi: u32) -> u64 {
     ((hi as u64) << 32) | (lo as u64)
+}
+
+impl<D: ExternalInputHandler + Device> Transport<D> {
+    pub fn handle_external_input(&mut self, input: D::Input<'_>, mem: &mut Memory) {
+        let queues = &mut self.queues;
+        let interrupt_status = &mut self.interrupt_status;
+
+        self.device.encode(input, |queue_idx, parts| {
+            match queues[queue_idx].supply(parts, mem) {
+                Some(_) => *interrupt_status |= INT_VRING,
+                None => eprintln!("virtio: queue {queue_idx} has no buffer, dropping payload"),
+            }
+        });
+    }
 }

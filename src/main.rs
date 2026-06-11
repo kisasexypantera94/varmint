@@ -197,7 +197,7 @@ enum HostInputEvent {
         pressed: bool,
     },
     Scroll {
-        horisontal: bool,
+        horizontal: bool,
         value: i32,
     },
 }
@@ -390,13 +390,13 @@ impl<'a> ApplicationHandler for AppState<'a> {
                 };
                 if dy != 0.0 {
                     let _ = self.input_tx.send(HostInputEvent::Scroll {
-                        horisontal: false,
+                        horizontal: false,
                         value: dy.round() as i32,
                     });
                 }
                 if dx != 0.0 {
                     let _ = self.input_tx.send(HostInputEvent::Scroll {
-                        horisontal: true,
+                        horizontal: true,
                         value: dx.round() as i32,
                     });
                 }
@@ -442,7 +442,7 @@ fn run_loop(
         loop {
             let n_read = iface.read(&mut net_buf).unwrap();
             if n_read > 0 {
-                virtio_net.deliver_external(&net_buf[..n_read], mem);
+                virtio_net.handle_external_input(&net_buf[..n_read], mem);
             } else {
                 break;
             }
@@ -451,9 +451,11 @@ fn run_loop(
         let mut last_pointer_move: Option<(u32, u32, u32, u32)> = None;
 
         while let Ok(event) = input_rx.try_recv() {
+            use virtio::input::ExternalInput;
             match event {
                 HostInputEvent::Key { code, pressed } => {
-                    virtio_input_keyboard.push_key(code, pressed, mem);
+                    virtio_input_keyboard
+                        .handle_external_input(ExternalInput::Key { code, pressed }, mem);
                 }
 
                 HostInputEvent::PointerMove {
@@ -467,13 +469,25 @@ fn run_loop(
 
                 HostInputEvent::PointerButton { button, pressed } => {
                     if let Some((x, y, width, height)) = last_pointer_move.take() {
-                        virtio_input_tablet.push_abs_position(x, y, width, height, mem);
+                        virtio_input_tablet.handle_external_input(
+                            ExternalInput::AbsPosition {
+                                x,
+                                y,
+                                width,
+                                height,
+                            },
+                            mem,
+                        );
                     }
-                    virtio_input_tablet.push_pointer_button(button, pressed, mem);
+                    virtio_input_tablet.handle_external_input(
+                        ExternalInput::PointerButton { button, pressed },
+                        mem,
+                    );
                 }
 
-                HostInputEvent::Scroll { horisontal, value } => {
-                    virtio_input_tablet.push_scroll(horisontal, value, mem);
+                HostInputEvent::Scroll { horizontal, value } => {
+                    virtio_input_tablet
+                        .handle_external_input(ExternalInput::Scroll { horizontal, value }, mem);
                 }
             }
         }
@@ -487,7 +501,15 @@ fn run_loop(
         }
 
         if let Some((x, y, width, height)) = last_pointer_move {
-            virtio_input_tablet.push_abs_position(x, y, width, height, mem);
+            virtio_input_tablet.handle_external_input(
+                virtio::input::ExternalInput::AbsPosition {
+                    x,
+                    y,
+                    width,
+                    height,
+                },
+                mem,
+            );
         }
 
         uart_irq.sync(vm, uart.lock().unwrap().is_asserted())?;
