@@ -244,9 +244,9 @@ impl Device for Input {
     fn process_chain(
         &mut self,
         q_idx: usize,
-        queue: &virtq::Queue,
+        _queue: &virtq::Queue,
         head_idx: u16,
-        mem: &mut Memory,
+        _mem: &mut Memory,
     ) -> Option<u32> {
         let queue_type = QueueType::try_from(q_idx).unwrap();
         match queue_type {

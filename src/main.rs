@@ -192,22 +192,80 @@ fn window_thread(
     let mut last_middle = false;
 
     let mut window = Window::new(
-        "varmint virtio-gpu",
+        "Varmint",
         virtio::gpu::WIDTH,
         virtio::gpu::HEIGHT,
-        WindowOptions::default(),
+        WindowOptions {
+            ..Default::default()
+        },
     )
     .unwrap();
 
+    window.set_target_fps(120);
+
+    let mut front = vec![0u32; virtio::gpu::WIDTH * virtio::gpu::HEIGHT];
+
+    let mut last_seq = 0u64;
+    let mut stat_last = std::time::Instant::now();
+    let mut stat_produced = 0u64;
+    let mut stat_presented = 0u64;
+    let mut stat_update_ns = 0u128;
+    let mut stat_loops = 0u64;
+
     while window.is_open() {
+        stat_loops += 1;
+
+        let mut need_kick = false;
+        let mut need_update = false;
+        let mut width = virtio::gpu::WIDTH;
+        let mut height = virtio::gpu::HEIGHT;
+
         {
             let mut display = display.lock().unwrap();
 
-            window
-                .update_with_buffer(&display.pixels, display.width, display.height)
-                .unwrap();
+            if display.seq != last_seq {
+                stat_produced += display.seq.wrapping_sub(last_seq);
+                last_seq = display.seq;
 
-            display.dirty = false;
+                width = display.width;
+                height = display.height;
+
+                if front.len() != display.pixels.len() {
+                    front.resize(display.pixels.len(), 0);
+                }
+
+                front.copy_from_slice(&display.pixels);
+                display.dirty = false;
+                need_update = true;
+            }
+        }
+
+        if need_update {
+            let t0 = std::time::Instant::now();
+            window.update_with_buffer(&front, width, height).unwrap();
+            stat_update_ns += t0.elapsed().as_nanos();
+            stat_presented += 1;
+        } else {
+            window.update();
+        }
+
+        if stat_last.elapsed() >= std::time::Duration::from_secs(1) {
+            let avg_ms = if stat_presented == 0 {
+                0.0
+            } else {
+                stat_update_ns as f64 / stat_presented as f64 / 1_000_000.0
+            };
+
+            eprintln!(
+                "display: loops={} produced={} presented={} avg_update_ms={:.3}",
+                stat_loops, stat_produced, stat_presented, avg_ms,
+            );
+
+            stat_loops = 0;
+            stat_produced = 0;
+            stat_presented = 0;
+            stat_update_ns = 0;
+            stat_last = std::time::Instant::now();
         }
 
         for key in window.get_keys_pressed(KeyRepeat::No) {
@@ -216,7 +274,7 @@ fn window_thread(
                     code,
                     pressed: true,
                 });
-                vm.vcpus_exit(&[handle.clone()]).unwrap();
+                need_kick = true;
             }
         }
 
@@ -226,7 +284,7 @@ fn window_thread(
                     code,
                     pressed: false,
                 });
-                vm.vcpus_exit(&[handle.clone()]).unwrap();
+                need_kick = true;
             }
         }
 
@@ -238,7 +296,7 @@ fn window_thread(
 
             if pos != last_mouse_pos {
                 let _ = input_tx.send(HostInputEvent::PointerMove { x, y });
-                vm.vcpus_exit(&[handle.clone()]).unwrap();
+                need_kick = true;
 
                 last_mouse_pos = pos;
             }
@@ -250,7 +308,7 @@ fn window_thread(
                 button: BTN_LEFT,
                 pressed: left,
             });
-            vm.vcpus_exit(&[handle.clone()]).unwrap();
+            need_kick = true;
             last_left = left;
         }
 
@@ -260,7 +318,7 @@ fn window_thread(
                 button: BTN_RIGHT,
                 pressed: right,
             });
-            vm.vcpus_exit(&[handle.clone()]).unwrap();
+            need_kick = true;
             last_right = right;
         }
 
@@ -270,11 +328,13 @@ fn window_thread(
                 button: BTN_MIDDLE,
                 pressed: middle,
             });
-            vm.vcpus_exit(&[handle.clone()]).unwrap();
+            need_kick = true;
             last_middle = middle;
         }
 
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        if need_kick {
+            vm.vcpus_exit(&[handle.clone()]).unwrap();
+        }
     }
 }
 

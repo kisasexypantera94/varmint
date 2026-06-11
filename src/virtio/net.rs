@@ -8,12 +8,6 @@ mod feature {
     pub const MAC: u64 = 1 << 5;
 }
 
-/// 02: local-administered unicast MAC.  \
-/// 56 41 52 4d = ASCII-ish "VARM".  \
-/// 01 = first varmint NIC.  \
-const MAC: [u8; 6] = [0x02, 0x56, 0x41, 0x52, 0x4d, 0x01];
-const MAC_LEN: u64 = MAC.len() as u64;
-
 /// https://docs.oasis-open.org/virtio/virtio/v1.3/csd01/virtio-v1.3-csd01.html#x1-2350001
 const DEVICE_ID: u32 = 1;
 

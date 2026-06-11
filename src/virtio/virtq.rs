@@ -41,29 +41,11 @@ pub struct AvailHeader {
     pub idx: u16,
 }
 
-impl AvailHeader {
-    pub fn new(offset: u64, mem: &Memory) -> Result<AvailHeader> {
-        Ok(AvailHeader {
-            flags: mem.read_u16(offset)?,
-            idx: mem.read_u16(offset + 2)?,
-        })
-    }
-}
-
 #[derive(Debug)]
 #[repr(C)]
 pub struct UsedHeader {
     pub flags: u16,
     pub idx: u16,
-}
-
-impl UsedHeader {
-    pub fn new(offset: u64, mem: &Memory) -> Result<UsedHeader> {
-        Ok(UsedHeader {
-            flags: mem.read_u16(offset)?,
-            idx: mem.read_u16(offset + 2)?,
-        })
-    }
 }
 
 pub struct Completion {

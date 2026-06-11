@@ -212,6 +212,7 @@ pub struct DisplayBuffer {
     pub height: usize,
     pub pixels: Vec<u32>,
     pub dirty: bool,
+    pub seq: u64,
 }
 
 impl DisplayBuffer {
@@ -220,6 +221,7 @@ impl DisplayBuffer {
             width,
             height,
             pixels: vec![0; width * height],
+            seq: 0,
             dirty: true,
         }
     }
@@ -430,11 +432,10 @@ impl<'a> Device for Gpu<'a> {
                     Ok(CtrlType::ResourceFlush) => {
                         let (val, _) = ResourceFlush::read_from_prefix(payload).unwrap();
 
-                        let resource_id = val.resource_id;
-
                         if self.scanout_resource == Some(val.resource_id) {
+                            let resource_id = val.resource_id;
                             let resource = self.resources.get(&resource_id)?;
-                            self.publish_display(&resource.framebuffer);
+                            self.publish_display_rect(resource, val.r);
                         }
 
                         Gpu::write_ok_nodata(&chain_data, mem)
@@ -465,29 +466,48 @@ impl<'a> Device for Gpu<'a> {
 }
 
 impl<'a> Gpu<'a> {
-    fn publish_display(&self, framebuffer: &[u8]) {
+    fn publish_display_rect(&self, resource: &Resource, rect: Rect) {
         let mut display = self.display.lock().unwrap();
 
-        let pixels = display.width * display.height;
-        if framebuffer.len() < pixels * BYTES_PER_PIXEL {
+        let res_width = resource.width as usize;
+        let res_height = resource.height as usize;
+
+        let x0 = (rect.x as usize).min(res_width).min(display.width);
+        let y0 = (rect.y as usize).min(res_height).min(display.height);
+        let x1 = ((rect.x + rect.width) as usize)
+            .min(res_width)
+            .min(display.width);
+        let y1 = ((rect.y + rect.height) as usize)
+            .min(res_height)
+            .min(display.height);
+
+        if x0 >= x1 || y0 >= y1 {
             return;
         }
 
-        if display.pixels.len() != pixels {
-            display.pixels.resize(pixels, 0);
-        }
+        let src_stride = res_width * BYTES_PER_PIXEL;
 
-        for i in 0..pixels {
-            let j = i * BYTES_PER_PIXEL;
+        for y in y0..y1 {
+            let src_row = y * src_stride;
+            let dst_row = y * display.width;
 
-            let b = framebuffer[j] as u32;
-            let g = framebuffer[j + 1] as u32;
-            let r = framebuffer[j + 2] as u32;
+            for x in x0..x1 {
+                let j = src_row + x * BYTES_PER_PIXEL;
 
-            display.pixels[i] = (r << 16) | (g << 8) | b;
+                if j + 2 >= resource.framebuffer.len() {
+                    return;
+                }
+
+                let b = resource.framebuffer[j] as u32;
+                let g = resource.framebuffer[j + 1] as u32;
+                let r = resource.framebuffer[j + 2] as u32;
+
+                display.pixels[dst_row + x] = (r << 16) | (g << 8) | b;
+            }
         }
 
         display.dirty = true;
+        display.seq = display.seq.wrapping_add(1);
     }
 
     fn write_ok_nodata(chain_data: &virtq::ChainData, mem: &mut Memory) -> u32 {
