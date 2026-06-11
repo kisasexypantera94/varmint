@@ -7,6 +7,9 @@ pub mod keys;
 
 const DEVICE_ID: u32 = 18;
 
+pub const TABLET_ABS_MAX_X: u32 = 32767;
+pub const TABLET_ABS_MAX_Y: u32 = 32767;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, TryFromPrimitive)]
 #[repr(usize)]
 enum QueueType {
@@ -65,7 +68,7 @@ enum InputConfigSelect {
 
 pub enum InputKind {
     Keyboard,
-    Tablet { width: u32, height: u32 },
+    Tablet,
 }
 
 pub struct Input {
@@ -89,9 +92,9 @@ impl Input {
         }
     }
 
-    pub fn tablet(width: u32, height: u32) -> Input {
+    pub fn tablet() -> Input {
         Input {
-            kind: InputKind::Tablet { width, height },
+            kind: InputKind::Tablet,
             select: 0,
             subsel: 0,
             free_rx_buffers: Vec::new(),
@@ -111,7 +114,7 @@ impl Input {
             Ok(InputConfigSelect::IdName) => {
                 let name = match self.kind {
                     InputKind::Keyboard => "varmint keyboard",
-                    InputKind::Tablet { .. } => "varmint tablet",
+                    InputKind::Tablet => "varmint tablet",
                 };
                 cfg.size = name.len() as u8;
                 cfg.u[..name.len()].copy_from_slice(name.as_bytes());
@@ -131,18 +134,18 @@ impl Input {
             }
 
             Ok(InputConfigSelect::AbsInfo) => {
-                if let InputKind::Tablet { width, height } = self.kind {
+                if let InputKind::Tablet = self.kind {
                     let abs = match self.subsel as u16 {
                         ABS_X => Some(AbsInfo {
                             min: 0,
-                            max: width - 1,
+                            max: TABLET_ABS_MAX_X,
                             fuzz: 0,
                             flat: 0,
                             res: 0,
                         }),
                         ABS_Y => Some(AbsInfo {
                             min: 0,
-                            max: height - 1,
+                            max: TABLET_ABS_MAX_Y,
                             fuzz: 0,
                             flat: 0,
                             res: 0,
@@ -187,6 +190,12 @@ impl Input {
                         set_bit(&mut cfg.u, ABS_Y as usize);
 
                         cfg.size = 1;
+                    }
+                    EV_REL => {
+                        set_bit(&mut cfg.u, REL_WHEEL as usize);
+                        set_bit(&mut cfg.u, REL_HWHEEL as usize);
+
+                        cfg.size = 2;
                     }
                     _ => {}
                 },
@@ -312,9 +321,11 @@ impl MmioTransport<Input> {
         self.push_event(EV_SYN, SYN_REPORT, 0, mem);
     }
 
-    pub fn push_abs_position(&mut self, x: u32, y: u32, mem: &mut Memory) {
-        self.push_event(EV_ABS, ABS_X, x, mem);
-        self.push_event(EV_ABS, ABS_Y, y, mem);
+    pub fn push_abs_position(&mut self, x: u32, y: u32, width: u32, height: u32, mem: &mut Memory) {
+        let x = (x as u64 * TABLET_ABS_MAX_X as u64) / (width as u64 - 1);
+        let y = (y as u64 * TABLET_ABS_MAX_Y as u64) / (height as u64 - 1);
+        self.push_event(EV_ABS, ABS_X, x as u32, mem);
+        self.push_event(EV_ABS, ABS_Y, y as u32, mem);
         self.push_event(EV_SYN, SYN_REPORT, 0, mem);
     }
 
@@ -322,6 +333,15 @@ impl MmioTransport<Input> {
         let value = if pressed { 1 } else { 0 };
 
         self.push_event(EV_KEY, button, value, mem);
+        self.push_event(EV_SYN, SYN_REPORT, 0, mem);
+    }
+
+    pub fn push_scroll(&mut self, horisontal: bool, value: i32, mem: &mut Memory) {
+        let code = match horisontal {
+            false => REL_WHEEL,
+            true => REL_HWHEEL,
+        };
+        self.push_event(EV_REL, code, value as u32, mem);
         self.push_event(EV_SYN, SYN_REPORT, 0, mem);
     }
 }

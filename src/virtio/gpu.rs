@@ -1,21 +1,17 @@
 //! https://docs.oasis-open.org/virtio/virtio/v1.3/csd01/virtio-v1.3-csd01.html#x1-4040006
-use crate::virtio::{common, device::Device, virtq};
+use crate::virtio::{MmioTransport, common, device::Device, virtq};
 use applevisor::{error::Result, memory::Memory};
 use num_enum::TryFromPrimitive;
-use std::{collections::HashMap, sync::Mutex};
+use std::{collections::HashMap, mem::offset_of, sync::Mutex};
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, Ref};
 
 const DEVICE_ID: u32 = 16;
 
 pub const MAX_SCANOUTS: usize = 16;
 
-pub const WIDTH: usize = 1024;
-pub const HEIGHT: usize = 768;
-const FORMAT_B8G8R8X8_UNORM: u32 = 2;
 const BYTES_PER_PIXEL: usize = 4;
 
-pub const FLAG_FENCE: u32 = 1 << 0;
-pub const FLAG_INFO_RING_IDX: u32 = 1 << 1;
+const EVENT_DISPLAY: u32 = 1;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, TryFromPrimitive)]
 #[repr(u32)]
@@ -216,14 +212,22 @@ pub struct DisplayBuffer {
 }
 
 impl DisplayBuffer {
-    pub fn new(width: usize, height: usize) -> Self {
+    pub fn new() -> Self {
         Self {
-            width,
-            height,
-            pixels: vec![0; width * height],
+            width: 0,
+            height: 0,
+            pixels: Vec::new(),
             seq: 0,
             dirty: true,
         }
+    }
+
+    pub fn resize(&mut self, width: usize, height: usize) {
+        self.width = width;
+        self.height = height;
+        self.pixels.resize(width * height, 0);
+        self.dirty = true;
+        self.seq = self.seq.wrapping_add(1);
     }
 }
 
@@ -240,14 +244,27 @@ pub struct Gpu<'a> {
     resources: HashMap<u32, Resource>,
     scanout_resource: Option<u32>,
     display: &'a Mutex<DisplayBuffer>,
+
+    scanout_width: u32,
+    scanout_height: u32,
+
+    events_read: u32,
 }
 
 impl<'a> Gpu<'a> {
     pub fn new(display: &'a Mutex<DisplayBuffer>) -> Gpu<'a> {
+        let (width, height) = {
+            let display = display.lock().unwrap();
+            (display.width, display.height)
+        };
+
         Gpu {
             resources: HashMap::new(),
             scanout_resource: None,
             display,
+            scanout_width: width as u32,
+            scanout_height: height as u32,
+            events_read: 0,
         }
     }
 }
@@ -263,12 +280,20 @@ impl<'a> Device for Gpu<'a> {
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
         let cfg = Config {
+            events_read: self.events_read,
             num_scanouts: 1,
             ..Default::default()
         };
 
         let offset = offset as usize;
         data.copy_from_slice(&cfg.as_bytes()[offset..offset + data.len()]);
+    }
+
+    fn write_config(&mut self, offset: u64, data: &[u8]) {
+        if offset as usize == offset_of!(Config, events_clear) {
+            let events_clear = u32::from_le_bytes(data.try_into().unwrap());
+            self.events_read &= !events_clear;
+        }
     }
 
     fn num_queues(&self) -> u16 {
@@ -299,8 +324,8 @@ impl<'a> Device for Gpu<'a> {
                             r: Rect {
                                 x: 0,
                                 y: 0,
-                                width: 1024,
-                                height: 768,
+                                width: self.scanout_width,
+                                height: self.scanout_height,
                             },
                             enabled: 1,
                             flags: 0,
@@ -388,6 +413,14 @@ impl<'a> Device for Gpu<'a> {
                             self.scanout_resource = None;
                         } else {
                             self.scanout_resource = Some(val.resource_id);
+
+                            let resource_id = val.resource_id;
+                            let resource = self.resources.get(&resource_id).unwrap();
+
+                            self.display
+                                .lock()
+                                .unwrap()
+                                .resize(resource.width as usize, resource.height as usize);
                         }
 
                         Gpu::write_ok_nodata(&chain_data, mem)
@@ -556,5 +589,22 @@ impl<'a> Gpu<'a> {
         }
 
         None
+    }
+
+    pub fn resize_display(&mut self, width: u32, height: u32) {
+        if width == 0 || height == 0 {
+            return;
+        }
+
+        self.scanout_width = width;
+        self.scanout_height = height;
+        self.events_read |= EVENT_DISPLAY;
+    }
+}
+
+impl<'a> MmioTransport<Gpu<'a>> {
+    pub fn resize_display(&mut self, width: u32, height: u32) {
+        self.device_mut().resize_display(width, height);
+        self.raise_config_interrupt();
     }
 }

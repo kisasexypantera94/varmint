@@ -1,7 +1,6 @@
 use crate::virtio::input::keys::*;
 use applevisor::prelude::*;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use minifb::{KeyRepeat, MouseButton, MouseMode, Window, WindowOptions};
 use std::{
     fs::File,
     io::{self, Read, Write},
@@ -11,11 +10,20 @@ use std::{
     },
     thread,
 };
+use winit::{
+    application::ApplicationHandler,
+    dpi::{LogicalSize, PhysicalPosition, PhysicalSize},
+    event::{ElementState, MouseButton, WindowEvent},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    keyboard::PhysicalKey,
+    window::{Window, WindowId},
+};
 
 mod helpers;
 mod irq;
 mod linux;
 mod net;
+mod present;
 mod sys_reg;
 mod uart;
 mod virtio;
@@ -119,7 +127,6 @@ fn stdin_thread(
     let stdin = std::io::stdin();
     let mut buf = [0u8; 1];
 
-    // Escape sequence: Ctrl-] then 'x' to exit, Ctrl-] then ']' to send literal Ctrl-]
     const PREFIX: u8 = 0x1d; // Ctrl-]
     let mut got_prefix = false;
 
@@ -127,7 +134,7 @@ fn stdin_thread(
 
     loop {
         match stdin.lock().read(&mut buf) {
-            Ok(0) => break, // EOF
+            Ok(0) => break,
             Ok(_) => {
                 let b = buf[0];
 
@@ -175,166 +182,237 @@ fn mmio_write_reg(vcpu: &Vcpu, rt: u64, value: u64) -> Result<()> {
 }
 
 enum HostInputEvent {
-    Key { code: u16, pressed: bool },
-    PointerMove { x: u32, y: u32 },
-    PointerButton { button: u16, pressed: bool },
+    Key {
+        code: u16,
+        pressed: bool,
+    },
+    PointerMove {
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+    },
+    PointerButton {
+        button: u16,
+        pressed: bool,
+    },
+    Scroll {
+        horisontal: bool,
+        value: i32,
+    },
 }
 
-fn window_thread(
-    vm: &VirtualMachineInstance<GicEnabled>,
+enum HostDisplayEvent {
+    Resize { width: u32, height: u32 },
+}
+
+struct AppState<'a> {
+    vm: &'a VirtualMachineInstance<GicEnabled>,
     handle: VcpuHandle,
-    display: &Mutex<virtio::gpu::DisplayBuffer>,
+    display: &'a Mutex<virtio::gpu::DisplayBuffer>,
     input_tx: Sender<HostInputEvent>,
-) {
-    let mut last_mouse_pos: Option<(u32, u32)> = None;
-    let mut last_left = false;
-    let mut last_right = false;
-    let mut last_middle = false;
+    display_tx: Sender<HostDisplayEvent>,
 
-    let mut window = Window::new(
-        "Varmint",
-        virtio::gpu::WIDTH,
-        virtio::gpu::HEIGHT,
-        WindowOptions {
-            ..Default::default()
-        },
-    )
-    .unwrap();
+    presenter: Option<present::Presenter>,
 
-    window.set_target_fps(120);
+    surface_w: u32,
+    surface_h: u32,
 
-    let mut front = vec![0u32; virtio::gpu::WIDTH * virtio::gpu::HEIGHT];
+    front: Vec<u32>,
+    present_w: usize,
+    present_h: usize,
+    last_seq: u64,
 
-    let mut last_seq = 0u64;
-    let mut stat_last = std::time::Instant::now();
-    let mut stat_produced = 0u64;
-    let mut stat_presented = 0u64;
-    let mut stat_update_ns = 0u128;
-    let mut stat_loops = 0u64;
+    last_mouse_pos: Option<(f64, f64)>,
 
-    while window.is_open() {
-        stat_loops += 1;
+    stat_last: std::time::Instant,
+    stat_produced: u64,
+    stat_presented: u64,
+    stat_update_ns: u128,
+    stat_loops: u64,
+}
 
-        let mut need_kick = false;
-        let mut need_update = false;
-        let mut width = virtio::gpu::WIDTH;
-        let mut height = virtio::gpu::HEIGHT;
+impl<'a> AppState<'a> {
+    fn kick_vm(&self) {
+        self.vm.vcpus_exit(&[self.handle.clone()]).unwrap();
+    }
 
-        {
-            let mut display = display.lock().unwrap();
-
-            if display.seq != last_seq {
-                stat_produced += display.seq.wrapping_sub(last_seq);
-                last_seq = display.seq;
-
-                width = display.width;
-                height = display.height;
-
-                if front.len() != display.pixels.len() {
-                    front.resize(display.pixels.len(), 0);
-                }
-
-                front.copy_from_slice(&display.pixels);
-                display.dirty = false;
-                need_update = true;
+    fn blit(&mut self) {
+        if let Some(p) = self.presenter.as_mut() {
+            if self.present_w > 0 && self.present_h > 0 {
+                let t0 = std::time::Instant::now();
+                p.present(&self.front, self.present_w as u32, self.present_h as u32);
+                self.stat_update_ns += t0.elapsed().as_nanos();
+                self.stat_presented += 1;
             }
         }
+    }
 
-        if need_update {
-            let t0 = std::time::Instant::now();
-            window.update_with_buffer(&front, width, height).unwrap();
-            stat_update_ns += t0.elapsed().as_nanos();
-            stat_presented += 1;
-        } else {
-            window.update();
+    fn poll_display(&mut self) -> bool {
+        let mut display = self.display.lock().unwrap();
+
+        if display.seq == self.last_seq {
+            return false;
         }
 
-        if stat_last.elapsed() >= std::time::Duration::from_secs(1) {
-            let avg_ms = if stat_presented == 0 {
+        self.stat_produced += display.seq.wrapping_sub(self.last_seq);
+        self.last_seq = display.seq;
+
+        self.present_w = display.width;
+        self.present_h = display.height;
+
+        if self.front.len() != display.pixels.len() {
+            self.front.resize(display.pixels.len(), 0);
+        }
+        self.front.copy_from_slice(&display.pixels);
+        display.dirty = false;
+        true
+    }
+
+    fn print_stats(&mut self) {
+        if self.stat_last.elapsed() >= std::time::Duration::from_secs(1) {
+            let avg_ms = if self.stat_presented == 0 {
                 0.0
             } else {
-                stat_update_ns as f64 / stat_presented as f64 / 1_000_000.0
+                self.stat_update_ns as f64 / self.stat_presented as f64 / 1_000_000.0
             };
-
             eprintln!(
                 "display: loops={} produced={} presented={} avg_update_ms={:.3}",
-                stat_loops, stat_produced, stat_presented, avg_ms,
+                self.stat_loops, self.stat_produced, self.stat_presented, avg_ms,
             );
-
-            stat_loops = 0;
-            stat_produced = 0;
-            stat_presented = 0;
-            stat_update_ns = 0;
-            stat_last = std::time::Instant::now();
+            self.stat_loops = 0;
+            self.stat_produced = 0;
+            self.stat_presented = 0;
+            self.stat_update_ns = 0;
+            self.stat_last = std::time::Instant::now();
         }
+    }
+}
 
-        for key in window.get_keys_pressed(KeyRepeat::No) {
-            if let Some(code) = helpers::minifb_to_linux_key(key) {
-                let _ = input_tx.send(HostInputEvent::Key {
-                    code,
-                    pressed: true,
+impl<'a> ApplicationHandler for AppState<'a> {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        let attrs = Window::default_attributes()
+            .with_title("Varmint")
+            .with_inner_size(LogicalSize::new(1024u32, 768u32))
+            .with_resizable(true);
+
+        let window = event_loop.create_window(attrs).unwrap();
+        let PhysicalSize { width, height } = window.inner_size();
+        self.surface_w = width;
+        self.surface_h = height;
+        self.presenter = Some(present::Presenter::new(window, width, height));
+
+        let _ = self
+            .display_tx
+            .send(HostDisplayEvent::Resize { width, height });
+        self.kick_vm();
+    }
+
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        _window_id: WindowId,
+        event: WindowEvent,
+    ) {
+        match event {
+            WindowEvent::CloseRequested => {
+                event_loop.exit();
+            }
+
+            WindowEvent::Resized(PhysicalSize { width, height }) => {
+                self.surface_w = width;
+                self.surface_h = height;
+                self.last_mouse_pos = None;
+
+                if let Some(p) = self.presenter.as_mut() {
+                    p.resize_surface(width, height);
+                }
+
+                let _ = self
+                    .display_tx
+                    .send(HostDisplayEvent::Resize { width, height });
+                self.kick_vm();
+
+                self.blit();
+            }
+
+            WindowEvent::RedrawRequested => {
+                self.blit();
+            }
+
+            WindowEvent::KeyboardInput { event, .. } => {
+                let pressed = event.state == ElementState::Pressed;
+                if let PhysicalKey::Code(code) = event.physical_key {
+                    if let Some(linux_code) = helpers::winit_to_linux_key(code) {
+                        let _ = self.input_tx.send(HostInputEvent::Key {
+                            code: linux_code,
+                            pressed,
+                        });
+                        self.kick_vm();
+                    }
+                }
+            }
+
+            WindowEvent::CursorMoved { position, .. } => {
+                let PhysicalPosition { x, y } = position;
+                let pos = Some((x, y));
+                if pos != self.last_mouse_pos {
+                    self.last_mouse_pos = pos;
+                    let _ = self.input_tx.send(HostInputEvent::PointerMove {
+                        x: x as u32,
+                        y: y as u32,
+                        width: self.surface_w,
+                        height: self.surface_h,
+                    });
+                    self.kick_vm();
+                }
+            }
+
+            WindowEvent::MouseInput { state, button, .. } => {
+                let btn = match button {
+                    MouseButton::Left => BTN_LEFT,
+                    MouseButton::Right => BTN_RIGHT,
+                    MouseButton::Middle => BTN_MIDDLE,
+                    _ => return,
+                };
+                let _ = self.input_tx.send(HostInputEvent::PointerButton {
+                    button: btn,
+                    pressed: state == ElementState::Pressed,
                 });
-                need_kick = true;
+                self.kick_vm();
             }
-        }
 
-        for key in window.get_keys_released() {
-            if let Some(code) = helpers::minifb_to_linux_key(key) {
-                let _ = input_tx.send(HostInputEvent::Key {
-                    code,
-                    pressed: false,
-                });
-                need_kick = true;
+            WindowEvent::MouseWheel { delta, .. } => {
+                use winit::event::MouseScrollDelta;
+                let (dx, dy) = match delta {
+                    MouseScrollDelta::LineDelta(x, y) => (x, y),
+                    MouseScrollDelta::PixelDelta(p) => (p.x as f32 / 32.0, p.y as f32 / 32.0),
+                };
+                if dy != 0.0 {
+                    let _ = self.input_tx.send(HostInputEvent::Scroll {
+                        horisontal: false,
+                        value: dy.round() as i32,
+                    });
+                }
+                if dx != 0.0 {
+                    let _ = self.input_tx.send(HostInputEvent::Scroll {
+                        horisontal: true,
+                        value: dx.round() as i32,
+                    });
+                }
+                self.kick_vm();
             }
+
+            _ => {}
         }
+    }
 
-        if let Some((x, y)) = window.get_mouse_pos(MouseMode::Clamp) {
-            let x = x as u32;
-            let y = y as u32;
-
-            let pos = Some((x, y));
-
-            if pos != last_mouse_pos {
-                let _ = input_tx.send(HostInputEvent::PointerMove { x, y });
-                need_kick = true;
-
-                last_mouse_pos = pos;
-            }
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        if self.poll_display() {
+            self.blit();
         }
-
-        let left = window.get_mouse_down(MouseButton::Left);
-        if left != last_left {
-            let _ = input_tx.send(HostInputEvent::PointerButton {
-                button: BTN_LEFT,
-                pressed: left,
-            });
-            need_kick = true;
-            last_left = left;
-        }
-
-        let right = window.get_mouse_down(MouseButton::Right);
-        if right != last_right {
-            let _ = input_tx.send(HostInputEvent::PointerButton {
-                button: BTN_RIGHT,
-                pressed: right,
-            });
-            need_kick = true;
-            last_right = right;
-        }
-
-        let middle = window.get_mouse_down(MouseButton::Middle);
-        if middle != last_middle {
-            let _ = input_tx.send(HostInputEvent::PointerButton {
-                button: BTN_MIDDLE,
-                pressed: middle,
-            });
-            need_kick = true;
-            last_middle = middle;
-        }
-
-        if need_kick {
-            vm.vcpus_exit(&[handle.clone()]).unwrap();
-        }
+        self.stat_loops += 1;
+        self.print_stats();
     }
 }
 
@@ -356,6 +434,7 @@ fn run_loop(
     virtio_input_tablet: &mut virtio::MmioTransport<virtio::Input>,
     virtio_input_tablet_irq: &mut irq::IrqLine,
     input_rx: &Receiver<HostInputEvent>,
+    display_rx: &Receiver<HostDisplayEvent>,
 ) -> Result<()> {
     let mut net_buf = vec![0; iface.max_packet_size() as usize];
 
@@ -369,7 +448,7 @@ fn run_loop(
             }
         }
 
-        let mut last_pointer_move: Option<(u32, u32)> = None;
+        let mut last_pointer_move: Option<(u32, u32, u32, u32)> = None;
 
         while let Ok(event) = input_rx.try_recv() {
             match event {
@@ -377,22 +456,38 @@ fn run_loop(
                     virtio_input_keyboard.push_key(code, pressed, mem);
                 }
 
-                HostInputEvent::PointerMove { x, y } => {
-                    last_pointer_move = Some((x, y));
+                HostInputEvent::PointerMove {
+                    x,
+                    y,
+                    width,
+                    height,
+                } => {
+                    last_pointer_move = Some((x, y, width, height));
                 }
 
                 HostInputEvent::PointerButton { button, pressed } => {
-                    if let Some((x, y)) = last_pointer_move.take() {
-                        virtio_input_tablet.push_abs_position(x, y, mem);
+                    if let Some((x, y, width, height)) = last_pointer_move.take() {
+                        virtio_input_tablet.push_abs_position(x, y, width, height, mem);
                     }
-
                     virtio_input_tablet.push_pointer_button(button, pressed, mem);
+                }
+
+                HostInputEvent::Scroll { horisontal, value } => {
+                    virtio_input_tablet.push_scroll(horisontal, value, mem);
                 }
             }
         }
 
-        if let Some((x, y)) = last_pointer_move {
-            virtio_input_tablet.push_abs_position(x, y, mem);
+        while let Ok(event) = display_rx.try_recv() {
+            match event {
+                HostDisplayEvent::Resize { width, height } => {
+                    virtio_gpu.resize_display(width, height);
+                }
+            }
+        }
+
+        if let Some((x, y, width, height)) = last_pointer_move {
+            virtio_input_tablet.push_abs_position(x, y, width, height, mem);
         }
 
         uart_irq.sync(vm, uart.lock().unwrap().is_asserted())?;
@@ -540,6 +635,7 @@ fn vmm_thread(
     uart: &Mutex<uart::Uart>,
     display: &Mutex<virtio::gpu::DisplayBuffer>,
     input_rx: Receiver<HostInputEvent>,
+    display_rx: Receiver<HostDisplayEvent>,
 ) -> Result<()> {
     let image = read_file("./artifacts/debian-arm64/installed-vmlinuz").unwrap();
     let initrd = read_file("./artifacts/debian-arm64/installed-initrd.gz").unwrap();
@@ -588,8 +684,7 @@ fn vmm_thread(
     let mut virtio_input_keyboard_irq =
         irq::IrqLine::new(spi_int_start + VIRTINPUT_KEYBOARD_SPI_OFFSET, false);
 
-    let virtio_input_tablet_dev =
-        virtio::Input::tablet(virtio::gpu::WIDTH as u32, virtio::gpu::HEIGHT as u32);
+    let virtio_input_tablet_dev = virtio::Input::tablet();
     let mut virtio_input_tablet = virtio::MmioTransport::new(virtio_input_tablet_dev);
     let mut virtio_input_tablet_irq =
         irq::IrqLine::new(spi_int_start + VIRTINPUT_TABLET_SPI_OFFSET, false);
@@ -628,6 +723,7 @@ fn vmm_thread(
             &mut virtio_input_tablet,
             &mut virtio_input_tablet_irq,
             &input_rx,
+            &display_rx,
         )
     })?;
 
@@ -645,30 +741,59 @@ fn main() -> Result<()> {
     let vm = VirtualMachine::with_gic(VirtualMachineConfig::default(), gic_config)?;
 
     let uart = Mutex::new(uart::Uart::new());
+    let display = Mutex::new(virtio::gpu::DisplayBuffer::new());
 
     let (handle_tx, handle_rx) = std::sync::mpsc::channel();
-
-    let display = Mutex::new(virtio::gpu::DisplayBuffer::new(
-        virtio::gpu::WIDTH,
-        virtio::gpu::HEIGHT,
-    ));
-
     let (input_tx, input_rx) = std::sync::mpsc::channel();
+    let (display_tx, display_rx) = std::sync::mpsc::channel();
+
+    // winit event loop must be created and run on the main thread
+    let event_loop = EventLoop::new().unwrap();
+    event_loop.set_control_flow(ControlFlow::Poll);
+
+    let vm_ref = &vm;
+    let uart_ref = &uart;
+    let display_ref = &display;
 
     thread::scope(|s| {
-        let vm_ref = &vm;
-        let uart_ref = &uart;
-        let display = &display;
-
-        s.spawn(move || vmm_thread(vm_ref, handle_tx, uart_ref, display, input_rx));
+        s.spawn(move || {
+            vmm_thread(
+                vm_ref,
+                handle_tx,
+                uart_ref,
+                display_ref,
+                input_rx,
+                display_rx,
+            )
+        });
 
         let handle = handle_rx.recv().unwrap();
 
         let stdin_handle = handle.clone();
         s.spawn(move || stdin_thread(vm_ref, stdin_handle, uart_ref));
 
-        // has to run in main thread
-        window_thread(vm_ref, handle, display, input_tx);
+        let mut app = AppState {
+            vm: vm_ref,
+            handle,
+            display: display_ref,
+            input_tx,
+            display_tx,
+            presenter: None,
+            surface_w: 0,
+            surface_h: 0,
+            front: Vec::new(),
+            present_w: 0,
+            present_h: 0,
+            last_seq: 0,
+            last_mouse_pos: None,
+            stat_last: std::time::Instant::now(),
+            stat_produced: 0,
+            stat_presented: 0,
+            stat_update_ns: 0,
+            stat_loops: 0,
+        };
+
+        event_loop.run_app(&mut app).unwrap();
     });
 
     Ok(())

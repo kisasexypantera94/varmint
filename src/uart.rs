@@ -5,12 +5,10 @@ const UART_FR: u64 = 0x18;
 const UART_IMSC: u64 = 0x38;
 const UART_RIS: u64 = 0x3c;
 const UART_MIS: u64 = 0x40;
-const UART_ICR: u64 = 0x44;
 
 const UART_FR_RXFE: u32 = 1 << 4;
 const UART_FR_TXFE: u32 = 1 << 7;
 const UART_INT_RX: u32 = 1 << 4;
-const UART_INT_RT: u32 = 1 << 6;
 
 pub struct Uart {
     imsc: u32,

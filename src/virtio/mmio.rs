@@ -52,6 +52,7 @@ pub const VERSION: u32 = 2;
 pub const VENDOR_ID: u32 = 0x76_6d_6e_74;
 
 pub const INT_VRING: u32 = 1 << 0;
+pub const INT_CONFIG: u32 = 1 << 1;
 
 #[derive(Default, Clone)]
 struct QueuePending {
@@ -248,6 +249,14 @@ impl<D: device::Device> Transport<D> {
         }
 
         self.device.reset();
+    }
+
+    pub fn device_mut(&mut self) -> &mut D {
+        &mut self.device
+    }
+
+    pub fn raise_config_interrupt(&mut self) {
+        self.interrupt_status |= INT_CONFIG;
     }
 }
 
