@@ -1,4 +1,4 @@
-use crate::virtio::virtq::{Completion, Queue};
+use crate::virtio::virtq::Queue;
 use applevisor::memory::Memory;
 
 pub trait Device {
@@ -16,13 +16,8 @@ pub trait Device {
         mem: &mut Memory,
     ) -> Option<u32>;
 
-    fn handle_external(
-        &mut self,
-        _queues: &[Queue],
-        _data: &[u8],
-        _mem: &mut Memory,
-    ) -> Option<Completion> {
-        None
+    fn async_queues(&self) -> &[u16] {
+        &[]
     }
 
     fn pop_external(&mut self) -> Option<Vec<u8>> {
@@ -30,4 +25,10 @@ pub trait Device {
     }
 
     fn reset(&mut self) {}
+}
+
+pub trait ExternalInputHandler {
+    type Input<'a>;
+
+    fn encode(&mut self, input: Self::Input<'_>, emit: impl FnMut(usize, &[&[u8]]));
 }

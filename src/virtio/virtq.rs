@@ -48,12 +48,6 @@ pub struct UsedHeader {
     pub idx: u16,
 }
 
-pub struct Completion {
-    pub queue_idx: u16,
-    pub head_idx: u16,
-    pub used_len: u32,
-}
-
 #[derive(Debug, Copy, Clone)]
 pub struct WritableDesc {
     pub addr: u64,
@@ -81,6 +75,34 @@ impl ChainData {
         }
 
         written as u32
+    }
+
+    pub fn write_parts(&self, parts: &[&[u8]], mem: &mut Memory) -> u32 {
+        let mut descs = self.writable.iter();
+        let mut cur = descs.next();
+        let mut off = 0u32;
+        let mut total = 0u32;
+
+        for part in parts {
+            let mut pos = 0usize;
+            while pos < part.len() {
+                let Some(d) = cur else {
+                    return total;
+                };
+                let room = (d.len - off) as usize;
+                if room == 0 {
+                    cur = descs.next();
+                    off = 0;
+                    continue;
+                }
+                let n = room.min(part.len() - pos);
+                mem.write(d.addr + off as u64, &part[pos..pos + n]).unwrap();
+                pos += n;
+                off += n as u32;
+                total += n as u32;
+            }
+        }
+        total
     }
 }
 
@@ -201,5 +223,13 @@ impl Queue {
         self.used_addr = 0;
         self.last_avail_idx = 0;
         self.last_used_idx = 0;
+    }
+
+    pub fn supply(&mut self, parts: &[&[u8]], mem: &mut Memory) -> Option<u32> {
+        let head_idx = self.pop_chain(mem)?;
+        let chain = self.collect_chain(head_idx, mem)?;
+        let written = chain.write_parts(parts, mem);
+        self.push_used(mem, head_idx, written);
+        Some(written)
     }
 }
