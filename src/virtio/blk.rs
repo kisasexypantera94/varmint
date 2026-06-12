@@ -1,10 +1,11 @@
 use crate::virtio::{common, device::Device, virtq};
-use applevisor::{error::Result, memory::Memory};
+use applevisor::memory::Memory;
 use num_enum::TryFromPrimitive;
 use std::{
     fs::{File, OpenOptions},
     os::unix::fs::FileExt,
 };
+use zerocopy::{FromBytes, Immutable};
 
 /// https://docs.oasis-open.org/virtio/virtio/v1.3/csd01/virtio-v1.3-csd01.html#x1-3060001
 const DEVICE_ID: u32 = 2;
@@ -28,22 +29,12 @@ enum RequestType {
     SecureErase = 14,
 }
 
-#[derive(Debug)]
+#[derive(FromBytes, Immutable)]
 #[repr(C)]
 struct RequestHeader {
     r#type: u32,
-    reserver: u32,
+    reserved: u32,
     sector: u64,
-}
-
-impl RequestHeader {
-    fn new(offset: u64, mem: &Memory) -> Result<RequestHeader> {
-        Ok(RequestHeader {
-            r#type: mem.read_u32(offset)?,
-            reserver: mem.read_u32(offset + 4)?,
-            sector: mem.read_u64(offset + 4 + 4)?,
-        })
-    }
 }
 
 pub struct Blk {
@@ -104,64 +95,52 @@ impl Device for Blk {
         head_idx: u16,
         mem: &mut Memory,
     ) -> Option<u32> {
-        let head_desc = queue.read_desc(head_idx, mem);
-        let request_header = RequestHeader::new(head_desc.addr, mem).unwrap();
-        let mut disk_offset = request_header.sector * 512;
+        let chain = queue.collect_chain(head_idx, mem)?;
 
-        let req_type = RequestType::try_from(request_header.r#type).unwrap();
-
-        let mut cur = head_desc.next();
-        let mut written_len: u32 = 0;
-        let mut status = status::OK;
-
-        while let Some(cur_desc_idx) = cur {
-            let cur_desc = queue.read_desc(cur_desc_idx, mem);
-
-            let next = cur_desc.next();
-            let is_status_desc = next.is_none();
-
-            if is_status_desc {
-                if cur_desc.len < 1 || cur_desc.flags & virtq::flags::DESC_F_WRITE == 0 {
-                    panic!("bad virtio-blk status descriptor: {:?}", cur_desc);
-                }
-
-                mem.write_u8(cur_desc.addr, status).unwrap();
-                written_len += 1;
-                break;
-            }
-
-            match req_type {
-                RequestType::In => {
-                    if !cur_desc.is_writable() {
-                        status = status::IOERR;
-                    } else if status == status::OK {
-                        let mut buf = vec![0u8; cur_desc.len as usize];
-                        self.file.read_at(&mut buf, disk_offset).unwrap();
-                        mem.write(cur_desc.addr, &buf).unwrap();
-
-                        written_len += cur_desc.len;
-                    }
-                }
-
-                RequestType::Out => {
-                    if cur_desc.is_writable() {
-                        status = status::IOERR;
-                    } else if status == status::OK {
-                        let mut buf = vec![0u8; cur_desc.len as usize];
-                        mem.read(cur_desc.addr, &mut buf).unwrap();
-                        self.file.write_at(&buf, disk_offset).unwrap();
-                    }
-                }
-
-                _ => {
-                    status = status::UNSUPP;
-                }
-            }
-
-            disk_offset += cur_desc.len as u64;
-            cur = next;
+        if chain.readable.len() < size_of::<RequestHeader>() || chain.writable.is_empty() {
+            return None;
         }
 
-        Some(written_len)
+        let (header, _) = RequestHeader::read_from_prefix(&chain.readable).ok()?;
+        let mut disk_offset = header.sector * 512;
+
+        let (status_desc, data_writable) = chain.writable.split_last().unwrap();
+
+        let mut written = 0u32;
+        let mut status = status::OK;
+
+        match RequestType::try_from(header.r#type) {
+            Ok(RequestType::In) => {
+                for d in data_writable {
+                    let mut buf = vec![0u8; d.len as usize];
+                    if self.file.read_at(&mut buf, disk_offset).is_err()
+                        || mem.write(d.addr, &buf).is_err()
+                    {
+                        status = status::IOERR;
+                        break;
+                    }
+                    disk_offset += d.len as u64;
+                    written += d.len;
+                }
+            }
+
+            Ok(RequestType::Out) => {
+                let data = &chain.readable[size_of::<RequestHeader>()..];
+                if self.file.write_at(data, disk_offset).is_err() {
+                    status = status::IOERR;
+                }
+            }
+
+            Ok(RequestType::Flush) => {
+                if self.file.sync_all().is_err() {
+                    status = status::IOERR;
+                }
+            }
+
+            _ => status = status::UNSUPP,
+        }
+
+        mem.write_u8(status_desc.addr, status).ok()?;
+        Some(written + 1)
     }
 }

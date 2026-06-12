@@ -447,17 +447,27 @@ impl<'a> Device for Gpu<'a> {
                         let rect_height = val.r.height as usize;
                         let transfer_offset = val.offset as usize;
 
-                        for row in 0..rect_height {
-                            let src_offset = transfer_offset + row * stride;
-                            let dst_offset = (rect_y + row) * stride + rect_x * BYTES_PER_PIXEL;
-                            let row_len = rect_width * BYTES_PER_PIXEL;
+                        let row_len = rect_width * BYTES_PER_PIXEL;
 
+                        if rect_x == 0 && rect_width == width {
+                            let start = rect_y * stride;
                             Gpu::read_backing(
                                 &resource.backing,
-                                src_offset,
-                                &mut resource.framebuffer[dst_offset..dst_offset + row_len],
+                                transfer_offset,
+                                &mut resource.framebuffer[start..start + rect_height * stride],
                                 mem,
                             )?;
+                        } else {
+                            for row in 0..rect_height {
+                                let src_offset = transfer_offset + row * stride;
+                                let dst_offset = (rect_y + row) * stride + rect_x * BYTES_PER_PIXEL;
+                                Gpu::read_backing(
+                                    &resource.backing,
+                                    src_offset,
+                                    &mut resource.framebuffer[dst_offset..dst_offset + row_len],
+                                    mem,
+                                )?;
+                            }
                         }
 
                         Gpu::write_ok_nodata(&chain_data, mem)
@@ -519,24 +529,18 @@ impl<'a> Gpu<'a> {
         }
 
         let src_stride = res_width * BYTES_PER_PIXEL;
+        if resource.framebuffer.len() < y1 * src_stride {
+            return;
+        }
+
+        let dst_w = display.width;
+        let dst = display.pixels.as_mut_slice();
 
         for y in y0..y1 {
-            let src_row = y * src_stride;
-            let dst_row = y * display.width;
-
-            for x in x0..x1 {
-                let j = src_row + x * BYTES_PER_PIXEL;
-
-                if j + 2 >= resource.framebuffer.len() {
-                    return;
-                }
-
-                let b = resource.framebuffer[j] as u32;
-                let g = resource.framebuffer[j + 1] as u32;
-                let r = resource.framebuffer[j + 2] as u32;
-
-                display.pixels[dst_row + x] = (r << 16) | (g << 8) | b;
-            }
+            let s = y * src_stride;
+            let src = &resource.framebuffer[s + x0 * BYTES_PER_PIXEL..s + x1 * BYTES_PER_PIXEL];
+            let drow = &mut dst[y * dst_w + x0..y * dst_w + x1];
+            drow.as_mut_bytes().copy_from_slice(src);
         }
 
         display.dirty = true;
