@@ -19,8 +19,10 @@ use winit::{
     window::{Window, WindowId},
 };
 
+mod audio;
 mod helpers;
 mod irq;
+mod kick;
 mod linux;
 mod net;
 mod present;
@@ -63,6 +65,10 @@ const VIRTINPUT_TABLET_START: u64 = 0x0a004000;
 const VIRTINPUT_TABLET_SIZE: u64 = 0x1000;
 const VIRTINPUT_TABLET_SPI_OFFSET: u32 = 36;
 
+const VIRTSND_START: u64 = 0x0a005000;
+const VIRTSND_SIZE: u64 = 0x1000;
+const VIRTSND_SPI_OFFSET: u32 = 37;
+
 enum MmioRegion {
     Uart(u64),
     VirtioBlk(u64),
@@ -70,6 +76,7 @@ enum MmioRegion {
     VirtioGpu(u64),
     VirtioInputKeyboard(u64),
     VirtioInputTablet(u64),
+    VirtioSnd(u64),
 }
 
 fn classify(phys_addr: u64) -> Option<MmioRegion> {
@@ -88,6 +95,7 @@ fn classify(phys_addr: u64) -> Option<MmioRegion> {
             VIRTINPUT_TABLET_SIZE,
             MmioRegion::VirtioInputTablet,
         ),
+        (VIRTSND_START, VIRTSND_SIZE, MmioRegion::VirtioSnd),
     ];
     REGIONS.iter().find_map(|&(base, size, ctor)| {
         (base..base + size)
@@ -426,15 +434,18 @@ fn run_loop(
     virtio_blk_irq: &mut irq::IrqLine,
     virtio_net: &mut virtio::MmioTransport<virtio::Net>,
     virtio_net_irq: &mut irq::IrqLine,
-    iface: &mut net::VmnetBackend,
+    iface: &mut net::vmnet::Backend,
     virtio_gpu: &mut virtio::MmioTransport<virtio::Gpu>,
     virtio_gpu_irq: &mut irq::IrqLine,
     virtio_input_keyboard: &mut virtio::MmioTransport<virtio::Input>,
     virtio_input_keyboard_irq: &mut irq::IrqLine,
     virtio_input_tablet: &mut virtio::MmioTransport<virtio::Input>,
     virtio_input_tablet_irq: &mut irq::IrqLine,
+    virtio_snd: &mut virtio::MmioTransport<virtio::Snd>,
+    virtio_snd_irq: &mut irq::IrqLine,
     input_rx: &Receiver<HostInputEvent>,
     display_rx: &Receiver<HostDisplayEvent>,
+    audio_rx: &Receiver<audio::coreaudio::BackendEvent>,
 ) -> Result<()> {
     let mut net_buf = vec![0; iface.max_packet_size() as usize];
 
@@ -442,7 +453,7 @@ fn run_loop(
         loop {
             let n_read = iface.read(&mut net_buf).unwrap();
             if n_read > 0 {
-                virtio_net.handle_external_input(&net_buf[..n_read], mem);
+                virtio_net.handle_external_event(&net_buf[..n_read], mem);
             } else {
                 break;
             }
@@ -455,7 +466,7 @@ fn run_loop(
             match event {
                 HostInputEvent::Key { code, pressed } => {
                     virtio_input_keyboard
-                        .handle_external_input(ExternalInput::Key { code, pressed }, mem);
+                        .handle_external_event(ExternalInput::Key { code, pressed }, mem);
                 }
 
                 HostInputEvent::PointerMove {
@@ -469,7 +480,7 @@ fn run_loop(
 
                 HostInputEvent::PointerButton { button, pressed } => {
                     if let Some((x, y, width, height)) = last_pointer_move.take() {
-                        virtio_input_tablet.handle_external_input(
+                        virtio_input_tablet.handle_external_event(
                             ExternalInput::AbsPosition {
                                 x,
                                 y,
@@ -479,7 +490,7 @@ fn run_loop(
                             mem,
                         );
                     }
-                    virtio_input_tablet.handle_external_input(
+                    virtio_input_tablet.handle_external_event(
                         ExternalInput::PointerButton { button, pressed },
                         mem,
                     );
@@ -487,7 +498,7 @@ fn run_loop(
 
                 HostInputEvent::Scroll { horizontal, value } => {
                     virtio_input_tablet
-                        .handle_external_input(ExternalInput::Scroll { horizontal, value }, mem);
+                        .handle_external_event(ExternalInput::Scroll { horizontal, value }, mem);
                 }
             }
         }
@@ -495,13 +506,16 @@ fn run_loop(
         while let Ok(event) = display_rx.try_recv() {
             match event {
                 HostDisplayEvent::Resize { width, height } => {
-                    virtio_gpu.resize_display(width, height);
+                    virtio_gpu.handle_external_event(
+                        virtio::gpu::ExternalEvent::DisplayResized { width, height },
+                        mem,
+                    );
                 }
             }
         }
 
         if let Some((x, y, width, height)) = last_pointer_move {
-            virtio_input_tablet.handle_external_input(
+            virtio_input_tablet.handle_external_event(
                 virtio::input::ExternalInput::AbsPosition {
                     x,
                     y,
@@ -512,12 +526,22 @@ fn run_loop(
             );
         }
 
+        while let Ok(event) = audio_rx.try_recv() {
+            match event {
+                audio::coreaudio::BackendEvent::PeriodElapsed(seq) => {
+                    virtio_snd
+                        .handle_external_event(virtio::snd::ExternalEvent::PeriodElapsed(seq), mem);
+                }
+            }
+        }
+
         uart_irq.sync(vm, uart.lock().unwrap().is_asserted())?;
         virtio_blk_irq.sync(vm, virtio_blk.is_asserted())?;
         virtio_net_irq.sync(vm, virtio_net.is_asserted())?;
         virtio_gpu_irq.sync(vm, virtio_gpu.is_asserted())?;
         virtio_input_keyboard_irq.sync(vm, virtio_input_keyboard.is_asserted())?;
         virtio_input_tablet_irq.sync(vm, virtio_input_tablet.is_asserted())?;
+        virtio_snd_irq.sync(vm, virtio_snd.is_asserted())?;
 
         vcpu.run()?;
         let exit = vcpu.get_exit_info();
@@ -614,6 +638,15 @@ fn run_loop(
                                     mmio_write_reg(vcpu, rt, value)?;
                                 }
                             }
+                            Some(MmioRegion::VirtioSnd(offset)) => {
+                                if is_write {
+                                    let value = mmio_read_reg(vcpu, rt)?;
+                                    virtio_snd.write(offset, size, value as u64, mem);
+                                } else {
+                                    let value = virtio_snd.read(offset, size);
+                                    mmio_write_reg(vcpu, rt, value)?;
+                                }
+                            }
                             None => {
                                 panic!(
                                     "unhandled data abort trap: ec={}, rt={}, {}, esr=0x{:x}, pc=0x{:x}, addr=0x{:x}",
@@ -688,11 +721,11 @@ fn vmm_thread(
 
     let mut uart_irq = irq::IrqLine::new(spi_int_start + UART_SPI_OFFSET, false);
 
-    let virtio_blk_dev = virtio::Blk::new("dev0.img", 8 * 1024 * 1024 * 1024);
+    let virtio_blk_dev = virtio::Blk::new("dev0.img", 16 * 1024 * 1024 * 1024);
     let mut virtio_blk = virtio::MmioTransport::new(virtio_blk_dev);
     let mut virtio_blk_irq = irq::IrqLine::new(spi_int_start + VIRTBLK_SPI_OFFSET, false);
 
-    let mut iface = net::VmnetBackend::new().unwrap();
+    let mut iface = net::vmnet::Backend::new().unwrap();
     let virtio_net_dev = virtio::Net::new(iface.mac());
     let mut virtio_net = virtio::MmioTransport::new(virtio_net_dev);
     let mut virtio_net_irq = irq::IrqLine::new(spi_int_start + VIRTNET_SPI_OFFSET, false);
@@ -712,20 +745,15 @@ fn vmm_thread(
         irq::IrqLine::new(spi_int_start + VIRTINPUT_TABLET_SPI_OFFSET, false);
 
     thread::scope(|s| -> Result<()> {
-        let vmnet_vcpu_handle = vcpu.get_handle();
-        let (signal_tx, signal_rx) = std::sync::mpsc::sync_channel::<()>(1);
+        let kicker = kick::Kicker::spawn(s, vm, vcpu.get_handle());
 
-        s.spawn(move || {
-            while signal_rx.recv().is_ok() {
-                vm.vcpus_exit(&[vmnet_vcpu_handle.clone()]).unwrap();
-            }
-        });
+        let (_audio_backend, period_sink, audio_rx) =
+            audio::coreaudio::Backend::new(kicker.clone()).unwrap();
+        let virtio_snd_dev = virtio::Snd::new(period_sink);
+        let mut virtio_snd = virtio::MmioTransport::new(virtio_snd_dev);
+        let mut virtio_snd_irq = irq::IrqLine::new(spi_int_start + VIRTSND_SPI_OFFSET, false);
 
-        iface
-            .set_event_callback(move || {
-                let _ = signal_tx.try_send(());
-            })
-            .unwrap();
+        iface.set_event_callback(move || kicker.kick()).unwrap();
 
         run_loop(
             vm,
@@ -744,8 +772,11 @@ fn vmm_thread(
             &mut virtio_input_keyboard_irq,
             &mut virtio_input_tablet,
             &mut virtio_input_tablet_irq,
+            &mut virtio_snd,
+            &mut virtio_snd_irq,
             &input_rx,
             &display_rx,
+            &audio_rx,
         )
     })?;
 

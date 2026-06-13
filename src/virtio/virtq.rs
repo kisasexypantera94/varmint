@@ -1,3 +1,4 @@
+use crate::virtio::chain::{ChainData, Seg};
 use applevisor::{error::Result, memory::Memory};
 
 pub mod flags {
@@ -48,64 +49,6 @@ pub struct UsedHeader {
     pub idx: u16,
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct WritableDesc {
-    pub addr: u64,
-    pub len: u32,
-}
-
-#[derive(Debug)]
-pub struct ChainData {
-    pub readable: Vec<u8>,
-    pub writable: Vec<WritableDesc>,
-}
-
-impl ChainData {
-    pub fn write_response(&self, bytes: &[u8], mem: &mut Memory) -> u32 {
-        let mut written = 0usize;
-
-        for desc in &self.writable {
-            if written == bytes.len() {
-                break;
-            }
-
-            let n = (desc.len as usize).min(bytes.len() - written);
-            mem.write(desc.addr, &bytes[written..written + n]).unwrap();
-            written += n;
-        }
-
-        written as u32
-    }
-
-    pub fn write_parts(&self, parts: &[&[u8]], mem: &mut Memory) -> u32 {
-        let mut descs = self.writable.iter();
-        let mut cur = descs.next();
-        let mut off = 0u32;
-        let mut total = 0u32;
-
-        for part in parts {
-            let mut pos = 0usize;
-            while pos < part.len() {
-                let Some(d) = cur else {
-                    return total;
-                };
-                let room = (d.len - off) as usize;
-                if room == 0 {
-                    cur = descs.next();
-                    off = 0;
-                    continue;
-                }
-                let n = room.min(part.len() - pos);
-                mem.write(d.addr + off as u64, &part[pos..pos + n]).unwrap();
-                pos += n;
-                off += n as u32;
-                total += n as u32;
-            }
-        }
-        total
-    }
-}
-
 #[derive(Default, Clone)]
 pub struct Queue {
     pub ready: bool,
@@ -150,9 +93,12 @@ impl Queue {
         Some(head_idx)
     }
 
-    pub fn read_desc(&self, idx: u16, mem: &Memory) -> Desc {
-        assert!(idx < self.size, "bad descriptor index: {}", idx);
-        Desc::new(self.desc_addr + idx as u64 * size_of::<Desc>() as u64, mem).unwrap()
+    pub fn read_desc(&self, idx: u16, mem: &Memory) -> Option<Desc> {
+        if idx >= self.size {
+            eprintln!("virtq: bad descriptor index: {}", idx);
+            return None;
+        }
+        Desc::new(self.desc_addr + idx as u64 * size_of::<Desc>() as u64, mem).ok()
     }
 
     pub fn push_used(&mut self, mem: &mut Memory, head_idx: u16, written_len: u32) {
@@ -169,10 +115,7 @@ impl Queue {
     }
 
     pub fn collect_chain(&self, head_idx: u16, mem: &Memory) -> Option<ChainData> {
-        let mut out = ChainData {
-            readable: Vec::new(),
-            writable: Vec::new(),
-        };
+        let mut out = ChainData::default();
 
         let mut cur = Some(head_idx);
         let mut seen_writable = false;
@@ -185,28 +128,29 @@ impl Queue {
             }
             count += 1;
 
-            let desc = self.read_desc(idx, mem);
+            let desc = self.read_desc(idx, mem)?;
 
             if desc.flags & flags::DESC_F_INDIRECT != 0 {
                 eprintln!("virtq: indirect descriptors are not supported");
                 return None;
             }
 
-            if desc.flags & flags::DESC_F_WRITE != 0 {
+            let seg = Seg {
+                addr: desc.addr,
+                len: desc.len,
+            };
+
+            if desc.is_writable() {
                 seen_writable = true;
-                out.writable.push(WritableDesc {
-                    addr: desc.addr,
-                    len: desc.len,
-                });
+                out.writable.push(seg);
             } else {
                 if seen_writable {
                     eprintln!("virtq: readable descriptor after writable descriptor");
                     return None;
                 }
 
-                let old_len = out.readable.len();
-                out.readable.resize(old_len + desc.len as usize, 0);
-                mem.read(desc.addr, &mut out.readable[old_len..]).ok()?;
+                out.readable.push(seg);
+                out.readable_len += desc.len as usize;
             }
 
             cur = desc.next();
@@ -225,7 +169,7 @@ impl Queue {
         self.last_used_idx = 0;
     }
 
-    pub fn supply(&mut self, parts: &[&[u8]], mem: &mut Memory) -> Option<u32> {
+    pub fn deliver(&mut self, parts: &[&[u8]], mem: &mut Memory) -> Option<u32> {
         let head_idx = self.pop_chain(mem)?;
         let chain = self.collect_chain(head_idx, mem)?;
         let written = chain.write_parts(parts, mem);

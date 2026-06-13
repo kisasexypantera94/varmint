@@ -3,12 +3,12 @@ use vmnet::{
     parameters::{Parameter, ParameterKind},
 };
 
-pub struct VmnetBackend {
+pub struct Backend {
     iface: Interface,
 }
 
-impl VmnetBackend {
-    pub fn new() -> Result<VmnetBackend> {
+impl Backend {
+    pub fn new() -> Result<Backend> {
         let iface = vmnet::Interface::new(
             vmnet::mode::Mode::Shared(vmnet::mode::Shared::default()),
             vmnet::Options::default(),
@@ -16,7 +16,7 @@ impl VmnetBackend {
 
         let params = iface.parameters();
         if let Some(Parameter::HostIPAddress(ip)) = params.get(ParameterKind::HostIPAddress) {
-            eprintln!("vmnet host IP: {}", ip); // это gateway для гостя
+            eprintln!("vmnet host IP: {}", ip);
         }
         if let Some(Parameter::SubnetMask(mask)) = params.get(ParameterKind::SubnetMask) {
             eprintln!("vmnet subnet mask: {}", mask);
@@ -25,7 +25,7 @@ impl VmnetBackend {
             eprintln!("vmnet DHCP start: {}", ip);
         }
 
-        Ok(VmnetBackend { iface })
+        Ok(Backend { iface })
     }
 
     pub fn mac(&self) -> [u8; 6] {

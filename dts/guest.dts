@@ -15,7 +15,7 @@
 		stdout-path = "serial0:115200n8";
 
 		linux,initrd-start = <0x0 0x48000000>;
-		linux,initrd-end = <0x0 0x4a2db930>;// debian
+		linux,initrd-end = <0x0 0x4a335840>;// debian
 		// linux,initrd-end   = <0x0 0x480cdecf>;// busybox
 	};
 
@@ -95,5 +95,11 @@
 		compatible = "virtio,mmio";
 		reg = <0x0 0x0a004000 0x0 0x1000>;
 		interrupts = <0 36 4>;
+	};
+
+	virtio_snd@a005000 {
+		compatible = "virtio,mmio";
+		reg = <0x0 0x0a005000 0x0 0x1000>;
+		interrupts = <0 37 4>;
 	};
 };
