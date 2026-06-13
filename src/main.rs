@@ -20,6 +20,7 @@ use winit::{
 };
 
 mod audio;
+mod clipboard;
 mod helpers;
 mod irq;
 mod kick;
@@ -69,6 +70,10 @@ const VIRTSND_START: u64 = 0x0a005000;
 const VIRTSND_SIZE: u64 = 0x1000;
 const VIRTSND_SPI_OFFSET: u32 = 37;
 
+const VIRTCONSOLE_START: u64 = 0x0a006000;
+const VIRTCONSOLE_SIZE: u64 = 0x1000;
+const VIRTCONSOLE_SPI_OFFSET: u32 = 38;
+
 enum MmioRegion {
     Uart(u64),
     VirtioBlk(u64),
@@ -77,6 +82,7 @@ enum MmioRegion {
     VirtioInputKeyboard(u64),
     VirtioInputTablet(u64),
     VirtioSnd(u64),
+    VirtioConsole(u64),
 }
 
 fn classify(phys_addr: u64) -> Option<MmioRegion> {
@@ -96,6 +102,11 @@ fn classify(phys_addr: u64) -> Option<MmioRegion> {
             MmioRegion::VirtioInputTablet,
         ),
         (VIRTSND_START, VIRTSND_SIZE, MmioRegion::VirtioSnd),
+        (
+            VIRTCONSOLE_START,
+            VIRTCONSOLE_SIZE,
+            MmioRegion::VirtioConsole,
+        ),
     ];
     REGIONS.iter().find_map(|&(base, size, ctor)| {
         (base..base + size)
@@ -443,6 +454,10 @@ fn run_loop(
     virtio_input_tablet_irq: &mut irq::IrqLine,
     virtio_snd: &mut virtio::MmioTransport<virtio::Snd>,
     virtio_snd_irq: &mut irq::IrqLine,
+    virtio_console: &mut virtio::MmioTransport<virtio::Console>,
+    virtio_console_irq: &mut irq::IrqLine,
+    clipboard_in_rx: &Receiver<Vec<u8>>,
+    clipboard_out_tx: &Sender<Vec<u8>>,
     input_rx: &Receiver<HostInputEvent>,
     display_rx: &Receiver<HostDisplayEvent>,
     audio_rx: &Receiver<audio::coreaudio::BackendEvent>,
@@ -535,6 +550,13 @@ fn run_loop(
             }
         }
 
+        while let Ok(payload) = clipboard_in_rx.try_recv() {
+            virtio_console.handle_external_event(
+                virtio::console::ExternalEvent::HostClipboard(&payload),
+                mem,
+            );
+        }
+
         uart_irq.sync(vm, uart.lock().unwrap().is_asserted())?;
         virtio_blk_irq.sync(vm, virtio_blk.is_asserted())?;
         virtio_net_irq.sync(vm, virtio_net.is_asserted())?;
@@ -542,6 +564,7 @@ fn run_loop(
         virtio_input_keyboard_irq.sync(vm, virtio_input_keyboard.is_asserted())?;
         virtio_input_tablet_irq.sync(vm, virtio_input_tablet.is_asserted())?;
         virtio_snd_irq.sync(vm, virtio_snd.is_asserted())?;
+        virtio_console_irq.sync(vm, virtio_console.is_asserted())?;
 
         vcpu.run()?;
         let exit = vcpu.get_exit_info();
@@ -644,6 +667,22 @@ fn run_loop(
                                     virtio_snd.write(offset, size, value as u64, mem);
                                 } else {
                                     let value = virtio_snd.read(offset, size);
+                                    mmio_write_reg(vcpu, rt, value)?;
+                                }
+                            }
+                            Some(MmioRegion::VirtioConsole(offset)) => {
+                                if is_write {
+                                    let value = mmio_read_reg(vcpu, rt)?;
+                                    virtio_console.write(offset, size, value as u64, mem);
+                                    while let Some(bytes) = virtio_console.pop_external() {
+                                        let _ = clipboard_out_tx.send(bytes);
+                                    }
+                                    virtio_console.handle_external_event(
+                                        virtio::console::ExternalEvent::RxAvailable,
+                                        mem,
+                                    );
+                                } else {
+                                    let value = virtio_console.read(offset, size);
                                     mmio_write_reg(vcpu, rt, value)?;
                                 }
                             }
@@ -753,6 +792,21 @@ fn vmm_thread(
         let mut virtio_snd = virtio::MmioTransport::new(virtio_snd_dev);
         let mut virtio_snd_irq = irq::IrqLine::new(spi_int_start + VIRTSND_SPI_OFFSET, false);
 
+        let virtio_console_dev = virtio::Console::new();
+        let mut virtio_console = virtio::MmioTransport::new(virtio_console_dev);
+        let mut virtio_console_irq =
+            irq::IrqLine::new(spi_int_start + VIRTCONSOLE_SPI_OFFSET, false);
+
+        let (clipboard_in_tx, clipboard_in_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        let (clipboard_out_tx, clipboard_out_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+
+        let clipboard_kicker = kicker.clone();
+        s.spawn(move || {
+            clipboard::run(clipboard_in_tx, clipboard_out_rx, move || {
+                clipboard_kicker.kick()
+            });
+        });
+
         iface.set_event_callback(move || kicker.kick()).unwrap();
 
         run_loop(
@@ -774,6 +828,10 @@ fn vmm_thread(
             &mut virtio_input_tablet_irq,
             &mut virtio_snd,
             &mut virtio_snd_irq,
+            &mut virtio_console,
+            &mut virtio_console_irq,
+            &clipboard_in_rx,
+            &clipboard_out_tx,
             &input_rx,
             &display_rx,
             &audio_rx,

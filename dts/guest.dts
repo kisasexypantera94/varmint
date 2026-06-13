@@ -102,4 +102,10 @@
 		reg = <0x0 0x0a005000 0x0 0x1000>;
 		interrupts = <0 37 4>;
 	};
+
+	virtio_console@a006000 {
+		compatible = "virtio,mmio";
+		reg = <0x0 0x0a006000 0x0 0x1000>;
+		interrupts = <0 38 4>;
+	};
 };

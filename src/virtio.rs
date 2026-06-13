@@ -3,6 +3,7 @@
 mod blk;
 mod chain;
 mod common;
+pub mod console;
 mod device;
 pub mod gpu;
 pub mod input;
@@ -12,6 +13,7 @@ pub mod snd;
 mod virtq;
 
 pub use blk::Blk;
+pub use console::Console;
 pub use gpu::Gpu;
 pub use input::Input;
 pub use net::Net;
