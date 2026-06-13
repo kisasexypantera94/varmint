@@ -1,5 +1,15 @@
-use crate::virtio::virtq::Queue;
+use crate::virtio::chain::ChainData;
 use applevisor::memory::Memory;
+
+pub enum ChainAction {
+    Complete(u32),
+    Deferred,
+}
+
+pub struct ChainToken {
+    pub queue_idx: usize,
+    pub head_idx: u16,
+}
 
 pub trait Device {
     fn id(&self) -> u32;
@@ -11,12 +21,12 @@ pub trait Device {
     fn process_chain(
         &mut self,
         queue_idx: usize,
-        queue: &Queue,
-        head_idx: u16,
+        chain: &ChainData,
+        token: ChainToken,
         mem: &mut Memory,
-    ) -> Option<u32>;
+    ) -> ChainAction;
 
-    fn async_queues(&self) -> &[u16] {
+    fn delivery_queues(&self) -> &[u16] {
         &[]
     }
 
@@ -27,8 +37,20 @@ pub trait Device {
     fn reset(&mut self) {}
 }
 
-pub trait ExternalInputHandler {
-    type Input<'a>;
+pub enum Effect<'a> {
+    Deliver {
+        queue_idx: usize,
+        parts: &'a [&'a [u8]],
+    },
+    Complete {
+        token: ChainToken,
+        written: u32,
+    },
+    Config,
+}
 
-    fn encode(&mut self, input: Self::Input<'_>, emit: impl FnMut(usize, &[&[u8]]));
+pub trait ExternalEventHandler {
+    type Event<'a>;
+
+    fn on_event(&mut self, event: Self::Event<'_>, emit: impl FnMut(Effect));
 }

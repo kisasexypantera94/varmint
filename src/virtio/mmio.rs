@@ -1,7 +1,7 @@
 //! https://docs.oasis-open.org/virtio/virtio/v1.3/csd01/virtio-v1.3-csd01.html#x1-1820002
 
 use crate::virtio::{
-    device::{self, Device, ExternalInputHandler},
+    device::{self, ChainAction, ChainToken, Device, Effect, ExternalEventHandler},
     virtq::{self, Queue},
 };
 use applevisor::memory::Memory;
@@ -9,7 +9,7 @@ use num_enum::TryFromPrimitive;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, TryFromPrimitive)]
 #[repr(u64)]
-pub enum Reg {
+enum Reg {
     MagicValue = 0x000,
     Version = 0x004,
     DeviceId = 0x008,
@@ -40,19 +40,19 @@ pub enum Reg {
     SHMBaseHigh = 0x0bc,
 }
 
-pub const CONFIG_BASE: u64 = 0x100;
+const CONFIG_BASE: u64 = 0x100;
 
 /// Magic value at offset `reg::MAGIC_VALUE`. Little-endian "virt".
-pub const MAGIC: u32 = 0x74726976;
+const MAGIC: u32 = 0x74726976;
 
 /// MMIO transport version. 2 = modern (non-legacy).
-pub const VERSION: u32 = 2;
+const VERSION: u32 = 2;
 
 /// "vmnt"
-pub const VENDOR_ID: u32 = 0x76_6d_6e_74;
+const VENDOR_ID: u32 = 0x76_6d_6e_74;
 
-pub const INT_VRING: u32 = 1 << 0;
-pub const INT_CONFIG: u32 = 1 << 1;
+const INT_VRING: u32 = 1 << 0;
+const INT_CONFIG: u32 = 1 << 1;
 
 #[derive(Default, Clone)]
 struct QueuePending {
@@ -180,15 +180,27 @@ impl<D: device::Device> Transport<D> {
             }
             Reg::QueueNotify => {
                 let q_idx = value as usize;
+                if q_idx >= self.queues.len() {
+                    return;
+                }
 
-                if self.device.async_queues().contains(&(q_idx as u16)) {
-                    // TODO: flush pending
-                } else {
+                if !self.device.delivery_queues().contains(&(q_idx as u16)) {
                     let q = &mut self.queues[q_idx];
 
                     let mut raised = false;
                     while let Some(head_idx) = q.pop_chain(mem) {
-                        if let Some(written) = self.device.process_chain(q_idx, q, head_idx, mem) {
+                        let action = match q.collect_chain(head_idx, mem) {
+                            Some(chain) => {
+                                let token = ChainToken {
+                                    queue_idx: q_idx,
+                                    head_idx,
+                                };
+                                self.device.process_chain(q_idx, &chain, token, mem)
+                            }
+                            None => ChainAction::Complete(0),
+                        };
+
+                        if let ChainAction::Complete(written) = action {
                             q.push_used(mem, head_idx, written);
                             raised = true;
                         }
@@ -239,30 +251,32 @@ impl<D: device::Device> Transport<D> {
 
         self.device.reset();
     }
-
-    pub fn device_mut(&mut self) -> &mut D {
-        &mut self.device
-    }
-
-    pub fn raise_config_interrupt(&mut self) {
-        self.interrupt_status |= INT_CONFIG;
-    }
 }
 
 pub fn queue_addr(lo: u32, hi: u32) -> u64 {
     ((hi as u64) << 32) | (lo as u64)
 }
 
-impl<D: ExternalInputHandler + Device> Transport<D> {
-    pub fn handle_external_input(&mut self, input: D::Input<'_>, mem: &mut Memory) {
+impl<D: ExternalEventHandler + Device> Transport<D> {
+    pub fn handle_external_event(&mut self, event: D::Event<'_>, mem: &mut Memory) {
         let queues = &mut self.queues;
         let interrupt_status = &mut self.interrupt_status;
 
-        self.device.encode(input, |queue_idx, parts| {
-            match queues[queue_idx].supply(parts, mem) {
+        self.device.on_event(event, |effect| match effect {
+            Effect::Deliver { queue_idx, parts } => match queues[queue_idx].deliver(parts, mem) {
                 Some(_) => *interrupt_status |= INT_VRING,
                 None => eprintln!("virtio: queue {queue_idx} has no buffer, dropping payload"),
+            },
+            Effect::Complete { token, written } => {
+                let q = &mut queues[token.queue_idx];
+
+                // guest may have reset the device while the chain was in flight
+                if q.ready {
+                    q.push_used(mem, token.head_idx, written);
+                    *interrupt_status |= INT_VRING;
+                }
             }
+            Effect::Config => *interrupt_status |= INT_CONFIG,
         });
     }
 }

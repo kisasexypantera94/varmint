@@ -1,7 +1,7 @@
 use crate::virtio::{
+    chain::ChainData,
     common,
-    device::{Device, ExternalInputHandler},
-    virtq,
+    device::{ChainAction, ChainToken, Device, Effect, ExternalEventHandler},
 };
 use applevisor::memory::Memory;
 use num_enum::TryFromPrimitive;
@@ -67,20 +67,20 @@ impl Device for Net {
         2
     }
 
-    fn async_queues(&self) -> &[u16] {
+    fn delivery_queues(&self) -> &[u16] {
         &[QueueType::Rx as u16]
     }
 
     fn process_chain(
         &mut self,
-        q_idx: usize,
-        queue: &virtq::Queue,
-        head_idx: u16,
+        queue_idx: usize,
+        chain: &ChainData,
+        _token: ChainToken,
         mem: &mut Memory,
-    ) -> Option<u32> {
-        match QueueType::try_from(q_idx).unwrap() {
-            QueueType::Rx => None,
-            QueueType::Tx => self.handle_tx(queue, head_idx, mem),
+    ) -> ChainAction {
+        match QueueType::try_from(queue_idx).unwrap() {
+            QueueType::Rx => ChainAction::Complete(0),
+            QueueType::Tx => ChainAction::Complete(self.handle_tx(chain, mem)),
         }
     }
 
@@ -94,19 +94,24 @@ impl Device for Net {
 }
 
 impl Net {
-    fn handle_tx(&mut self, queue: &virtq::Queue, head_idx: u16, mem: &mut Memory) -> Option<u32> {
-        let virtq::ChainData { readable, .. } = queue.collect_chain(head_idx, mem)?;
+    fn handle_tx(&mut self, chain: &ChainData, mem: &Memory) -> u32 {
+        const HEADER_LEN: usize = size_of::<NetHeader>();
 
-        if readable.len() < size_of::<NetHeader>() {
-            eprintln!("TX: chain too short, {} bytes", readable.len());
-            return Some(0);
+        let total = chain.readable_len();
+        if total < HEADER_LEN {
+            eprintln!("TX: chain too short, {} bytes", total);
+            return 0;
         }
 
-        let (_, eth) = NetHeader::read_from_prefix(&readable).ok()?;
+        let mut eth = vec![0u8; total - HEADER_LEN];
+        if chain.read_at(HEADER_LEN, &mut eth, mem).is_none() {
+            eprintln!("TX: failed to read frame from guest memory");
+            return 0;
+        }
 
-        self.tx_frames.push_front(eth.to_vec());
+        self.tx_frames.push_front(eth);
 
-        Some(0)
+        0
     }
 
     fn plain_rx_hdr() -> NetHeader {
@@ -116,13 +121,13 @@ impl Net {
     }
 }
 
-impl ExternalInputHandler for Net {
-    type Input<'a> = &'a [u8];
+impl ExternalEventHandler for Net {
+    type Event<'a> = &'a [u8];
 
-    fn encode(&mut self, frame: Self::Input<'_>, mut emit: impl FnMut(usize, &[&[u8]])) {
-        emit(
-            QueueType::Rx as usize,
-            &[Net::plain_rx_hdr().as_bytes(), frame],
-        )
+    fn on_event(&mut self, frame: Self::Event<'_>, mut emit: impl FnMut(Effect)) {
+        emit(Effect::Deliver {
+            queue_idx: QueueType::Rx as usize,
+            parts: &[Net::plain_rx_hdr().as_bytes(), frame],
+        })
     }
 }

@@ -5,9 +5,11 @@ edition = "2024"
 
 [dependencies]
 applevisor = "1.0"
+coreaudio-rs = "0.14.2"
 crossterm = "0.29.0"
 num_enum = "0.7.6"
 pollster = "0.4.0"
+rtrb = "0.3.4"
 vmnet = "0.5.1"
 wgpu = "29.0.3"
 winit = "0.30.13"

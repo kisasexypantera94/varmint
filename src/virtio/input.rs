@@ -1,8 +1,8 @@
 use crate::virtio::{
+    chain::ChainData,
     common,
-    device::{Device, ExternalInputHandler},
+    device::{ChainAction, ChainToken, Device, Effect, ExternalEventHandler},
     input::keys::*,
-    virtq,
 };
 use applevisor::memory::Memory;
 use num_enum::TryFromPrimitive;
@@ -12,8 +12,8 @@ pub mod keys;
 
 const DEVICE_ID: u32 = 18;
 
-pub const TABLET_ABS_MAX_X: u32 = 32767;
-pub const TABLET_ABS_MAX_Y: u32 = 32767;
+const TABLET_ABS_MAX_X: u32 = 32767;
+const TABLET_ABS_MAX_Y: u32 = 32767;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, TryFromPrimitive)]
 #[repr(usize)]
@@ -71,7 +71,7 @@ enum InputConfigSelect {
     AbsInfo = 0x12,
 }
 
-pub enum InputKind {
+enum InputKind {
     Keyboard,
     Tablet,
 }
@@ -252,22 +252,20 @@ impl Device for Input {
         2
     }
 
-    fn async_queues(&self) -> &[u16] {
-        // eventq наполняется драйвером впрок, потребляется по хост-событию.
+    fn delivery_queues(&self) -> &[u16] {
         &[QueueType::Event as u16]
     }
 
     fn process_chain(
         &mut self,
-        q_idx: usize,
-        _queue: &virtq::Queue,
-        _head_idx: u16,
+        queue_idx: usize,
+        _chain: &ChainData,
+        _token: ChainToken,
         _mem: &mut Memory,
-    ) -> Option<u32> {
-        match QueueType::try_from(q_idx).unwrap() {
-            // eventq — async, потребляется в encode()/supply(); сюда не приходит.
-            QueueType::Event => None,
-            QueueType::Status => Some(0),
+    ) -> ChainAction {
+        match QueueType::try_from(queue_idx).unwrap() {
+            QueueType::Event => ChainAction::Complete(0),
+            QueueType::Status => ChainAction::Complete(0),
         }
     }
 
@@ -303,21 +301,21 @@ pub enum ExternalInput {
     },
 }
 
-impl ExternalInputHandler for Input {
-    type Input<'a> = ExternalInput;
+impl ExternalEventHandler for Input {
+    type Event<'a> = ExternalInput;
 
-    fn encode(&mut self, input: ExternalInput, mut emit: impl FnMut(usize, &[&[u8]])) {
+    fn on_event(&mut self, input: ExternalInput, mut emit: impl FnMut(Effect)) {
         let q = QueueType::Event as usize;
         let mut ev = |t: u16, c: u16, v: u32| {
-            emit(
-                q,
-                &[Event {
+            emit(Effect::Deliver {
+                queue_idx: q,
+                parts: &[Event {
                     r#type: t,
                     code: c,
                     value: v,
                 }
                 .as_bytes()],
-            );
+            });
         };
 
         match input {

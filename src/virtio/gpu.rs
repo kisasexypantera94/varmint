@@ -1,13 +1,17 @@
 //! https://docs.oasis-open.org/virtio/virtio/v1.3/csd01/virtio-v1.3-csd01.html#x1-4040006
-use crate::virtio::{MmioTransport, common, device::Device, virtq};
-use applevisor::{error::Result, memory::Memory};
+use crate::virtio::{
+    chain::ChainData,
+    common,
+    device::{ChainAction, ChainToken, Device, Effect, ExternalEventHandler},
+};
+use applevisor::memory::Memory;
 use num_enum::TryFromPrimitive;
 use std::{collections::HashMap, mem::offset_of, sync::Mutex};
-use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes, Ref};
+use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes};
 
 const DEVICE_ID: u32 = 16;
 
-pub const MAX_SCANOUTS: usize = 16;
+const MAX_SCANOUTS: usize = 16;
 
 const BYTES_PER_PIXEL: usize = 4;
 
@@ -178,22 +182,9 @@ struct CtrlHeader {
     padding: [u8; 3],
 }
 
-impl CtrlHeader {
-    fn new(addr: u64, mem: &mut Memory) -> Result<CtrlHeader> {
-        let mut h = CtrlHeader {
-            r#type: mem.read_u32(addr)?,
-            flags: mem.read_u32(addr + 4)?,
-            fence_id: mem.read_u64(addr + 8)?,
-            ctx_ud: mem.read_u32(addr + 16)?,
-            ring_idx: mem.read_u8(addr + 20)?,
-            padding: [0; 3],
-        };
+const FLAG_FENCE: u32 = 1 << 0;
 
-        mem.read(addr + 21, &mut h.padding)?;
-
-        Ok(h)
-    }
-}
+const PAYLOAD_OFFSET: usize = size_of::<CtrlHeader>();
 
 struct Resource {
     format: u32,
@@ -303,203 +294,53 @@ impl<'a> Device for Gpu<'a> {
     fn process_chain(
         &mut self,
         queue_idx: usize,
-        queue: &super::virtq::Queue,
-        head_idx: u16,
-        mem: &mut applevisor::prelude::Memory,
-    ) -> Option<u32> {
-        let queue_type = QueueType::try_from(queue_idx).unwrap();
-        match queue_type {
-            QueueType::Control => {
-                let chain_data = queue.collect_chain(head_idx, mem)?;
+        chain: &ChainData,
+        _token: ChainToken,
+        mem: &mut Memory,
+    ) -> ChainAction {
+        let Some(hdr) = chain.read_obj::<CtrlHeader>(0, mem) else {
+            eprintln!("virtio-gpu: unreadable command header");
+            let written = Gpu::write_response(
+                chain,
+                CtrlType::RespErrUnspec,
+                &CtrlHeader::new_zeroed(),
+                mem,
+            );
+            return ChainAction::Complete(written);
+        };
 
-                let (hdr, payload) = CtrlHeader::read_from_prefix(&chain_data.readable).ok()?;
+        let written = match QueueType::try_from(queue_idx).unwrap() {
+            QueueType::Cursor => Gpu::write_response(chain, CtrlType::RespOkNoData, &hdr, mem),
+            QueueType::Control => match CtrlType::try_from(hdr.r#type) {
+                Ok(CtrlType::GetDisplayInfo) => {
+                    let mut resp = RespDisplayInfo::new_zeroed();
 
-                Some(match CtrlType::try_from(hdr.r#type) {
-                    Ok(CtrlType::GetDisplayInfo) => {
-                        let mut resp = RespDisplayInfo::new_zeroed();
+                    resp.hdr = Gpu::resp_header(CtrlType::RespOkDisplayInfo, &hdr);
+                    resp.pmodes[0] = DisplayOne {
+                        r: Rect {
+                            x: 0,
+                            y: 0,
+                            width: self.scanout_width,
+                            height: self.scanout_height,
+                        },
+                        enabled: 1,
+                        flags: 0,
+                    };
 
-                        resp.hdr.r#type = CtrlType::RespOkDisplayInfo as u32;
+                    chain.write_response(resp.as_bytes(), mem)
+                }
+                Ok(cmd) => {
+                    let resp = self.control(cmd, chain, mem);
+                    Gpu::write_response(chain, resp, &hdr, mem)
+                }
+                Err(v) => {
+                    eprintln!("virtio-gpu: unknown command: 0x{:x}", v.number);
+                    Gpu::write_response(chain, CtrlType::RespErrUnspec, &hdr, mem)
+                }
+            },
+        };
 
-                        resp.pmodes[0] = DisplayOne {
-                            r: Rect {
-                                x: 0,
-                                y: 0,
-                                width: self.scanout_width,
-                                height: self.scanout_height,
-                            },
-                            enabled: 1,
-                            flags: 0,
-                        };
-
-                        chain_data.write_response(resp.as_bytes(), mem)
-                    }
-                    Ok(CtrlType::ResourceCreate2d) => {
-                        let (val, _) = ResourceCreate2d::read_from_prefix(payload).unwrap();
-
-                        if val.format != 2 {
-                            let format = val.format;
-                            eprintln!("unsupported gpu format: {}", format);
-                            return Some(Gpu::write_response(
-                                &chain_data,
-                                CtrlType::RespErrInvalidParameter,
-                                mem,
-                            ));
-                        }
-
-                        self.resources.insert(
-                            val.resource_id,
-                            Resource {
-                                format: val.format,
-                                width: val.width,
-                                height: val.height,
-                                backing: Vec::new(),
-                                framebuffer: Vec::new(),
-                            },
-                        );
-
-                        Gpu::write_ok_nodata(&chain_data, mem)
-                    }
-                    Ok(CtrlType::ResourceUnref) => {
-                        let (val, _) = ResourceUnref::read_from_prefix(payload).unwrap();
-
-                        let resource_id = val.resource_id;
-                        self.resources.remove(&resource_id);
-
-                        if self.scanout_resource == Some(resource_id) {
-                            self.scanout_resource = None;
-                        }
-
-                        Gpu::write_ok_nodata(&chain_data, mem)
-                    }
-                    Ok(CtrlType::ResourceAttachBacking) => {
-                        let (val, entries_raw) =
-                            ResourceAttachBacking::read_from_prefix(payload).unwrap();
-
-                        let n_entries = val.nr_entries as usize;
-                        let entries_len = n_entries * core::mem::size_of::<MemEntry>();
-
-                        let Some(entries_raw) = entries_raw.get(..entries_len) else {
-                            return Some(Gpu::write_response(
-                                &chain_data,
-                                CtrlType::RespErrInvalidParameter,
-                                mem,
-                            ));
-                        };
-
-                        let entries = Ref::<_, [MemEntry]>::from_bytes(entries_raw).ok()?.to_vec();
-
-                        let resource_id = val.resource_id;
-                        self.resources.get_mut(&resource_id).unwrap().backing = entries;
-
-                        Gpu::write_ok_nodata(&chain_data, mem)
-                    }
-                    Ok(CtrlType::ResourceDetachBacking) => {
-                        let (val, _) = ResourceDetachBacking::read_from_prefix(payload).unwrap();
-
-                        let resource_id = val.resource_id;
-
-                        self.resources
-                            .get_mut(&resource_id)
-                            .unwrap()
-                            .backing
-                            .clear();
-
-                        Gpu::write_ok_nodata(&chain_data, mem)
-                    }
-                    Ok(CtrlType::SetScanout) => {
-                        let (val, _) = SetScanout::read_from_prefix(payload).unwrap();
-
-                        if val.resource_id == 0 {
-                            self.scanout_resource = None;
-                        } else {
-                            self.scanout_resource = Some(val.resource_id);
-
-                            let resource_id = val.resource_id;
-                            let resource = self.resources.get(&resource_id).unwrap();
-
-                            self.display
-                                .lock()
-                                .unwrap()
-                                .resize(resource.width as usize, resource.height as usize);
-                        }
-
-                        Gpu::write_ok_nodata(&chain_data, mem)
-                    }
-                    Ok(CtrlType::TransferToHost2d) => {
-                        let (val, _) = TransferToHost2d::read_from_prefix(payload).unwrap();
-
-                        let resource_id = val.resource_id;
-                        let resource = self.resources.get_mut(&resource_id)?;
-
-                        let width = resource.width as usize;
-                        let height = resource.height as usize;
-                        let stride = width * BYTES_PER_PIXEL;
-
-                        let fb_len = height * stride;
-
-                        if resource.framebuffer.len() != fb_len {
-                            resource.framebuffer.resize(fb_len, 0);
-                        }
-
-                        let rect_x = val.r.x as usize;
-                        let rect_y = val.r.y as usize;
-                        let rect_width = val.r.width as usize;
-                        let rect_height = val.r.height as usize;
-                        let transfer_offset = val.offset as usize;
-
-                        let row_len = rect_width * BYTES_PER_PIXEL;
-
-                        if rect_x == 0 && rect_width == width {
-                            let start = rect_y * stride;
-                            Gpu::read_backing(
-                                &resource.backing,
-                                transfer_offset,
-                                &mut resource.framebuffer[start..start + rect_height * stride],
-                                mem,
-                            )?;
-                        } else {
-                            for row in 0..rect_height {
-                                let src_offset = transfer_offset + row * stride;
-                                let dst_offset = (rect_y + row) * stride + rect_x * BYTES_PER_PIXEL;
-                                Gpu::read_backing(
-                                    &resource.backing,
-                                    src_offset,
-                                    &mut resource.framebuffer[dst_offset..dst_offset + row_len],
-                                    mem,
-                                )?;
-                            }
-                        }
-
-                        Gpu::write_ok_nodata(&chain_data, mem)
-                    }
-                    Ok(CtrlType::ResourceFlush) => {
-                        let (val, _) = ResourceFlush::read_from_prefix(payload).unwrap();
-
-                        if self.scanout_resource == Some(val.resource_id) {
-                            let resource_id = val.resource_id;
-                            let resource = self.resources.get(&resource_id)?;
-                            self.publish_display_rect(resource, val.r);
-                        }
-
-                        Gpu::write_ok_nodata(&chain_data, mem)
-                    }
-                    Ok(t) => {
-                        eprintln!("unhandled: {:?}", t);
-
-                        Gpu::write_response(&chain_data, CtrlType::RespErrUnspec, mem)
-                    }
-                    Err(v) => {
-                        eprintln!("unknown type: 0x{:x}", v.number);
-                        Gpu::write_response(&chain_data, CtrlType::RespErrUnspec, mem)
-                    }
-                })
-            }
-            QueueType::Cursor => {
-                let chain_data = queue.collect_chain(head_idx, mem)?;
-
-                Some(Gpu::write_ok_nodata(&chain_data, mem))
-            }
-        }
+        ChainAction::Complete(written)
     }
 
     fn reset(&mut self) {
@@ -547,21 +388,231 @@ impl<'a> Gpu<'a> {
         display.seq = display.seq.wrapping_add(1);
     }
 
-    fn write_ok_nodata(chain_data: &virtq::ChainData, mem: &mut Memory) -> u32 {
-        Gpu::write_response(chain_data, CtrlType::RespOkNoData, mem)
+    fn control(&mut self, cmd: CtrlType, chain: &ChainData, mem: &mut Memory) -> CtrlType {
+        match cmd {
+            CtrlType::ResourceCreate2d => {
+                let Some(val) = chain.read_obj::<ResourceCreate2d>(PAYLOAD_OFFSET, mem) else {
+                    return CtrlType::RespErrInvalidParameter;
+                };
+
+                if val.format != 2 {
+                    eprintln!("virtio-gpu: unsupported format: {}", { val.format });
+                    return CtrlType::RespErrInvalidParameter;
+                }
+
+                if val.width == 0 || val.height == 0 || val.width > 16384 || val.height > 16384 {
+                    return CtrlType::RespErrInvalidParameter;
+                }
+
+                self.resources.insert(
+                    val.resource_id,
+                    Resource {
+                        format: val.format,
+                        width: val.width,
+                        height: val.height,
+                        backing: Vec::new(),
+                        framebuffer: Vec::new(),
+                    },
+                );
+
+                CtrlType::RespOkNoData
+            }
+
+            CtrlType::ResourceUnref => {
+                let Some(val) = chain.read_obj::<ResourceUnref>(PAYLOAD_OFFSET, mem) else {
+                    return CtrlType::RespErrInvalidParameter;
+                };
+
+                let resource_id = val.resource_id;
+                self.resources.remove(&resource_id);
+
+                if self.scanout_resource == Some(resource_id) {
+                    self.scanout_resource = None;
+                }
+
+                CtrlType::RespOkNoData
+            }
+
+            CtrlType::ResourceAttachBacking => {
+                let Some(val) = chain.read_obj::<ResourceAttachBacking>(PAYLOAD_OFFSET, mem) else {
+                    return CtrlType::RespErrInvalidParameter;
+                };
+
+                let n_entries = val.nr_entries as usize;
+                let entries_base = PAYLOAD_OFFSET + size_of::<ResourceAttachBacking>();
+                let entry_size = size_of::<MemEntry>();
+
+                if entries_base + n_entries * entry_size > chain.readable_len() {
+                    return CtrlType::RespErrInvalidParameter;
+                }
+
+                let resource_id = val.resource_id;
+                let Some(resource) = self.resources.get_mut(&resource_id) else {
+                    return CtrlType::RespErrInvalidResourceId;
+                };
+
+                let mut backing = Vec::with_capacity(n_entries);
+                for i in 0..n_entries {
+                    let Some(entry) =
+                        chain.read_obj::<MemEntry>(entries_base + i * entry_size, mem)
+                    else {
+                        return CtrlType::RespErrInvalidParameter;
+                    };
+                    backing.push(entry);
+                }
+
+                resource.backing = backing;
+
+                CtrlType::RespOkNoData
+            }
+
+            CtrlType::ResourceDetachBacking => {
+                let Some(val) = chain.read_obj::<ResourceDetachBacking>(PAYLOAD_OFFSET, mem) else {
+                    return CtrlType::RespErrInvalidParameter;
+                };
+
+                let resource_id = val.resource_id;
+                let Some(resource) = self.resources.get_mut(&resource_id) else {
+                    return CtrlType::RespErrInvalidResourceId;
+                };
+
+                resource.backing.clear();
+
+                CtrlType::RespOkNoData
+            }
+
+            CtrlType::SetScanout => {
+                let Some(val) = chain.read_obj::<SetScanout>(PAYLOAD_OFFSET, mem) else {
+                    return CtrlType::RespErrInvalidParameter;
+                };
+
+                let resource_id = val.resource_id;
+
+                if resource_id == 0 {
+                    self.scanout_resource = None;
+                } else {
+                    let Some(resource) = self.resources.get(&resource_id) else {
+                        return CtrlType::RespErrInvalidResourceId;
+                    };
+
+                    self.scanout_resource = Some(resource_id);
+                    self.display
+                        .lock()
+                        .unwrap()
+                        .resize(resource.width as usize, resource.height as usize);
+                }
+
+                CtrlType::RespOkNoData
+            }
+
+            CtrlType::TransferToHost2d => {
+                let Some(val) = chain.read_obj::<TransferToHost2d>(PAYLOAD_OFFSET, mem) else {
+                    return CtrlType::RespErrInvalidParameter;
+                };
+
+                let resource_id = val.resource_id;
+                let Some(resource) = self.resources.get_mut(&resource_id) else {
+                    return CtrlType::RespErrInvalidResourceId;
+                };
+
+                let width = resource.width as usize;
+                let height = resource.height as usize;
+                let stride = width * BYTES_PER_PIXEL;
+
+                let rect_x = val.r.x as usize;
+                let rect_y = val.r.y as usize;
+                let rect_width = val.r.width as usize;
+                let rect_height = val.r.height as usize;
+                let transfer_offset = val.offset as usize;
+
+                if rect_x + rect_width > width || rect_y + rect_height > height {
+                    return CtrlType::RespErrInvalidParameter;
+                }
+
+                let fb_len = height * stride;
+                if resource.framebuffer.len() != fb_len {
+                    resource.framebuffer.resize(fb_len, 0);
+                }
+
+                let row_len = rect_width * BYTES_PER_PIXEL;
+
+                let ok = if rect_x == 0 && rect_width == width {
+                    let start = rect_y * stride;
+                    Gpu::read_backing(
+                        &resource.backing,
+                        transfer_offset,
+                        &mut resource.framebuffer[start..start + rect_height * stride],
+                        mem,
+                    )
+                    .is_some()
+                } else {
+                    (0..rect_height).all(|row| {
+                        let src_offset = transfer_offset + row * stride;
+                        let dst_offset = (rect_y + row) * stride + rect_x * BYTES_PER_PIXEL;
+                        Gpu::read_backing(
+                            &resource.backing,
+                            src_offset,
+                            &mut resource.framebuffer[dst_offset..dst_offset + row_len],
+                            mem,
+                        )
+                        .is_some()
+                    })
+                };
+
+                if !ok {
+                    return CtrlType::RespErrInvalidParameter;
+                }
+
+                CtrlType::RespOkNoData
+            }
+
+            CtrlType::ResourceFlush => {
+                let Some(val) = chain.read_obj::<ResourceFlush>(PAYLOAD_OFFSET, mem) else {
+                    return CtrlType::RespErrInvalidParameter;
+                };
+
+                let resource_id = val.resource_id;
+                if self.scanout_resource == Some(resource_id) {
+                    let Some(resource) = self.resources.get(&resource_id) else {
+                        return CtrlType::RespErrInvalidResourceId;
+                    };
+                    self.publish_display_rect(resource, val.r);
+                }
+
+                CtrlType::RespOkNoData
+            }
+
+            cmd => {
+                eprintln!("virtio-gpu: unhandled command: {:?}", cmd);
+                CtrlType::RespErrUnspec
+            }
+        }
     }
 
-    fn write_response(chain_data: &virtq::ChainData, r#type: CtrlType, mem: &mut Memory) -> u32 {
+    fn resp_header(r#type: CtrlType, req: &CtrlHeader) -> CtrlHeader {
         let mut resp = CtrlHeader::new_zeroed();
         resp.r#type = r#type as u32;
-        chain_data.write_response(resp.as_bytes(), mem)
+        if req.flags & FLAG_FENCE != 0 {
+            resp.flags = FLAG_FENCE;
+            resp.fence_id = req.fence_id;
+        }
+        resp
+    }
+
+    fn write_response(
+        chain: &ChainData,
+        r#type: CtrlType,
+        req: &CtrlHeader,
+        mem: &mut Memory,
+    ) -> u32 {
+        chain.write_response(Gpu::resp_header(r#type, req).as_bytes(), mem)
     }
 
     fn read_backing(
         backing: &[MemEntry],
         mut src_offset: usize,
         dst: &mut [u8],
-        mem: &mut Memory,
+        mem: &Memory,
     ) -> Option<()> {
         let mut written = 0usize;
 
@@ -594,21 +645,27 @@ impl<'a> Gpu<'a> {
 
         None
     }
-
-    pub fn resize_display(&mut self, width: u32, height: u32) {
-        if width == 0 || height == 0 {
-            return;
-        }
-
-        self.scanout_width = width;
-        self.scanout_height = height;
-        self.events_read |= EVENT_DISPLAY;
-    }
 }
 
-impl<'a> MmioTransport<Gpu<'a>> {
-    pub fn resize_display(&mut self, width: u32, height: u32) {
-        self.device_mut().resize_display(width, height);
-        self.raise_config_interrupt();
+pub enum ExternalEvent {
+    DisplayResized { width: u32, height: u32 },
+}
+
+impl<'a> ExternalEventHandler for Gpu<'a> {
+    type Event<'b> = ExternalEvent;
+
+    fn on_event(&mut self, event: ExternalEvent, mut emit: impl FnMut(Effect)) {
+        match event {
+            ExternalEvent::DisplayResized { width, height } => {
+                if width == 0 || height == 0 {
+                    return;
+                }
+
+                self.scanout_width = width;
+                self.scanout_height = height;
+                self.events_read |= EVENT_DISPLAY;
+                emit(Effect::Config);
+            }
+        }
     }
 }

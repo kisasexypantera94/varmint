@@ -1,3 +1,1 @@
-mod vmnet_backend;
-
-pub use vmnet_backend::VmnetBackend;
+pub mod vmnet;
