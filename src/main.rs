@@ -1,6 +1,11 @@
 use crate::virtio::input::keys::*;
 use applevisor::prelude::*;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+use rutabaga_gfx::{
+    RUTABAGA_CAPSET_VENUS, Rutabaga, RutabagaBuilder,
+    RutabagaComponentType::{self, VirglRenderer},
+    RutabagaFence, RutabagaFenceHandler, RutabagaResult, VirglRendererFlags,
+};
 use std::{
     fs::File,
     io::{self, Read, Write},
@@ -435,6 +440,46 @@ impl<'a> ApplicationHandler for AppState<'a> {
     }
 }
 
+fn build_rutabaga(
+    fence_tx: Sender<virtio::gpu::ExternalEvent>,
+    kicker: kick::Kicker,
+) -> RutabagaResult<Rutabaga> {
+    let fence_handler = RutabagaFenceHandler::new(move |fence: RutabagaFence| {
+        let _ = fence_tx.send(virtio::gpu::ExternalEvent::FenceSignaled {
+            ring_idx: fence.ring_idx,
+            fence_id: fence.fence_id,
+        });
+        kicker.kick();
+    });
+
+    let capset_mask: u64 = 1u64 << RUTABAGA_CAPSET_VENUS;
+
+    let virgl_flags: u32 = 0;
+
+    let rutabaga = RutabagaBuilder::new(VirglRenderer, virgl_flags, capset_mask)
+        .set_use_external_blob(true)
+        .build(fence_handler, None)?;
+
+    let n = rutabaga.get_num_capsets();
+    eprintln!("rutabaga: num_capsets={}", n);
+
+    for i in 0..n {
+        match rutabaga.get_capset_info(i) {
+            Ok((id, ver, size)) => {
+                eprintln!(
+                    "rutabaga: capset[{}]: id={} version={} size={}",
+                    i, id, ver, size
+                );
+            }
+            Err(e) => {
+                eprintln!("rutabaga: capset[{}]: error={:?}", i, e);
+            }
+        }
+    }
+
+    Ok(rutabaga)
+}
+
 fn run_loop(
     vm: &VirtualMachineInstance<GicEnabled>,
     vcpu: &Vcpu,
@@ -461,6 +506,7 @@ fn run_loop(
     input_rx: &Receiver<HostInputEvent>,
     display_rx: &Receiver<HostDisplayEvent>,
     audio_rx: &Receiver<audio::coreaudio::BackendEvent>,
+    fence_rx: &Receiver<virtio::gpu::ExternalEvent>,
 ) -> Result<()> {
     let mut net_buf = vec![0; iface.max_packet_size() as usize];
 
@@ -548,6 +594,10 @@ fn run_loop(
                         .handle_external_event(virtio::snd::ExternalEvent::PeriodElapsed(seq), mem);
                 }
             }
+        }
+
+        while let Ok(event) = fence_rx.try_recv() {
+            virtio_gpu.handle_external_event(event, mem);
         }
 
         while let Ok(payload) = clipboard_in_rx.try_recv() {
@@ -739,6 +789,7 @@ fn vmm_thread(
     eprintln!("Image header: {:?}", image_header);
 
     let vcpu = vm.vcpu_create()?;
+    vcpu.set_sys_reg(SysReg::ACTLR_EL1, 1 << 1)?; // enable TSO
     vcpu.set_sys_reg(SysReg::MPIDR_EL1, 0)?;
 
     handle_tx.send(vcpu.get_handle()).unwrap();
@@ -769,8 +820,6 @@ fn vmm_thread(
     let mut virtio_net = virtio::MmioTransport::new(virtio_net_dev);
     let mut virtio_net_irq = irq::IrqLine::new(spi_int_start + VIRTNET_SPI_OFFSET, false);
 
-    let virtio_gpu_dev = virtio::Gpu::new(display);
-    let mut virtio_gpu = virtio::MmioTransport::new(virtio_gpu_dev);
     let mut virtio_gpu_irq = irq::IrqLine::new(spi_int_start + VIRTGPU_SPI_OFFSET, false);
 
     let virtio_input_keyboard_dev = virtio::Input::keyboard();
@@ -785,6 +834,11 @@ fn vmm_thread(
 
     thread::scope(|s| -> Result<()> {
         let kicker = kick::Kicker::spawn(s, vm, vcpu.get_handle());
+
+        let (fence_tx, fence_rx) = std::sync::mpsc::channel::<virtio::gpu::ExternalEvent>();
+        let mut rutabaga = build_rutabaga(fence_tx, kicker.clone()).expect("rutabaga init failed");
+        let virtio_gpu_dev = virtio::Gpu::new(display, &mut rutabaga);
+        let mut virtio_gpu = virtio::MmioTransport::new(virtio_gpu_dev);
 
         let (_audio_backend, period_sink, audio_rx) =
             audio::coreaudio::Backend::new(kicker.clone()).unwrap();
@@ -835,6 +889,7 @@ fn vmm_thread(
             &input_rx,
             &display_rx,
             &audio_rx,
+            &fence_rx,
         )
     })?;
 

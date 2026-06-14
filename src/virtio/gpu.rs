@@ -6,7 +6,13 @@ use crate::virtio::{
 };
 use applevisor::memory::Memory;
 use num_enum::TryFromPrimitive;
-use std::{collections::HashMap, mem::offset_of, sync::Mutex};
+use rutabaga_gfx::{ResourceCreate3D, Rutabaga, RutabagaFence, RutabagaIovec, Transfer3D};
+use std::{
+    collections::{HashMap, VecDeque},
+    ffi::c_void,
+    mem::offset_of,
+    sync::Mutex,
+};
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes};
 
 const DEVICE_ID: u32 = 16;
@@ -17,45 +23,67 @@ const BYTES_PER_PIXEL: usize = 4;
 
 const EVENT_DISPLAY: u32 = 1;
 
+const CAPSET_VENUS: u32 = 4;
+
+const CONTEXT_INIT_CAPSET_ID_MASK: u32 = 0xff;
+
+mod feature {
+    pub const VIRGL: u64 = 1 << 0;
+    pub const RESOURCE_BLOB: u64 = 1 << 3;
+    pub const CONTEXT_INIT: u64 = 1 << 4;
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, TryFromPrimitive)]
 #[repr(u32)]
 enum CtrlType {
     // 2d commands
     GetDisplayInfo = 0x0100,
-    ResourceCreate2d,
-    ResourceUnref,
-    SetScanout,
-    ResourceFlush,
-    TransferToHost2d,
-    ResourceAttachBacking,
-    ResourceDetachBacking,
-    GetCapsetInfo,
-    GetCapset,
-    GetEdid,
-    ResourceAssignUuid,
-    ResourceCreateBlob,
-    SetScanoutBlob,
+    ResourceCreate2d,      // 0x0101
+    ResourceUnref,         // 0x0102
+    SetScanout,            // 0x0103
+    ResourceFlush,         // 0x0104
+    TransferToHost2d,      // 0x0105
+    ResourceAttachBacking, // 0x0106
+    ResourceDetachBacking, // 0x0107
+    GetCapsetInfo,         // 0x0108
+    GetCapset,             // 0x0109
+    GetEdid,               // 0x010a
+    ResourceAssignUuid,    // 0x010b
+    ResourceCreateBlob,    // 0x010c
+    SetScanoutBlob,        // 0x010d
+
+    // 3d commands (context + venus)
+    CtxCreate = 0x0200,
+    CtxDestroy,         // 0x0201
+    CtxAttachResource,  // 0x0202
+    CtxDetachResource,  // 0x0203
+    ResourceCreate3d,   // 0x0204
+    TransferToHost3d,   // 0x0205
+    TransferFromHost3d, // 0x0206
+    Submit3d,           // 0x0207
+    ResourceMapBlob,    // 0x0208
+    ResourceUnmapBlob,  // 0x0209
 
     // cursor commands
     UpdateCursor = 0x0300,
-    MoveCursor,
+    MoveCursor, // 0x0301
 
     // ok responses
     RespOkNoData = 0x1100,
-    RespOkDisplayInfo,
-    RespOkCapsetInfo,
-    RespOkCapset,
-    RespOkEdid,
-    RespOkResourceUuid,
-    RespOkMapInfo,
+    RespOkDisplayInfo,  // 0x1101
+    RespOkCapsetInfo,   // 0x1102
+    RespOkCapset,       // 0x1103
+    RespOkEdid,         // 0x1104
+    RespOkResourceUuid, // 0x1105
+    RespOkMapInfo,      // 0x1106
 
     // error responses
     RespErrUnspec = 0x1200,
-    RespErrOutOfMemory,
-    RespErrInvalidScanoutId,
-    RespErrInvalidResourceId,
-    RespErrInvalidContextId,
-    RespErrInvalidParameter,
+    RespErrOutOfMemory,       // 0x1201
+    RespErrInvalidScanoutId,  // 0x1202
+    RespErrInvalidResourceId, // 0x1203
+    RespErrInvalidContextId,  // 0x1204
+    RespErrInvalidParameter,  // 0x1205
 }
 
 #[derive(IntoBytes, FromBytes, Immutable, Debug, Copy, Clone)]
@@ -78,7 +106,6 @@ struct DisplayOne {
 #[derive(IntoBytes, FromBytes, Immutable, Debug, Copy, Clone)]
 #[repr(C, packed)]
 struct RespDisplayInfo {
-    hdr: CtrlHeader,
     pmodes: [DisplayOne; MAX_SCANOUTS],
 }
 
@@ -164,6 +191,102 @@ struct UpdateCursor {
     padding: u32,
 }
 
+#[derive(IntoBytes, FromBytes, Immutable, Debug, Copy, Clone)]
+#[repr(C, packed)]
+struct GetCapsetInfo {
+    hdr: CtrlHeader,
+    capset_index: u32,
+    padding: u32,
+}
+
+#[derive(IntoBytes, FromBytes, Immutable, Debug, Copy, Clone)]
+#[repr(C, packed)]
+struct RespCapsetInfo {
+    hdr: CtrlHeader,
+    capset_id: u32,
+    capset_max_version: u32,
+    capset_max_size: u32,
+    padding: u32,
+}
+
+#[derive(IntoBytes, FromBytes, Immutable, Debug, Copy, Clone)]
+#[repr(C, packed)]
+struct GetCapset {
+    hdr: CtrlHeader,
+    capset_id: u32,
+    capset_version: u32,
+}
+
+#[derive(IntoBytes, FromBytes, Immutable, Debug, Copy, Clone)]
+#[repr(C, packed)]
+struct CtxCreate {
+    hdr: CtrlHeader,
+    nlen: u32,
+    context_init: u32,
+    debug_name: [u8; 64],
+}
+
+#[derive(IntoBytes, FromBytes, Immutable, Debug, Copy, Clone)]
+#[repr(C, packed)]
+struct CtxResource {
+    hdr: CtrlHeader,
+    resource_id: u32,
+    padding: u32,
+}
+
+#[derive(IntoBytes, FromBytes, Immutable, Debug, Copy, Clone)]
+#[repr(C, packed)]
+struct ResourceCreate3d {
+    hdr: CtrlHeader,
+    resource_id: u32,
+    target: u32,
+    format: u32,
+    bind: u32,
+    width: u32,
+    height: u32,
+    depth: u32,
+    array_size: u32,
+    last_level: u32,
+    nr_samples: u32,
+    flags: u32,
+    padding: u32,
+}
+
+#[derive(IntoBytes, FromBytes, Immutable, Debug, Copy, Clone)]
+#[repr(C, packed)]
+struct Box3d {
+    x: u32,
+    y: u32,
+    z: u32,
+    w: u32,
+    h: u32,
+    d: u32,
+}
+
+#[derive(IntoBytes, FromBytes, Immutable, Debug, Copy, Clone)]
+#[repr(C, packed)]
+struct TransferHost3d {
+    hdr: CtrlHeader,
+    r#box: Box3d,
+    offset: u64,
+    resource_id: u32,
+    level: u32,
+    stride: u32,
+    layer_stride: u32,
+}
+
+#[derive(IntoBytes, FromBytes, Immutable, Debug, Copy, Clone)]
+#[repr(C, packed)]
+struct ResourceCreateBlob {
+    hdr: CtrlHeader,
+    resource_id: u32,
+    blob_mem: u32,
+    blob_flags: u32,
+    nr_entries: u32,
+    blob_id: u64,
+    size: u64,
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, TryFromPrimitive)]
 #[repr(usize)]
 enum QueueType {
@@ -192,6 +315,10 @@ struct Resource {
     height: u32,
     backing: Vec<MemEntry>,
     framebuffer: Vec<u8>,
+    is_3d: bool,
+    mapped_gpa: Option<u64>,
+    mapped_size: usize,
+    blob_size: u64,
 }
 
 pub struct DisplayBuffer {
@@ -231,6 +358,13 @@ struct Config {
     num_capsets: u32,
 }
 
+struct PendingFence {
+    ring_idx: u8,
+    fence_id: u64,
+    token: ChainToken,
+    written: u32,
+}
+
 pub struct Gpu<'a> {
     resources: HashMap<u32, Resource>,
     scanout_resource: Option<u32>,
@@ -240,10 +374,13 @@ pub struct Gpu<'a> {
     scanout_height: u32,
 
     events_read: u32,
+
+    pending_fences: VecDeque<PendingFence>,
+    rutabaga: &'a mut Rutabaga,
 }
 
 impl<'a> Gpu<'a> {
-    pub fn new(display: &'a Mutex<DisplayBuffer>) -> Gpu<'a> {
+    pub fn new(display: &'a Mutex<DisplayBuffer>, rutabaga: &'a mut Rutabaga) -> Gpu<'a> {
         let (width, height) = {
             let display = display.lock().unwrap();
             (display.width, display.height)
@@ -256,6 +393,8 @@ impl<'a> Gpu<'a> {
             scanout_width: width as u32,
             scanout_height: height as u32,
             events_read: 0,
+            pending_fences: VecDeque::new(),
+            rutabaga,
         }
     }
 }
@@ -266,14 +405,15 @@ impl<'a> Device for Gpu<'a> {
     }
 
     fn features(&self) -> u64 {
-        common::feature::VERSION_1
+        common::feature::VERSION_1 | feature::VIRGL | feature::RESOURCE_BLOB | feature::CONTEXT_INIT
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
         let cfg = Config {
             events_read: self.events_read,
+            events_clear: 0,
             num_scanouts: 1,
-            ..Default::default()
+            num_capsets: self.rutabaga.get_num_capsets(),
         };
 
         let offset = offset as usize;
@@ -295,7 +435,7 @@ impl<'a> Device for Gpu<'a> {
         &mut self,
         queue_idx: usize,
         chain: &ChainData,
-        _token: ChainToken,
+        token: ChainToken,
         mem: &mut Memory,
     ) -> ChainAction {
         let Some(hdr) = chain.read_obj::<CtrlHeader>(0, mem) else {
@@ -313,9 +453,10 @@ impl<'a> Device for Gpu<'a> {
             QueueType::Cursor => Gpu::write_response(chain, CtrlType::RespOkNoData, &hdr, mem),
             QueueType::Control => match CtrlType::try_from(hdr.r#type) {
                 Ok(CtrlType::GetDisplayInfo) => {
+                    let hdr = Gpu::resp_header(CtrlType::RespOkDisplayInfo, &hdr);
+
                     let mut resp = RespDisplayInfo::new_zeroed();
 
-                    resp.hdr = Gpu::resp_header(CtrlType::RespOkDisplayInfo, &hdr);
                     resp.pmodes[0] = DisplayOne {
                         r: Rect {
                             x: 0,
@@ -327,7 +468,506 @@ impl<'a> Device for Gpu<'a> {
                         flags: 0,
                     };
 
+                    chain.write_parts(&[hdr.as_bytes(), resp.as_bytes()], mem)
+                }
+                Ok(CtrlType::GetCapsetInfo) => {
+                    let Some(req) = chain.read_obj::<GetCapsetInfo>(0, mem) else {
+                        return ChainAction::Complete(Gpu::write_response(
+                            chain,
+                            CtrlType::RespErrInvalidParameter,
+                            &hdr,
+                            mem,
+                        ));
+                    };
+
+                    let Ok((id, ver, size)) = self.rutabaga.get_capset_info(req.capset_index)
+                    else {
+                        return ChainAction::Complete(Gpu::write_response(
+                            chain,
+                            CtrlType::RespErrInvalidParameter,
+                            &hdr,
+                            mem,
+                        ));
+                    };
+                    let mut resp = RespCapsetInfo::new_zeroed();
+                    resp.hdr = Gpu::resp_header(CtrlType::RespOkCapsetInfo, &hdr);
+                    resp.capset_id = id;
+                    resp.capset_max_version = ver;
+                    resp.capset_max_size = size;
                     chain.write_response(resp.as_bytes(), mem)
+                }
+                Ok(CtrlType::GetCapset) => {
+                    let Some(req) = chain.read_obj::<GetCapset>(0, mem) else {
+                        return ChainAction::Complete(Gpu::write_response(
+                            chain,
+                            CtrlType::RespErrInvalidParameter,
+                            &hdr,
+                            mem,
+                        ));
+                    };
+
+                    let data = self
+                        .rutabaga
+                        .get_capset(req.capset_id, req.capset_version)
+                        .unwrap();
+
+                    let resp_hdr = Gpu::resp_header(CtrlType::RespOkCapset, &hdr);
+                    chain.write_parts(&[resp_hdr.as_bytes(), &data], mem)
+                }
+                Ok(CtrlType::CtxCreate) => {
+                    let Some(req) = chain.read_obj::<CtxCreate>(0, mem) else {
+                        return ChainAction::Complete(Gpu::write_response(
+                            chain,
+                            CtrlType::RespErrInvalidParameter,
+                            &hdr,
+                            mem,
+                        ));
+                    };
+
+                    let raw_context_init = req.context_init;
+
+                    // if the lower 8-bits of the context_init are zero, then the type of the context is determined by the device.
+                    let context_init = if raw_context_init & CONTEXT_INIT_CAPSET_ID_MASK == 0 {
+                        eprintln!(
+                            "CtxCreate: guest sent context_init=0, forcing Venus capset={}",
+                            CAPSET_VENUS
+                        );
+                        CAPSET_VENUS
+                    } else {
+                        raw_context_init
+                    };
+
+                    let nlen = (req.nlen as usize).min(req.debug_name.len());
+                    let name_bytes = &req.debug_name[..nlen];
+                    let nul = name_bytes
+                        .iter()
+                        .position(|&b| b == 0)
+                        .unwrap_or(name_bytes.len());
+                    let name = std::str::from_utf8(&name_bytes[..nul]).unwrap_or("ctx");
+
+                    let ctx_ud = hdr.ctx_ud;
+                    let req_nlen = req.nlen;
+                    eprintln!(
+                        "CtxCreate ctx_id={} nlen={} raw_context_init={} context_init={} name={:?}",
+                        ctx_ud, req_nlen, raw_context_init, context_init, name,
+                    );
+
+                    match self
+                        .rutabaga
+                        .create_context(hdr.ctx_ud, context_init, Some(name))
+                    {
+                        Ok(()) => Gpu::write_response(chain, CtrlType::RespOkNoData, &hdr, mem),
+                        Err(e) => {
+                            eprintln!(
+                                "CtxCreate FAILED ctx_id={} raw_context_init={} context_init={} err={:?}",
+                                ctx_ud, raw_context_init, context_init, e,
+                            );
+
+                            Gpu::write_response(chain, CtrlType::RespErrInvalidContextId, &hdr, mem)
+                        }
+                    }
+                }
+                Ok(CtrlType::CtxDestroy) => {
+                    self.rutabaga.destroy_context(hdr.ctx_ud).unwrap();
+                    Gpu::write_response(chain, CtrlType::RespOkNoData, &hdr, mem)
+                }
+                Ok(CtrlType::CtxAttachResource) => {
+                    let Some(req) = chain.read_obj::<CtxResource>(0, mem) else {
+                        return ChainAction::Complete(Gpu::write_response(
+                            chain,
+                            CtrlType::RespErrInvalidParameter,
+                            &hdr,
+                            mem,
+                        ));
+                    };
+
+                    let resource_id = req.resource_id;
+                    let ctx_ud = hdr.ctx_ud;
+
+                    let Some(resource) = self.resources.get(&resource_id) else {
+                        eprintln!(
+                            "CtxAttach FAILED: resource not in local map ctx_id={} resource_id={}",
+                            ctx_ud, resource_id,
+                        );
+
+                        return ChainAction::Complete(Gpu::write_response(
+                            chain,
+                            CtrlType::RespErrInvalidResourceId,
+                            &hdr,
+                            mem,
+                        ));
+                    };
+
+                    let ctx_ud = hdr.ctx_ud;
+                    eprintln!(
+                        "CtxAttach ctx_id={} resource_id={} is_3d={} blob_size={}",
+                        ctx_ud, resource_id, resource.is_3d, resource.blob_size,
+                    );
+
+                    if !resource.is_3d {
+                        eprintln!(
+                            "CtxAttach: ignoring attach of local 2D resource {} to ctx {}",
+                            resource_id, ctx_ud,
+                        );
+
+                        return ChainAction::Complete(Gpu::write_response(
+                            chain,
+                            CtrlType::RespOkNoData,
+                            &hdr,
+                            mem,
+                        ));
+                    }
+
+                    let ctx_ud = hdr.ctx_ud;
+                    match self
+                        .rutabaga
+                        .context_attach_resource(hdr.ctx_ud, resource_id)
+                    {
+                        Ok(()) => Gpu::write_response(chain, CtrlType::RespOkNoData, &hdr, mem),
+                        Err(e) => {
+                            eprintln!(
+                                "CtxAttach FAILED in rutabaga ctx_id={} resource_id={} err={:?}",
+                                ctx_ud, resource_id, e,
+                            );
+
+                            Gpu::write_response(
+                                chain,
+                                CtrlType::RespErrInvalidResourceId,
+                                &hdr,
+                                mem,
+                            )
+                        }
+                    }
+                }
+                Ok(CtrlType::CtxDetachResource) => {
+                    let Some(req) = chain.read_obj::<CtxResource>(0, mem) else {
+                        return ChainAction::Complete(Gpu::write_response(
+                            chain,
+                            CtrlType::RespErrInvalidParameter,
+                            &hdr,
+                            mem,
+                        ));
+                    };
+
+                    let resource_id = req.resource_id;
+
+                    let Some(resource) = self.resources.get(&resource_id) else {
+                        return ChainAction::Complete(Gpu::write_response(
+                            chain,
+                            CtrlType::RespErrInvalidResourceId,
+                            &hdr,
+                            mem,
+                        ));
+                    };
+
+                    let ctx_ud = hdr.ctx_ud;
+                    if !resource.is_3d {
+                        eprintln!(
+                            "CtxDetach: ignoring detach of local 2D resource {} from ctx {}",
+                            resource_id, ctx_ud,
+                        );
+
+                        return ChainAction::Complete(Gpu::write_response(
+                            chain,
+                            CtrlType::RespOkNoData,
+                            &hdr,
+                            mem,
+                        ));
+                    }
+
+                    let ctx_ud = hdr.ctx_ud;
+                    match self
+                        .rutabaga
+                        .context_detach_resource(hdr.ctx_ud, resource_id)
+                    {
+                        Ok(()) => Gpu::write_response(chain, CtrlType::RespOkNoData, &hdr, mem),
+                        Err(e) => {
+                            eprintln!(
+                                "CtxDetach FAILED ctx_id={} resource_id={} err={:?}",
+                                ctx_ud, resource_id, e,
+                            );
+
+                            Gpu::write_response(
+                                chain,
+                                CtrlType::RespErrInvalidResourceId,
+                                &hdr,
+                                mem,
+                            )
+                        }
+                    }
+                }
+                Ok(CtrlType::ResourceCreate3d) => {
+                    let Some(req) = chain.read_obj::<ResourceCreate3d>(0, mem) else {
+                        return ChainAction::Complete(Gpu::write_response(
+                            chain,
+                            CtrlType::RespErrInvalidParameter,
+                            &hdr,
+                            mem,
+                        ));
+                    };
+
+                    let ctx_ud = hdr.ctx_ud;
+                    let resource_id = req.resource_id;
+                    let target = req.target;
+                    let format = req.format;
+                    let bind = req.bind;
+                    let width = req.width;
+                    let height = req.height;
+                    let depth = req.depth;
+                    let flags = req.flags;
+                    eprintln!(
+                        "ResourceCreate3d ctx_id={} resource_id={} target={} format={} bind={:#x} {}x{} depth={} flags={:#x}",
+                        ctx_ud, resource_id, target, format, bind, width, height, depth, flags,
+                    );
+                    let info = ResourceCreate3D {
+                        target: req.target,
+                        format: req.format,
+                        bind: req.bind,
+                        width: req.width,
+                        height: req.height,
+                        depth: req.depth,
+                        array_size: req.array_size,
+                        last_level: req.last_level,
+                        nr_samples: req.nr_samples,
+                        flags: req.flags,
+                    };
+                    if self
+                        .rutabaga
+                        .resource_create_3d(req.resource_id, info)
+                        .is_err()
+                    {
+                        return ChainAction::Complete(Gpu::write_response(
+                            chain,
+                            CtrlType::RespErrUnspec,
+                            &hdr,
+                            mem,
+                        ));
+                    }
+
+                    self.resources.insert(
+                        req.resource_id,
+                        Resource {
+                            format: req.format,
+                            width: req.width,
+                            height: req.height,
+                            backing: Vec::new(),
+                            framebuffer: Vec::new(),
+                            is_3d: true,
+                            mapped_gpa: None,
+                            mapped_size: 0,
+                            blob_size: 0,
+                        },
+                    );
+
+                    Gpu::write_response(chain, CtrlType::RespOkNoData, &hdr, mem)
+                }
+                Ok(CtrlType::TransferToHost3d) => {
+                    let Some(req) = chain.read_obj::<TransferHost3d>(0, mem) else {
+                        return ChainAction::Complete(Gpu::write_response(
+                            chain,
+                            CtrlType::RespErrInvalidParameter,
+                            &hdr,
+                            mem,
+                        ));
+                    };
+
+                    self.rutabaga
+                        .transfer_write(
+                            hdr.ctx_ud,
+                            req.resource_id,
+                            Transfer3D {
+                                x: req.r#box.x,
+                                y: req.r#box.y,
+                                z: req.r#box.z,
+                                w: req.r#box.w,
+                                h: req.r#box.h,
+                                d: req.r#box.d,
+                                level: req.level,
+                                stride: req.stride,
+                                layer_stride: req.layer_stride,
+                                offset: req.offset,
+                            },
+                        )
+                        .unwrap();
+
+                    Gpu::write_response(chain, CtrlType::RespOkNoData, &hdr, mem)
+                }
+                Ok(CtrlType::TransferFromHost3d) => {
+                    let Some(req) = chain.read_obj::<TransferHost3d>(0, mem) else {
+                        return ChainAction::Complete(Gpu::write_response(
+                            chain,
+                            CtrlType::RespErrInvalidParameter,
+                            &hdr,
+                            mem,
+                        ));
+                    };
+
+                    self.rutabaga
+                        .transfer_read(
+                            hdr.ctx_ud,
+                            req.resource_id,
+                            Transfer3D {
+                                x: req.r#box.x,
+                                y: req.r#box.y,
+                                z: req.r#box.z,
+                                w: req.r#box.w,
+                                h: req.r#box.h,
+                                d: req.r#box.d,
+                                level: req.level,
+                                stride: req.stride,
+                                layer_stride: req.layer_stride,
+                                offset: req.offset,
+                            },
+                            None,
+                        )
+                        .unwrap();
+
+                    Gpu::write_response(chain, CtrlType::RespOkNoData, &hdr, mem)
+                }
+                Ok(CtrlType::Submit3d) => {
+                    let stream_len = chain.readable_len().saturating_sub(size_of::<CtrlHeader>());
+                    let mut buf = vec![0u8; stream_len];
+                    if chain
+                        .read_at(size_of::<CtrlHeader>(), &mut buf, mem)
+                        .is_none()
+                    {
+                        return ChainAction::Complete(Gpu::write_response(
+                            chain,
+                            CtrlType::RespErrInvalidParameter,
+                            &hdr,
+                            mem,
+                        ));
+                    }
+                    if self
+                        .rutabaga
+                        .submit_command(hdr.ctx_ud, &mut buf, &[])
+                        .is_err()
+                    {
+                        return ChainAction::Complete(Gpu::write_response(
+                            chain,
+                            CtrlType::RespErrUnspec,
+                            &hdr,
+                            mem,
+                        ));
+                    }
+
+                    if hdr.flags & FLAG_FENCE != 0 {
+                        let fence = RutabagaFence {
+                            flags: hdr.flags,
+                            fence_id: hdr.fence_id,
+                            ctx_id: hdr.ctx_ud,
+                            ring_idx: hdr.ring_idx,
+                        };
+
+                        self.rutabaga.create_fence(fence).unwrap();
+                        self.pending_fences.push_back(PendingFence {
+                            ring_idx: hdr.ring_idx,
+                            fence_id: hdr.fence_id,
+                            token,
+                            written: size_of::<CtrlHeader>() as u32,
+                        });
+                        return ChainAction::Deferred;
+                    } else {
+                        Gpu::write_response(chain, CtrlType::RespOkNoData, &hdr, mem)
+                    }
+                }
+                Ok(CtrlType::ResourceCreateBlob) => {
+                    let Some(req) = chain.read_obj::<ResourceCreateBlob>(0, mem) else {
+                        return ChainAction::Complete(Gpu::write_response(
+                            chain,
+                            CtrlType::RespErrInvalidParameter,
+                            &hdr,
+                            mem,
+                        ));
+                    };
+
+                    let mut iovecs = Vec::with_capacity(req.nr_entries as usize);
+                    if req.nr_entries > 0 {
+                        let entries_base = size_of::<ResourceCreateBlob>();
+                        let entry_size = size_of::<MemEntry>();
+                        if entries_base + req.nr_entries as usize * entry_size
+                            > chain.readable_len()
+                        {
+                            return ChainAction::Complete(Gpu::write_response(
+                                chain,
+                                CtrlType::RespErrInvalidParameter,
+                                &hdr,
+                                mem,
+                            ));
+                        }
+                        for i in 0..req.nr_entries as usize {
+                            let Some(e) =
+                                chain.read_obj::<MemEntry>(entries_base + i * entry_size, mem)
+                            else {
+                                return ChainAction::Complete(Gpu::write_response(
+                                    chain,
+                                    CtrlType::RespErrInvalidParameter,
+                                    &hdr,
+                                    mem,
+                                ));
+                            };
+                            let Some(base) = gpa_to_host(mem, e.addr, e.length as u64) else {
+                                return ChainAction::Complete(Gpu::write_response(
+                                    chain,
+                                    CtrlType::RespErrInvalidParameter,
+                                    &hdr,
+                                    mem,
+                                ));
+                            };
+                            iovecs.push(RutabagaIovec {
+                                base,
+                                len: e.length as usize,
+                            });
+                        }
+                    }
+
+                    let blob = rutabaga_gfx::ResourceCreateBlob {
+                        blob_mem: req.blob_mem,
+                        blob_flags: req.blob_flags,
+                        blob_id: req.blob_id,
+                        size: req.size,
+                    };
+
+                    let iovecs_opt = if iovecs.is_empty() {
+                        None
+                    } else {
+                        Some(iovecs)
+                    };
+                    if self
+                        .rutabaga
+                        .resource_create_blob(hdr.ctx_ud, req.resource_id, blob, iovecs_opt, None)
+                        .is_err()
+                    {
+                        return ChainAction::Complete(Gpu::write_response(
+                            chain,
+                            CtrlType::RespErrUnspec,
+                            &hdr,
+                            mem,
+                        ));
+                    }
+
+                    self.resources.insert(
+                        req.resource_id,
+                        Resource {
+                            format: 0,
+                            width: 0,
+                            height: 0,
+                            backing: Vec::new(),
+                            framebuffer: Vec::new(),
+                            is_3d: true,
+                            mapped_gpa: None,
+                            mapped_size: 0,
+                            blob_size: req.size,
+                        },
+                    );
+
+                    Gpu::write_response(chain, CtrlType::RespOkNoData, &hdr, mem)
+                }
+                Ok(CtrlType::ResourceMapBlob) => {
+                    Gpu::write_response(chain, CtrlType::RespOkNoData, &hdr, mem)
+                }
+                Ok(CtrlType::ResourceUnmapBlob) => {
+                    Gpu::write_response(chain, CtrlType::RespOkNoData, &hdr, mem)
                 }
                 Ok(cmd) => {
                     let resp = self.control(cmd, chain, mem);
@@ -395,6 +1035,15 @@ impl<'a> Gpu<'a> {
                     return CtrlType::RespErrInvalidParameter;
                 };
 
+                let resource_id = val.resource_id;
+                let format = val.format;
+                let width = val.width;
+                let height = val.width;
+                eprintln!(
+                    "ResourceCreate2d resource_id={} format={} {}x{}",
+                    resource_id, format, width, height
+                );
+
                 if val.format != 2 {
                     eprintln!("virtio-gpu: unsupported format: {}", { val.format });
                     return CtrlType::RespErrInvalidParameter;
@@ -412,6 +1061,10 @@ impl<'a> Gpu<'a> {
                         height: val.height,
                         backing: Vec::new(),
                         framebuffer: Vec::new(),
+                        is_3d: false,
+                        mapped_gpa: None,
+                        mapped_size: 0,
+                        blob_size: 0,
                     },
                 );
 
@@ -459,6 +1112,20 @@ impl<'a> Gpu<'a> {
                         return CtrlType::RespErrInvalidParameter;
                     };
                     backing.push(entry);
+                }
+
+                let rutabaga_backing = backing
+                    .iter()
+                    .map(|b| RutabagaIovec {
+                        base: gpa_to_host(mem, b.addr, b.length as u64).unwrap(),
+                        len: b.length as usize,
+                    })
+                    .collect();
+
+                if resource.is_3d {
+                    self.rutabaga
+                        .attach_backing(resource_id, rutabaga_backing)
+                        .unwrap();
                 }
 
                 resource.backing = backing;
@@ -649,6 +1316,7 @@ impl<'a> Gpu<'a> {
 
 pub enum ExternalEvent {
     DisplayResized { width: u32, height: u32 },
+    FenceSignaled { ring_idx: u8, fence_id: u64 },
 }
 
 impl<'a> ExternalEventHandler for Gpu<'a> {
@@ -666,6 +1334,35 @@ impl<'a> ExternalEventHandler for Gpu<'a> {
                 self.events_read |= EVENT_DISPLAY;
                 emit(Effect::Config);
             }
+            ExternalEvent::FenceSignaled { ring_idx, fence_id } => {
+                let mut i = 0;
+                while i < self.pending_fences.len() {
+                    let p = &self.pending_fences[i];
+                    if p.ring_idx == ring_idx && p.fence_id <= fence_id {
+                        let p = self.pending_fences.remove(i).unwrap();
+                        emit(Effect::Complete {
+                            token: p.token,
+                            written: p.written,
+                        });
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
         }
     }
+}
+
+fn gpa_to_host(mem: &Memory, gpa: u64, len: u64) -> Option<*mut c_void> {
+    let base_gpa = mem.guest_addr()?;
+    let size = mem.size() as u64;
+
+    if gpa < base_gpa {
+        return None;
+    }
+    if gpa.checked_add(len)? > base_gpa.checked_add(size)? {
+        return None;
+    }
+    let offset = gpa - base_gpa;
+    Some(unsafe { mem.host_addr().add(offset as usize) } as *mut c_void)
 }

@@ -5,7 +5,7 @@ ENTITLEMENTS := entitlements.xml
 .PHONY: release sign run clean
 
 release:
-	cargo build --release
+	RUSTFLAGS="-L /opt/homebrew/lib" cargo build --release
 	codesign --sign - --entitlements $(ENTITLEMENTS) --deep --force $(BIN)
 
 dtb:
