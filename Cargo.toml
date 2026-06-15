@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 applevisor = "1.0"
+applevisor-sys = "1.0.0"
 coreaudio-rs = "0.14.2"
 crossterm = "0.29.0"
 num_enum = "0.7.6"

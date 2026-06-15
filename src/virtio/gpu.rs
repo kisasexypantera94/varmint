@@ -2,9 +2,10 @@
 use crate::virtio::{
     chain::ChainData,
     common,
-    device::{ChainAction, ChainToken, Device, Effect, ExternalEventHandler},
+    device::{ChainAction, ChainToken, Device, Effect, ExternalEventHandler, ShmRegion},
 };
 use applevisor::memory::Memory;
+use applevisor_sys::{hv_vm_map, hv_vm_unmap};
 use num_enum::TryFromPrimitive;
 use rutabaga_gfx::{ResourceCreate3D, Rutabaga, RutabagaFence, RutabagaIovec, Transfer3D};
 use std::{
@@ -26,6 +27,14 @@ const EVENT_DISPLAY: u32 = 1;
 const CAPSET_VENUS: u32 = 4;
 
 const CONTEXT_INIT_CAPSET_ID_MASK: u32 = 0xff;
+
+const HOST_VISIBLE_SHM_ID: u64 = 1;
+const HOST_VISIBLE_SHM_BASE: u64 = 0x8_0000_0000;
+const HOST_VISIBLE_SHM_SIZE: u64 = 4 * 1024 * 1024 * 1024;
+const APPLE_HV_PAGE_SIZE: usize = 0x4000;
+
+const RUTABAGA_MAP_CACHE_MASK: u32 = 0x0f;
+const RUTABAGA_MEM_HANDLE_TYPE_APPLE: u32 = 0x0006;
 
 mod feature {
     pub const VIRGL: u64 = 1 << 0;
@@ -285,6 +294,39 @@ struct ResourceCreateBlob {
     nr_entries: u32,
     blob_id: u64,
     size: u64,
+}
+
+#[derive(IntoBytes, FromBytes, Immutable, Debug, Copy, Clone)]
+#[repr(C, packed)]
+struct ResourceMapBlob {
+    hdr: CtrlHeader,
+    resource_id: u32,
+    padding: u32,
+    offset: u64,
+}
+
+#[derive(IntoBytes, FromBytes, Immutable, Debug, Copy, Clone)]
+#[repr(C, packed)]
+struct ResourceUnmapBlob {
+    hdr: CtrlHeader,
+    resource_id: u32,
+    padding: u32,
+}
+
+#[derive(IntoBytes, FromBytes, Immutable, Debug, Copy, Clone)]
+#[repr(C, packed)]
+struct RespMapInfo {
+    hdr: CtrlHeader,
+    map_info: u32,
+    padding: u32,
+}
+
+#[derive(IntoBytes, FromBytes, Immutable, Debug, Copy, Clone)]
+#[repr(C, packed)]
+struct CmdSubmit3d {
+    hdr: CtrlHeader,
+    size: u32,
+    padding: u32,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, TryFromPrimitive)]
@@ -825,12 +867,30 @@ impl<'a> Device for Gpu<'a> {
                     Gpu::write_response(chain, CtrlType::RespOkNoData, &hdr, mem)
                 }
                 Ok(CtrlType::Submit3d) => {
-                    let stream_len = chain.readable_len().saturating_sub(size_of::<CtrlHeader>());
-                    let mut buf = vec![0u8; stream_len];
-                    if chain
-                        .read_at(size_of::<CtrlHeader>(), &mut buf, mem)
-                        .is_none()
-                    {
+                    let Some(req) = chain.read_obj::<CmdSubmit3d>(0, mem) else {
+                        return ChainAction::Complete(Gpu::write_response(
+                            chain,
+                            CtrlType::RespErrInvalidParameter,
+                            &hdr,
+                            mem,
+                        ));
+                    };
+
+                    let ctx_id = hdr.ctx_ud;
+                    let flags = hdr.flags;
+                    let fence_id = hdr.fence_id;
+                    let ring_idx = hdr.ring_idx;
+                    let submit_size = req.size as usize;
+
+                    let payload_offset = size_of::<CmdSubmit3d>();
+                    let readable_len = chain.readable_len();
+
+                    if submit_size > readable_len.saturating_sub(payload_offset) {
+                        eprintln!(
+                            "Submit3d FAILED: invalid size ctx_id={} submit_size={} readable_len={} payload_offset={}",
+                            ctx_id, submit_size, readable_len, payload_offset,
+                        );
+
                         return ChainAction::Complete(Gpu::write_response(
                             chain,
                             CtrlType::RespErrInvalidParameter,
@@ -838,38 +898,96 @@ impl<'a> Device for Gpu<'a> {
                             mem,
                         ));
                     }
-                    if self
-                        .rutabaga
-                        .submit_command(hdr.ctx_ud, &mut buf, &[])
-                        .is_err()
-                    {
+
+                    let mut buf = vec![0u8; submit_size];
+
+                    if chain.read_at(payload_offset, &mut buf, mem).is_none() {
+                        eprintln!(
+                            "Submit3d FAILED: cannot read payload ctx_id={} size={}",
+                            ctx_id, submit_size,
+                        );
+
                         return ChainAction::Complete(Gpu::write_response(
                             chain,
-                            CtrlType::RespErrUnspec,
+                            CtrlType::RespErrInvalidParameter,
                             &hdr,
                             mem,
                         ));
                     }
 
-                    if hdr.flags & FLAG_FENCE != 0 {
+                    eprintln!(
+                        "Submit3d: ctx_id={} size={} flags={:#x} fence_id={} ring_idx={} first_bytes={:02x?}",
+                        ctx_id,
+                        submit_size,
+                        flags,
+                        fence_id,
+                        ring_idx,
+                        &buf[..buf.len().min(16)],
+                    );
+
+                    match self.rutabaga.submit_command(ctx_id, &mut buf, &[]) {
+                        Ok(()) => {
+                            eprintln!(
+                                "Submit3d OK ctx_id={} size={} flags={:#x} fence_id={} ring_idx={}",
+                                ctx_id, submit_size, flags, fence_id, ring_idx,
+                            );
+                        }
+                        Err(err) => {
+                            eprintln!(
+                                "Submit3d ERR ctx_id={} size={} flags={:#x} fence_id={} ring_idx={} err={:?}",
+                                ctx_id, submit_size, flags, fence_id, ring_idx, err,
+                            );
+
+                            return ChainAction::Complete(Gpu::write_response(
+                                chain,
+                                CtrlType::RespErrUnspec,
+                                &hdr,
+                                mem,
+                            ));
+                        }
+                    }
+
+                    if flags & FLAG_FENCE != 0 {
                         let fence = RutabagaFence {
-                            flags: hdr.flags,
-                            fence_id: hdr.fence_id,
-                            ctx_id: hdr.ctx_ud,
-                            ring_idx: hdr.ring_idx,
+                            flags,
+                            fence_id,
+                            ctx_id,
+                            ring_idx,
                         };
 
-                        self.rutabaga.create_fence(fence).unwrap();
+                        match self.rutabaga.create_fence(fence) {
+                            Ok(()) => {
+                                eprintln!(
+                                    "CreateFence OK ctx_id={} fence_id={} ring_idx={}",
+                                    ctx_id, fence_id, ring_idx,
+                                );
+                            }
+                            Err(err) => {
+                                eprintln!(
+                                    "CreateFence ERR ctx_id={} fence_id={} ring_idx={} err={:?}",
+                                    ctx_id, fence_id, ring_idx, err,
+                                );
+
+                                return ChainAction::Complete(Gpu::write_response(
+                                    chain,
+                                    CtrlType::RespErrUnspec,
+                                    &hdr,
+                                    mem,
+                                ));
+                            }
+                        }
+
                         self.pending_fences.push_back(PendingFence {
-                            ring_idx: hdr.ring_idx,
-                            fence_id: hdr.fence_id,
+                            ring_idx,
+                            fence_id,
                             token,
                             written: size_of::<CtrlHeader>() as u32,
                         });
+
                         return ChainAction::Deferred;
-                    } else {
-                        Gpu::write_response(chain, CtrlType::RespOkNoData, &hdr, mem)
                     }
+
+                    Gpu::write_response(chain, CtrlType::RespOkNoData, &hdr, mem)
                 }
                 Ok(CtrlType::ResourceCreateBlob) => {
                     let Some(req) = chain.read_obj::<ResourceCreateBlob>(0, mem) else {
@@ -938,6 +1056,11 @@ impl<'a> Device for Gpu<'a> {
                         .resource_create_blob(hdr.ctx_ud, req.resource_id, blob, iovecs_opt, None)
                         .is_err()
                     {
+                        let resource_id = req.resource_id;
+                        eprintln!(
+                            "ResourceCreateBlob FAILED ctx_id={} resource_id={}",
+                            ctx_ud, resource_id,
+                        );
                         return ChainAction::Complete(Gpu::write_response(
                             chain,
                             CtrlType::RespErrUnspec,
@@ -963,12 +1086,8 @@ impl<'a> Device for Gpu<'a> {
 
                     Gpu::write_response(chain, CtrlType::RespOkNoData, &hdr, mem)
                 }
-                Ok(CtrlType::ResourceMapBlob) => {
-                    Gpu::write_response(chain, CtrlType::RespOkNoData, &hdr, mem)
-                }
-                Ok(CtrlType::ResourceUnmapBlob) => {
-                    Gpu::write_response(chain, CtrlType::RespOkNoData, &hdr, mem)
-                }
+                Ok(CtrlType::ResourceMapBlob) => self.resource_map_blob(chain, &hdr, mem),
+                Ok(CtrlType::ResourceUnmapBlob) => self.resource_unmap_blob(chain, &hdr, mem),
                 Ok(cmd) => {
                     let resp = self.control(cmd, chain, mem);
                     Gpu::write_response(chain, resp, &hdr, mem)
@@ -986,6 +1105,17 @@ impl<'a> Device for Gpu<'a> {
     fn reset(&mut self) {
         self.resources.clear();
         self.scanout_resource = None;
+    }
+
+    fn shared_memory_region(&self, id: u32) -> Option<ShmRegion> {
+        if id as u64 == HOST_VISIBLE_SHM_ID {
+            Some(ShmRegion {
+                base: HOST_VISIBLE_SHM_BASE,
+                len: HOST_VISIBLE_SHM_SIZE,
+            })
+        } else {
+            None
+        }
     }
 }
 
@@ -1312,6 +1442,199 @@ impl<'a> Gpu<'a> {
 
         None
     }
+
+    #[cfg(target_os = "macos")]
+    fn resource_map_blob(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> u32 {
+        let Some(req) = chain.read_obj::<ResourceMapBlob>(0, mem) else {
+            return Gpu::write_response(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
+        };
+
+        let resource_id = req.resource_id;
+        let offset = req.offset;
+
+        let Some(resource) = self.resources.get(&resource_id) else {
+            eprintln!(
+                "ResourceMapBlob FAILED: unknown resource_id={}",
+                resource_id,
+            );
+            return Gpu::write_response(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
+        };
+
+        let size = resource.blob_size;
+        if size == 0 {
+            eprintln!(
+                "ResourceMapBlob FAILED: resource_id={} has zero blob_size",
+                resource_id,
+            );
+            return Gpu::write_response(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
+        }
+
+        if offset
+            .checked_add(size)
+            .is_none_or(|end| end > HOST_VISIBLE_SHM_SIZE)
+        {
+            eprintln!(
+                "ResourceMapBlob FAILED: mapping does not fit resource_id={} offset={:#x} size={} shm_size={}",
+                resource_id, offset, size, HOST_VISIBLE_SHM_SIZE,
+            );
+            return Gpu::write_response(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
+        }
+
+        let align = APPLE_HV_PAGE_SIZE as u64;
+
+        if offset & (align - 1) != 0 {
+            eprintln!(
+                "ResourceMapBlob FAILED: unaligned offset resource_id={} offset={:#x} align={:#x}",
+                resource_id, offset, align,
+            );
+            return Gpu::write_response(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
+        }
+
+        let map_info = match self.rutabaga.map_info(resource_id) {
+            Ok(map_info) => map_info,
+            Err(err) => {
+                eprintln!(
+                    "ResourceMapBlob FAILED: map_info resource_id={} err={:?}",
+                    resource_id, err,
+                );
+                return Gpu::write_response(chain, CtrlType::RespErrUnspec, hdr, mem);
+            }
+        };
+
+        let map_ptr = match self.rutabaga.map_ptr(resource_id) {
+            Ok(map_ptr) => map_ptr,
+            Err(err) => {
+                eprintln!(
+                    "ResourceMapBlob FAILED: map_ptr resource_id={} err={:?}",
+                    resource_id, err,
+                );
+                return Gpu::write_response(chain, CtrlType::RespErrUnspec, hdr, mem);
+            }
+        };
+
+        let export = match self.rutabaga.export_blob(resource_id) {
+            Ok(export) => export,
+            Err(err) => {
+                eprintln!(
+                    "ResourceMapBlob FAILED: export_blob resource_id={} err={:?}",
+                    resource_id, err,
+                );
+                return Gpu::write_response(chain, CtrlType::RespErrUnspec, hdr, mem);
+            }
+        };
+
+        if export.handle_type != RUTABAGA_MEM_HANDLE_TYPE_APPLE {
+            eprintln!(
+                "ResourceMapBlob FAILED: unsupported handle_type={:#x} resource_id={}",
+                export.handle_type, resource_id,
+            );
+            return Gpu::write_response(chain, CtrlType::RespErrUnspec, hdr, mem);
+        }
+
+        let guest_addr = HOST_VISIBLE_SHM_BASE + offset;
+
+        eprintln!(
+            "ResourceMapBlob: resource_id={} map_ptr={:#x} guest_addr={:#x} size={} map_info={:#x}",
+            resource_id, map_ptr, guest_addr, size, map_info,
+        );
+
+        let (mapped_gpa, mapped_size) = match map_blob_to_guest(map_ptr, guest_addr, size as usize)
+        {
+            Ok(mapping) => mapping,
+            Err(err) => {
+                eprintln!(
+                    "ResourceMapBlob FAILED: hv_vm_map resource_id={} map_ptr={:#x} guest_addr={:#x} size={} err={:#x}",
+                    resource_id, map_ptr, guest_addr, size, err,
+                );
+                return Gpu::write_response(chain, CtrlType::RespErrUnspec, hdr, mem);
+            }
+        };
+
+        let Some(resource) = self.resources.get_mut(&resource_id) else {
+            let _ = unmap_blob_from_guest(mapped_gpa, mapped_size);
+            return Gpu::write_response(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
+        };
+
+        resource.mapped_gpa = Some(mapped_gpa);
+        resource.mapped_size = mapped_size;
+
+        let resp = RespMapInfo {
+            hdr: Gpu::resp_header(CtrlType::RespOkMapInfo, hdr),
+            // Access flags are rutabaga-internal, not virtio-gpu ABI.
+            map_info: map_info & RUTABAGA_MAP_CACHE_MASK,
+            padding: 0,
+        };
+
+        chain.write_response(resp.as_bytes(), mem)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn resource_map_blob(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> u32 {
+        Gpu::write_response(chain, CtrlType::RespErrUnspec, hdr, mem)
+    }
+
+    #[cfg(target_os = "macos")]
+    fn resource_unmap_blob(
+        &mut self,
+        chain: &ChainData,
+        hdr: &CtrlHeader,
+        mem: &mut Memory,
+    ) -> u32 {
+        let Some(req) = chain.read_obj::<ResourceUnmapBlob>(0, mem) else {
+            return Gpu::write_response(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
+        };
+
+        // packed field: copy first
+        let resource_id = req.resource_id;
+
+        let (mapped_gpa, mapped_size) = {
+            let Some(resource) = self.resources.get_mut(&resource_id) else {
+                eprintln!(
+                    "ResourceUnmapBlob FAILED: unknown resource_id={}",
+                    resource_id,
+                );
+                return Gpu::write_response(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
+            };
+
+            let Some(mapped_gpa) = resource.mapped_gpa.take() else {
+                eprintln!(
+                    "ResourceUnmapBlob FAILED: resource_id={} is not mapped",
+                    resource_id,
+                );
+                return Gpu::write_response(chain, CtrlType::RespErrUnspec, hdr, mem);
+            };
+
+            let mapped_size = resource.mapped_size;
+            resource.mapped_size = 0;
+
+            (mapped_gpa, mapped_size)
+        };
+
+        eprintln!(
+            "ResourceUnmapBlob: resource_id={} guest_addr={:#x} size={}",
+            resource_id, mapped_gpa, mapped_size,
+        );
+
+        if let Err(err) = unmap_blob_from_guest(mapped_gpa, mapped_size) {
+            eprintln!(
+                "ResourceUnmapBlob FAILED: hv_vm_unmap resource_id={} guest_addr={:#x} size={} err={:#x}",
+                resource_id, mapped_gpa, mapped_size, err,
+            );
+            return Gpu::write_response(chain, CtrlType::RespErrUnspec, hdr, mem);
+        }
+
+        Gpu::write_response(chain, CtrlType::RespOkNoData, hdr, mem)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn resource_unmap_blob(
+        &mut self,
+        chain: &ChainData,
+        hdr: &CtrlHeader,
+        mem: &mut Memory,
+    ) -> u32 {
+        Gpu::write_response(chain, CtrlType::RespErrUnspec, hdr, mem)
+    }
 }
 
 pub enum ExternalEvent {
@@ -1365,4 +1688,69 @@ fn gpa_to_host(mem: &Memory, gpa: u64, len: u64) -> Option<*mut c_void> {
     }
     let offset = gpa - base_gpa;
     Some(unsafe { mem.host_addr().add(offset as usize) } as *mut c_void)
+}
+
+#[cfg(target_os = "macos")]
+const HV_SUCCESS: i32 = 0;
+
+#[cfg(target_os = "macos")]
+const HV_MEMORY_READ: u64 = 1 << 0;
+
+#[cfg(target_os = "macos")]
+const HV_MEMORY_WRITE: u64 = 1 << 1;
+
+fn align_up(value: usize, align: usize) -> Option<usize> {
+    let mask = align.checked_sub(1)?;
+    value.checked_add(mask).map(|v| v & !mask)
+}
+
+fn align_down_u64(value: u64, align: u64) -> u64 {
+    value & !(align - 1)
+}
+
+#[cfg(target_os = "macos")]
+fn map_blob_to_guest(host_addr: u64, guest_addr: u64, size: usize) -> Result<(u64, usize), i32> {
+    let page_size = APPLE_HV_PAGE_SIZE as u64;
+
+    let host_base = align_down_u64(host_addr, page_size);
+    let guest_base = align_down_u64(guest_addr, page_size);
+
+    let host_delta = host_addr - host_base;
+    let guest_delta = guest_addr - guest_base;
+
+    if host_delta != guest_delta {
+        eprintln!(
+            "blob mapping alignment mismatch: host_addr={:#x} guest_addr={:#x} host_delta={:#x} guest_delta={:#x}",
+            host_addr, guest_addr, host_delta, guest_delta,
+        );
+        return Err(-1);
+    }
+
+    let map_size = align_up(
+        size.checked_add(host_delta as usize).ok_or(-1)?,
+        APPLE_HV_PAGE_SIZE,
+    )
+    .ok_or(-1)?;
+
+    let ret = unsafe {
+        hv_vm_map(
+            host_base as *const c_void,
+            guest_base,
+            map_size,
+            HV_MEMORY_READ | HV_MEMORY_WRITE,
+        )
+    };
+
+    if ret == HV_SUCCESS {
+        Ok((guest_base, map_size))
+    } else {
+        Err(ret)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn unmap_blob_from_guest(guest_base: u64, size: usize) -> Result<(), i32> {
+    let ret = unsafe { hv_vm_unmap(guest_base, size) };
+
+    if ret == HV_SUCCESS { Ok(()) } else { Err(ret) }
 }

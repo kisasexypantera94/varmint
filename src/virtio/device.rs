@@ -11,6 +11,11 @@ pub struct ChainToken {
     pub head_idx: u16,
 }
 
+pub struct ShmRegion {
+    pub base: u64,
+    pub len: u64,
+}
+
 pub trait Device {
     fn id(&self) -> u32;
     fn features(&self) -> u64;
@@ -35,6 +40,10 @@ pub trait Device {
     }
 
     fn reset(&mut self) {}
+
+    fn shared_memory_region(&self, _id: u32) -> Option<ShmRegion> {
+        None
+    }
 }
 
 pub enum Effect<'a> {
