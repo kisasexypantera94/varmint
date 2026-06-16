@@ -1,5 +1,6 @@
 use crate::virtio::input::keys::*;
 use applevisor::prelude::*;
+use applevisor_sys::{hv_ipa_granule_t::HV_IPA_GRANULE_4KB, hv_vm_config_set_ipa_granule};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use rutabaga_gfx::{
     RUTABAGA_CAPSET_VENUS, Rutabaga, RutabagaBuilder,
@@ -781,8 +782,8 @@ fn vmm_thread(
     input_rx: Receiver<HostInputEvent>,
     display_rx: Receiver<HostDisplayEvent>,
 ) -> Result<()> {
-    let image = read_file("./artifacts/debian-arm64/installed-vmlinuz").unwrap();
-    let initrd = read_file("./artifacts/debian-arm64/installed-initrd.gz").unwrap();
+    let image = read_file("/Users/dvgr/varmint-kernels/debian-4k/vmlinuz-6.12.90+deb13.1-arm64").unwrap();
+    let initrd = read_file("/Users/dvgr/varmint-kernels/debian-4k/initrd.img-6.12.90+deb13.1-arm64").unwrap();
     let dtb = read_file("./artifacts/guest.dtb").unwrap();
 
     let image_header = linux::parse_image_header(&image).unwrap();
@@ -904,7 +905,10 @@ fn main() -> Result<()> {
     gic_config.set_distributor_base(GICD_START)?;
     gic_config.set_redistributor_base(GICR_START)?;
 
-    let vm = VirtualMachine::with_gic(VirtualMachineConfig::default(), gic_config)?;
+    let mut vm_cfg = VirtualMachineConfig::new();
+    vm_cfg.set_ipa_granule(IpaGranule::HV_IPA_GRANULE_4KB)?;
+
+    let vm = VirtualMachine::with_gic(vm_cfg, gic_config)?;
 
     let uart = Mutex::new(uart::Uart::new());
     let display = Mutex::new(virtio::gpu::DisplayBuffer::new());

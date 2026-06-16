@@ -31,7 +31,7 @@ const CONTEXT_INIT_CAPSET_ID_MASK: u32 = 0xff;
 const HOST_VISIBLE_SHM_ID: u64 = 1;
 const HOST_VISIBLE_SHM_BASE: u64 = 0x8_0000_0000;
 const HOST_VISIBLE_SHM_SIZE: u64 = 4 * 1024 * 1024 * 1024;
-const APPLE_HV_PAGE_SIZE: usize = 0x4000;
+const APPLE_HV_PAGE_SIZE: usize = 0x1000;
 
 const RUTABAGA_MAP_CACHE_MASK: u32 = 0x0f;
 const RUTABAGA_MEM_HANDLE_TYPE_APPLE: u32 = 0x0006;
@@ -1056,6 +1056,7 @@ impl<'a> Device for Gpu<'a> {
                         .resource_create_blob(hdr.ctx_ud, req.resource_id, blob, iovecs_opt, None)
                         .is_err()
                     {
+                        let ctx_ud = hdr.ctx_ud;
                         let resource_id = req.resource_id;
                         eprintln!(
                             "ResourceCreateBlob FAILED ctx_id={} resource_id={}",
