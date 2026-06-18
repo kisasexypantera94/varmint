@@ -75,6 +75,8 @@ pub struct Transport<D: Device> {
 
     queue_sel: u16,
 
+    shm_sel: u32,
+
     interrupt_status: u32,
     status: u32,
 }
@@ -88,6 +90,7 @@ impl<D: device::Device> Transport<D> {
             device_features_sel: 0,
             driver_features_sel: 0,
             queue_sel: 0,
+            shm_sel: 0,
             interrupt_status: 0,
             status: 0,
         }
@@ -128,10 +131,22 @@ impl<D: device::Device> Transport<D> {
             Reg::QueueReady => self.queues[self.queue_sel as usize].ready as u32,
             Reg::InterruptStatus => self.interrupt_status,
             Reg::Status => self.status,
-            Reg::SHMLenLow => u32::MAX,
-            Reg::SHMLenHigh => u32::MAX,
-            Reg::SHMBaseLow => u32::MAX,
-            Reg::SHMBaseHigh => u32::MAX,
+            Reg::SHMLenLow => match self.device.shared_memory_region(self.shm_sel) {
+                Some(region) => region.len as u32,
+                None => u32::MAX,
+            },
+            Reg::SHMLenHigh => match self.device.shared_memory_region(self.shm_sel) {
+                Some(region) => (region.len >> 32) as u32,
+                None => u32::MAX,
+            },
+            Reg::SHMBaseLow => match self.device.shared_memory_region(self.shm_sel) {
+                Some(region) => region.base as u32,
+                None => u32::MAX,
+            },
+            Reg::SHMBaseHigh => match self.device.shared_memory_region(self.shm_sel) {
+                Some(region) => (region.base >> 32) as u32,
+                None => u32::MAX,
+            },
             _ => 0,
         }) as u64
     }
@@ -225,6 +240,7 @@ impl<D: device::Device> Transport<D> {
             Reg::QueueDriverHigh => self.current_pending_queue().driver_hi = value,
             Reg::QueueDeviceLow => self.current_pending_queue().device_lo = value,
             Reg::QueueDeviceHigh => self.current_pending_queue().device_hi = value,
+            Reg::SHMSel => self.shm_sel = value,
             _ => {}
         }
     }

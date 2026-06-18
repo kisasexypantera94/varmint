@@ -3,11 +3,34 @@
 </p>
 
 # varmint
-varmint – a tiny Virtual Machine Manager for Apple Silicon, built on top of the Hypervisor framework.
+A small Virtual Machine Manager for Apple Silicon, built on top of Hypervisor.framework.
 
+It boots a Debian arm64 guest and a small set of devices:
+- virtio-blk
+- virtio-net
+- virtio-input
+- virtio-snd
+- virtio-gpu
+- virtio-console (shared clipboard)
+
+## Graphics
+The main experiment is hardware-accelerated graphics: `guest Vulkan => Mesa Venus => virglrenderer => MoltenVK => Metal`
+
+Native arm64 Vulkan can run `vkcube` and `vkmark`.
+
+x86-64 binaries can run under FEX. Steam starts, Helltaker launches through Proton, and early Wine/DXVK experiments are starting to work.
+
+## Demo
+Final Fantasy XIV Dawntrail benchmark:
 <p align="left">
-  <img src="./assets/demo_gui.png">
+  <img src="./assets/dawntrail_bench_demo.png">
 </p>
+
+##  Setup
+### Dependencies
+```sh
+chmod +x ./scripts/build_graphics_stack.sh ; ./scripts/build_graphics_stack.sh
+```
 
 ## Resources
 - [Booting AArch64 Linux](https://docs.kernel.org/arch/arm64/booting.html)

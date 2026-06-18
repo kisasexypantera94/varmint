@@ -481,7 +481,7 @@ impl Snd {
 
                 let written = self.respond_status(chain, Status::Ok, mem);
                 self.stream.state = StreamState::Initial;
-                // self.flush_backend();
+
                 if self.pending.is_empty() {
                     ChainAction::Complete(written)
                 } else {
