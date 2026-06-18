@@ -3,7 +3,7 @@
 </p>
 
 # varmint
-A small Virtual Machine Manager for Apple Silicon, built on top of Apple’s Hypervisor framework.
+A small Virtual Machine Manager for Apple Silicon, built on top of Hypervisor.framework.
 
 It boots a Debian arm64 guest and a small set of devices:
 - virtio-blk
@@ -21,7 +21,7 @@ Native arm64 Vulkan can run `vkcube` and `vkmark`.
 x86-64 binaries can run under FEX. Steam starts, Helltaker launches through Proton, and early Wine/DXVK experiments are starting to work.
 
 ## Demo
-Final Fantasy XIV: Dawntrail benchmark:
+Final Fantasy XIV Dawntrail benchmark:
 <p align="left">
   <img src="./assets/dawntrail_bench_demo.png">
 </p>
