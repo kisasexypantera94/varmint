@@ -418,6 +418,7 @@ pub struct Gpu<'a> {
     events_read: u32,
 
     pending_fences: VecDeque<PendingFence>,
+    submit_buf: Vec<u8>,
     rutabaga: &'a mut Rutabaga,
 }
 
@@ -436,6 +437,7 @@ impl<'a> Gpu<'a> {
             scanout_height: height as u32,
             events_read: 0,
             pending_fences: VecDeque::new(),
+            submit_buf: Vec::new(),
             rutabaga,
         }
     }
@@ -588,11 +590,6 @@ impl<'a> Device for Gpu<'a> {
                     let name = std::str::from_utf8(&name_bytes[..nul]).unwrap_or("ctx");
 
                     let ctx_ud = hdr.ctx_ud;
-                    let req_nlen = req.nlen;
-                    eprintln!(
-                        "CtxCreate ctx_id={} nlen={} raw_context_init={} context_init={} name={:?}",
-                        ctx_ud, req_nlen, raw_context_init, context_init, name,
-                    );
 
                     match self
                         .rutabaga
@@ -641,10 +638,6 @@ impl<'a> Device for Gpu<'a> {
                     };
 
                     let ctx_ud = hdr.ctx_ud;
-                    eprintln!(
-                        "CtxAttach ctx_id={} resource_id={} is_3d={} blob_size={}",
-                        ctx_ud, resource_id, resource.is_3d, resource.blob_size,
-                    );
 
                     if !resource.is_3d {
                         eprintln!(
@@ -748,19 +741,6 @@ impl<'a> Device for Gpu<'a> {
                         ));
                     };
 
-                    let ctx_ud = hdr.ctx_ud;
-                    let resource_id = req.resource_id;
-                    let target = req.target;
-                    let format = req.format;
-                    let bind = req.bind;
-                    let width = req.width;
-                    let height = req.height;
-                    let depth = req.depth;
-                    let flags = req.flags;
-                    eprintln!(
-                        "ResourceCreate3d ctx_id={} resource_id={} target={} format={} bind={:#x} {}x{} depth={} flags={:#x}",
-                        ctx_ud, resource_id, target, format, bind, width, height, depth, flags,
-                    );
                     let info = ResourceCreate3D {
                         target: req.target,
                         format: req.format,
@@ -899,9 +879,12 @@ impl<'a> Device for Gpu<'a> {
                         ));
                     }
 
-                    let mut buf = vec![0u8; submit_size];
+                    self.submit_buf.resize(submit_size, 0);
 
-                    if chain.read_at(payload_offset, &mut buf, mem).is_none() {
+                    if chain
+                        .read_at(payload_offset, &mut self.submit_buf, mem)
+                        .is_none()
+                    {
                         eprintln!(
                             "Submit3d FAILED: cannot read payload ctx_id={} size={}",
                             ctx_id, submit_size,
@@ -915,36 +898,22 @@ impl<'a> Device for Gpu<'a> {
                         ));
                     }
 
-                    eprintln!(
-                        "Submit3d: ctx_id={} size={} flags={:#x} fence_id={} ring_idx={} first_bytes={:02x?}",
-                        ctx_id,
-                        submit_size,
-                        flags,
-                        fence_id,
-                        ring_idx,
-                        &buf[..buf.len().min(16)],
-                    );
+                    let submit_result =
+                        self.rutabaga
+                            .submit_command(ctx_id, &mut self.submit_buf, &[]);
 
-                    match self.rutabaga.submit_command(ctx_id, &mut buf, &[]) {
-                        Ok(()) => {
-                            eprintln!(
-                                "Submit3d OK ctx_id={} size={} flags={:#x} fence_id={} ring_idx={}",
-                                ctx_id, submit_size, flags, fence_id, ring_idx,
-                            );
-                        }
-                        Err(err) => {
-                            eprintln!(
-                                "Submit3d ERR ctx_id={} size={} flags={:#x} fence_id={} ring_idx={} err={:?}",
-                                ctx_id, submit_size, flags, fence_id, ring_idx, err,
-                            );
+                    if let Err(err) = submit_result {
+                        eprintln!(
+                            "Submit3d ERR ctx_id={} size={} flags={:#x} fence_id={} ring_idx={} err={:?}",
+                            ctx_id, submit_size, flags, fence_id, ring_idx, err,
+                        );
 
-                            return ChainAction::Complete(Gpu::write_response(
-                                chain,
-                                CtrlType::RespErrUnspec,
-                                &hdr,
-                                mem,
-                            ));
-                        }
+                        return ChainAction::Complete(Gpu::write_response(
+                            chain,
+                            CtrlType::RespErrUnspec,
+                            &hdr,
+                            mem,
+                        ));
                     }
 
                     if flags & FLAG_FENCE != 0 {
@@ -955,26 +924,20 @@ impl<'a> Device for Gpu<'a> {
                             ring_idx,
                         };
 
-                        match self.rutabaga.create_fence(fence) {
-                            Ok(()) => {
-                                eprintln!(
-                                    "CreateFence OK ctx_id={} fence_id={} ring_idx={}",
-                                    ctx_id, fence_id, ring_idx,
-                                );
-                            }
-                            Err(err) => {
-                                eprintln!(
-                                    "CreateFence ERR ctx_id={} fence_id={} ring_idx={} err={:?}",
-                                    ctx_id, fence_id, ring_idx, err,
-                                );
+                        let fence_result = self.rutabaga.create_fence(fence);
 
-                                return ChainAction::Complete(Gpu::write_response(
-                                    chain,
-                                    CtrlType::RespErrUnspec,
-                                    &hdr,
-                                    mem,
-                                ));
-                            }
+                        if let Err(err) = fence_result {
+                            eprintln!(
+                                "CreateFence ERR ctx_id={} fence_id={} ring_idx={} err={:?}",
+                                ctx_id, fence_id, ring_idx, err,
+                            );
+
+                            return ChainAction::Complete(Gpu::write_response(
+                                chain,
+                                CtrlType::RespErrUnspec,
+                                &hdr,
+                                mem,
+                            ));
                         }
 
                         self.pending_fences.push_back(PendingFence {
@@ -1169,7 +1132,7 @@ impl<'a> Gpu<'a> {
                 let resource_id = val.resource_id;
                 let format = val.format;
                 let width = val.width;
-                let height = val.width;
+                let height = val.height;
                 eprintln!(
                     "ResourceCreate2d resource_id={} format={} {}x{}",
                     resource_id, format, width, height
@@ -1470,23 +1433,34 @@ impl<'a> Gpu<'a> {
             return Gpu::write_response(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
         }
 
-        if offset
-            .checked_add(size)
-            .is_none_or(|end| end > HOST_VISIBLE_SHM_SIZE)
-        {
-            eprintln!(
-                "ResourceMapBlob FAILED: mapping does not fit resource_id={} offset={:#x} size={} shm_size={}",
-                resource_id, offset, size, HOST_VISIBLE_SHM_SIZE,
-            );
-            return Gpu::write_response(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
-        }
-
         let align = APPLE_HV_PAGE_SIZE as u64;
 
         if offset & (align - 1) != 0 {
             eprintln!(
                 "ResourceMapBlob FAILED: unaligned offset resource_id={} offset={:#x} align={:#x}",
                 resource_id, offset, align,
+            );
+            return Gpu::write_response(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
+        }
+
+        let rounded_size = match align_up(size as usize, APPLE_HV_PAGE_SIZE) {
+            Some(v) => v as u64,
+            None => {
+                eprintln!(
+                    "ResourceMapBlob FAILED: size overflow resource_id={} size={}",
+                    resource_id, size,
+                );
+                return Gpu::write_response(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
+            }
+        };
+
+        if offset
+            .checked_add(rounded_size)
+            .is_none_or(|end| end > HOST_VISIBLE_SHM_SIZE)
+        {
+            eprintln!(
+                "ResourceMapBlob FAILED: rounded mapping does not fit resource_id={} offset={:#x} size={} rounded_size={} shm_size={}",
+                resource_id, offset, size, rounded_size, HOST_VISIBLE_SHM_SIZE,
             );
             return Gpu::write_response(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         }
@@ -1533,11 +1507,6 @@ impl<'a> Gpu<'a> {
         }
 
         let guest_addr = HOST_VISIBLE_SHM_BASE + offset;
-
-        eprintln!(
-            "ResourceMapBlob: resource_id={} map_ptr={:#x} guest_addr={:#x} size={} map_info={:#x}",
-            resource_id, map_ptr, guest_addr, size, map_info,
-        );
 
         let (mapped_gpa, mapped_size) = match map_blob_to_guest(map_ptr, guest_addr, size as usize)
         {
@@ -1610,11 +1579,6 @@ impl<'a> Gpu<'a> {
 
             (mapped_gpa, mapped_size)
         };
-
-        eprintln!(
-            "ResourceUnmapBlob: resource_id={} guest_addr={:#x} size={}",
-            resource_id, mapped_gpa, mapped_size,
-        );
 
         if let Err(err) = unmap_blob_from_guest(mapped_gpa, mapped_size) {
             eprintln!(

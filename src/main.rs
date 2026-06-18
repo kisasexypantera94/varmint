@@ -38,7 +38,7 @@ mod uart;
 mod virtio;
 
 const RAM_START: u64 = 0x40000000;
-const RAM_SIZE: usize = 0x80000000;
+const RAM_SIZE: usize = 0x200000000;
 
 const KERNEL_TEXT_OFFSET: u64 = 0x0;
 const IMAGE_START: u64 = RAM_START + KERNEL_TEXT_OFFSET;
@@ -782,8 +782,11 @@ fn vmm_thread(
     input_rx: Receiver<HostInputEvent>,
     display_rx: Receiver<HostDisplayEvent>,
 ) -> Result<()> {
-    let image = read_file("/Users/dvgr/varmint-kernels/debian-4k/vmlinuz-6.12.90+deb13.1-arm64").unwrap();
-    let initrd = read_file("/Users/dvgr/varmint-kernels/debian-4k/initrd.img-6.12.90+deb13.1-arm64").unwrap();
+    let image =
+        read_file("/Users/dvgr/varmint-kernels/debian-4k/vmlinuz-6.12.90+deb13.1-arm64").unwrap();
+    let initrd =
+        read_file("/Users/dvgr/varmint-kernels/debian-4k/initrd.img-6.12.90+deb13.1-arm64")
+            .unwrap();
     let dtb = read_file("./artifacts/guest.dtb").unwrap();
 
     let image_header = linux::parse_image_header(&image).unwrap();
@@ -812,7 +815,7 @@ fn vmm_thread(
 
     let mut uart_irq = irq::IrqLine::new(spi_int_start + UART_SPI_OFFSET, false);
 
-    let virtio_blk_dev = virtio::Blk::new("dev0.img", 16 * 1024 * 1024 * 1024);
+    let virtio_blk_dev = virtio::Blk::new("dev0.img", 28 * 1024 * 1024 * 1024);
     let mut virtio_blk = virtio::MmioTransport::new(virtio_blk_dev);
     let mut virtio_blk_irq = irq::IrqLine::new(spi_int_start + VIRTBLK_SPI_OFFSET, false);
 
