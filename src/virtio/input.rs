@@ -294,11 +294,6 @@ pub enum ExternalInput {
         horizontal: bool,
         value: i32,
     },
-    RawEvent {
-        ty: u16,
-        code: u16,
-        value: u32,
-    },
 }
 
 impl ExternalEventHandler for Input {
@@ -344,7 +339,6 @@ impl ExternalEventHandler for Input {
                 ev(EV_REL, code, value as u32);
                 ev(EV_SYN, SYN_REPORT, 0);
             }
-            ExternalInput::RawEvent { ty, code, value } => ev(ty, code, value),
         }
     }
 }

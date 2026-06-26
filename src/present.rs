@@ -1,313 +1,377 @@
+use crate::iosurface::ScopedIOSurface;
+use core_graphics_types::geometry::CGSize;
+use foreign_types::ForeignType;
+use metal::{
+    CAMetalLayer, CommandQueue, Device, MTLOrigin, MTLPixelFormat, MTLRegion, MTLSize,
+    MTLStorageMode, MTLTextureType, MTLTextureUsage, MetalLayer, Texture, TextureDescriptor,
+    TextureRef,
+};
+use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use raw_window_metal::Layer;
+use std::ffi::{c_char, c_void};
 use winit::window::Window;
 
+struct IOSurfaceBackedTexture {
+    surface_id: u32,
+    surface: ScopedIOSurface,
+    texture: Texture,
+}
+
 pub struct Presenter {
-    surface: wgpu::Surface<'static>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
+    _window: Window,
 
-    pipeline: wgpu::RenderPipeline,
-    bind_group_layout: wgpu::BindGroupLayout,
-    sampler: wgpu::Sampler,
+    layer: MetalLayer,
+    device: Device,
+    queue: CommandQueue,
 
-    // recreated when guest resolution changes
-    texture: Option<wgpu::Texture>,
-    bind_group: Option<wgpu::BindGroup>,
+    texture: Option<Texture>,
     tex_w: u32,
     tex_h: u32,
+
+    iosurface_texture: Option<IOSurfaceBackedTexture>,
+
+    drawable_w: u32,
+    drawable_h: u32,
+}
+
+type Sel = *mut c_void;
+
+#[link(name = "objc")]
+unsafe extern "C" {
+    fn sel_registerName(name: *const c_char) -> Sel;
+    fn objc_msgSend();
+}
+
+unsafe fn new_texture_with_iosurface(
+    device: &Device,
+    desc: &TextureDescriptor,
+    surface: crate::iosurface::IOSurfaceRef,
+) -> Option<Texture> {
+    let sel_name = b"newTextureWithDescriptor:iosurface:plane:\0";
+    let sel = unsafe { sel_registerName(sel_name.as_ptr() as *const c_char) };
+
+    let send: unsafe extern "C" fn(
+        *mut c_void,
+        Sel,
+        *const c_void,
+        crate::iosurface::IOSurfaceRef,
+        usize,
+    ) -> *mut metal::MTLTexture = unsafe { std::mem::transmute(objc_msgSend as *const ()) };
+
+    let texture = unsafe {
+        send(
+            device.as_ptr() as *mut c_void,
+            sel,
+            desc.as_ptr() as *const c_void,
+            surface,
+            0,
+        )
+    };
+
+    if texture.is_null() {
+        None
+    } else {
+        Some(unsafe { Texture::from_ptr(texture) })
+    }
 }
 
 impl Presenter {
     pub fn new(window: Window, width: u32, height: u32) -> Self {
-        let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
-        desc.backends = wgpu::Backends::METAL;
-        let instance = wgpu::Instance::new(desc);
+        let raw = window.window_handle().expect("window handle").as_raw();
 
-        let surface = instance.create_surface(window).unwrap();
-
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-        }))
-        .expect("no suitable GPU adapter");
-
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("varmint-device"),
-            required_features: wgpu::Features::empty(),
-            required_limits: adapter.limits(),
-            ..Default::default()
-        }))
-        .expect("failed to create device");
-
-        let caps = surface.get_capabilities(&adapter);
-        // Prefer a non-sRGB format so guest pixel values are shown as-is.
-        let format = caps
-            .formats
-            .iter()
-            .copied()
-            .find(|f| !f.is_srgb())
-            .unwrap_or(caps.formats[0]);
-
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format,
-            width: width.max(1),
-            height: height.max(1),
-            present_mode: wgpu::PresentMode::Fifo, // vsync; use Mailbox/Immediate for uncapped
-            alpha_mode: caps.alpha_modes[0],
-            view_formats: vec![],
-            desired_maximum_frame_latency: 2,
+        let raw_layer = match raw {
+            RawWindowHandle::AppKit(handle) => {
+                // SAFETY: winit's AppKit handle is a valid NSView.
+                unsafe { Layer::from_ns_view(handle.ns_view) }
+            }
+            other => panic!("unsupported window handle for Metal presenter: {other:?}"),
         };
-        surface.configure(&device, &config);
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("blit-shader"),
-            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
-        });
+        let layer_ptr = raw_layer.into_raw();
 
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("blit-bgl"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
+        // SAFETY: raw-window-metal returned a retained CAMetalLayer pointer.
+        let layer = unsafe { MetalLayer::from_ptr(layer_ptr.as_ptr() as *mut CAMetalLayer) };
 
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("blit-pl"),
-            bind_group_layouts: &[Some(&bind_group_layout)],
-            immediate_size: 0,
-        });
+        let device = Device::system_default().expect("no Metal device");
+        let queue = device.new_command_queue();
+        eprintln!("present: IOSurface-backed upload path enabled");
+        eprintln!("present: ANGLE MTLTexture -> IOSurface copy path enabled");
+        layer.set_device(&device);
+        layer.set_pixel_format(MTLPixelFormat::BGRA8Unorm);
+        layer.set_framebuffer_only(false);
 
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("blit-pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs"),
-                buffers: &[],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        // Guest scanout data is effectively XRGB in many paths; do not let
+        // WindowServer/CoreAnimation treat guest alpha as real window alpha.
+        layer.set_opaque(true);
+        layer.remove_all_animations();
 
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("blit-sampler"),
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            ..Default::default()
+        layer.set_presents_with_transaction(false);
+        layer.set_display_sync_enabled(false);
+        layer.set_drawable_size(CGSize {
+            width: width.max(1) as f64,
+            height: height.max(1) as f64,
         });
 
         Self {
-            surface,
+            _window: window,
+            layer,
             device,
             queue,
-            config,
-            pipeline,
-            bind_group_layout,
-            sampler,
             texture: None,
-            bind_group: None,
             tex_w: 0,
             tex_h: 0,
+            iosurface_texture: None,
+            drawable_w: width.max(1),
+            drawable_h: height.max(1),
         }
+    }
+
+    fn set_drawable_size_if_needed(&mut self, width: u32, height: u32) {
+        let width = width.max(1);
+        let height = height.max(1);
+
+        if self.drawable_w == width && self.drawable_h == height {
+            return;
+        }
+
+        self.layer.set_drawable_size(CGSize {
+            width: width as f64,
+            height: height as f64,
+        });
+
+        self.drawable_w = width;
+        self.drawable_h = height;
     }
 
     pub fn resize_surface(&mut self, width: u32, height: u32) {
-        if width == 0 || height == 0 {
-            return;
-        }
-        let max = self.device.limits().max_texture_dimension_2d;
-        self.config.width = width.min(max);
-        self.config.height = height.min(max);
-        self.surface.configure(&self.device, &self.config);
+        self.set_drawable_size_if_needed(width, height);
     }
 
-    fn ensure_texture(&mut self, w: u32, h: u32) {
+    fn ensure_texture(&mut self, w: u32, h: u32) -> bool {
         if self.tex_w == w && self.tex_h == h && self.texture.is_some() {
-            return;
+            return false;
         }
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("guest-fb"),
-            size: wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Bgra8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("blit-bg"),
-            layout: &self.bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler),
-                },
-            ],
-        });
+
+        let desc = TextureDescriptor::new();
+        desc.set_texture_type(MTLTextureType::D2);
+        desc.set_pixel_format(MTLPixelFormat::BGRA8Unorm);
+        desc.set_width(w as u64);
+        desc.set_height(h as u64);
+        desc.set_depth(1);
+        desc.set_mipmap_level_count(1);
+        desc.set_storage_mode(MTLStorageMode::Shared);
+        desc.set_usage(MTLTextureUsage::ShaderRead);
+
+        let texture = self.device.new_texture(&desc);
+
         self.texture = Some(texture);
-        self.bind_group = Some(bind_group);
         self.tex_w = w;
         self.tex_h = h;
+
+        true
     }
 
-    /// Upload the guest frame and present it scaled to the window.
-    pub fn present(&mut self, pixels: &[u32], pw: u32, ph: u32) {
+    fn upload_rect_to_texture(
+        texture: &TextureRef,
+        pixels: &[u32],
+        pw: u32,
+        ph: u32,
+        dirty_x: u32,
+        dirty_y: u32,
+        dirty_w: u32,
+        dirty_h: u32,
+        force_full: bool,
+    ) -> bool {
         if pw == 0 || ph == 0 || pixels.len() < (pw * ph) as usize {
-            return;
+            return false;
         }
 
-        self.ensure_texture(pw, ph);
-        let texture = self.texture.as_ref().unwrap();
+        let (x, y, w, h) = if force_full {
+            (0, 0, pw, ph)
+        } else {
+            let x = dirty_x.min(pw);
+            let y = dirty_y.min(ph);
+            let w = dirty_w.min(pw.saturating_sub(x));
+            let h = dirty_h.min(ph.saturating_sub(y));
+            (x, y, w, h)
+        };
 
-        // u32 slice -> byte slice without bytemuck
+        if w == 0 || h == 0 {
+            return false;
+        }
+
         let bytes: &[u8] =
             unsafe { std::slice::from_raw_parts(pixels.as_ptr() as *const u8, pixels.len() * 4) };
 
-        let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(frame) => frame,
-            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
-            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                self.surface.configure(&self.device, &self.config);
-                return;
-            }
-            wgpu::CurrentSurfaceTexture::Timeout
-            | wgpu::CurrentSurfaceTexture::Occluded
-            | wgpu::CurrentSurfaceTexture::Validation => return,
-        };
-
-        self.queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &bytes[..(pw * ph * 4) as usize],
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(pw * 4),
-                rows_per_image: Some(ph),
-            },
-            wgpu::Extent3d {
-                width: pw,
-                height: ph,
-                depth_or_array_layers: 1,
-            },
-        );
-
-        let view = frame
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("blit-encoder"),
-            });
-
-        {
-            let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("blit-pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            rp.set_pipeline(&self.pipeline);
-            rp.set_bind_group(0, self.bind_group.as_ref().unwrap(), &[]);
-            rp.draw(0..3, 0..1);
+        let row_bytes = pw as usize * 4;
+        let start = y as usize * row_bytes + x as usize * 4;
+        let last = start + (h as usize - 1) * row_bytes + w as usize * 4;
+        if last > bytes.len() {
+            return false;
         }
 
-        self.queue.submit(std::iter::once(encoder.finish()));
-        frame.present();
+        texture.replace_region(
+            MTLRegion::new_2d(x as u64, y as u64, w as u64, h as u64),
+            0,
+            bytes[start..].as_ptr() as *const c_void,
+            row_bytes as u64,
+        );
+
+        true
+    }
+
+    fn ensure_iosurface_texture_for_id(
+        &mut self,
+        surface_id: u32,
+        width: u32,
+        height: u32,
+    ) -> bool {
+        if let Some(backing) = self.iosurface_texture.as_ref() {
+            if backing.surface_id == surface_id
+                && backing.surface.width() == width
+                && backing.surface.height() == height
+            {
+                return true;
+            }
+        }
+
+        let Some(surface) = ScopedIOSurface::lookup(surface_id, width, height) else {
+            eprintln!("present: IOSurfaceLookup({surface_id}) failed");
+            self.iosurface_texture = None;
+            return false;
+        };
+
+        let desc = TextureDescriptor::new();
+        desc.set_texture_type(MTLTextureType::D2);
+        desc.set_pixel_format(MTLPixelFormat::BGRA8Unorm);
+        desc.set_width(width as u64);
+        desc.set_height(height as u64);
+        desc.set_depth(1);
+        desc.set_mipmap_level_count(1);
+        desc.set_storage_mode(MTLStorageMode::Shared);
+        desc.set_usage(MTLTextureUsage::ShaderRead);
+
+        let Some(texture) =
+            (unsafe { new_texture_with_iosurface(&self.device, &desc, surface.as_ptr()) })
+        else {
+            eprintln!(
+                "present: failed to create Metal texture for producer IOSurface id={surface_id}"
+            );
+            self.iosurface_texture = None;
+            return false;
+        };
+
+        self.iosurface_texture = Some(IOSurfaceBackedTexture {
+            surface_id,
+            surface,
+            texture,
+        });
+
+        true
+    }
+
+    pub fn present_iosurface_or_rect(
+        &mut self,
+        iosurface_id: Option<u32>,
+        pixels: &[u32],
+        pw: u32,
+        ph: u32,
+        dirty_x: u32,
+        dirty_y: u32,
+        dirty_w: u32,
+        dirty_h: u32,
+    ) -> bool {
+        if let Some(iosurface_id) = iosurface_id {
+            self.set_drawable_size_if_needed(pw, ph);
+
+            if self.ensure_iosurface_texture_for_id(iosurface_id, pw, ph) {
+                if let Some(backing) = self.iosurface_texture.as_ref() {
+                    return self.blit_texture_to_drawable(backing.texture.as_ref(), pw, ph);
+                }
+            }
+
+            return false;
+        }
+
+        self.present_rect(pixels, pw, ph, dirty_x, dirty_y, dirty_w, dirty_h)
+    }
+
+    pub fn present_rect(
+        &mut self,
+        pixels: &[u32],
+        pw: u32,
+        ph: u32,
+        dirty_x: u32,
+        dirty_y: u32,
+        dirty_w: u32,
+        dirty_h: u32,
+    ) -> bool {
+        if pw == 0 || ph == 0 {
+            return false;
+        }
+
+        self.set_drawable_size_if_needed(pw, ph);
+
+        let force_full = self.ensure_texture(pw, ph);
+
+        let Some(texture) = self.texture.as_ref() else {
+            return false;
+        };
+
+        if !Self::upload_rect_to_texture(
+            texture.as_ref(),
+            pixels,
+            pw,
+            ph,
+            dirty_x,
+            dirty_y,
+            dirty_w,
+            dirty_h,
+            force_full,
+        ) {
+            return false;
+        }
+
+        self.blit_texture_to_drawable(texture.as_ref(), pw, ph)
+    }
+
+    fn blit_texture_to_drawable(&self, src: &TextureRef, width: u32, height: u32) -> bool {
+        let Some(drawable) = self.layer.next_drawable() else {
+            return false;
+        };
+
+        let dst = drawable.texture();
+
+        let copy_w = (width as u64).min(src.width()).min(dst.width());
+        let copy_h = (height as u64).min(src.height()).min(dst.height());
+        if copy_w == 0 || copy_h == 0 {
+            return false;
+        }
+
+        let command_buffer = self.queue.new_command_buffer();
+        let blit = command_buffer.new_blit_command_encoder();
+
+        blit.copy_from_texture(
+            src,
+            0,
+            0,
+            MTLOrigin { x: 0, y: 0, z: 0 },
+            MTLSize {
+                width: copy_w,
+                height: copy_h,
+                depth: 1,
+            },
+            dst,
+            0,
+            0,
+            MTLOrigin { x: 0, y: 0, z: 0 },
+        );
+
+        blit.end_encoding();
+        command_buffer.present_drawable(drawable);
+
+        command_buffer.commit();
+
+        true
     }
 }
-
-const SHADER: &str = r#"
-struct VsOut {
-    @builtin(position) pos: vec4<f32>,
-    @location(0) uv: vec2<f32>,
-};
-
-@vertex
-fn vs(@builtin(vertex_index) i: u32) -> VsOut {
-    var p = array<vec2<f32>, 3>(
-        vec2<f32>(-1.0, -1.0),
-        vec2<f32>( 3.0, -1.0),
-        vec2<f32>(-1.0,  3.0),
-    );
-    var uv = array<vec2<f32>, 3>(
-        vec2<f32>(0.0, 1.0),
-        vec2<f32>(2.0, 1.0),
-        vec2<f32>(0.0, -1.0),
-    );
-    var out: VsOut;
-    out.pos = vec4<f32>(p[i], 0.0, 1.0);
-    out.uv = uv[i];
-    return out;
-}
-
-@group(0) @binding(0) var tex: texture_2d<f32>;
-@group(0) @binding(1) var samp: sampler;
-
-@fragment
-fn fs(in: VsOut) -> @location(0) vec4<f32> {
-    let c = textureSample(tex, samp, in.uv);
-    return vec4<f32>(c.rgb, 1.0);
-}
-"#;

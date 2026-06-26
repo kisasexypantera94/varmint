@@ -14,11 +14,12 @@ objc2-app-kit = "0.3.2"
 objc2-foundation = "0.3.2"
 pollster = "0.4.0"
 rtrb = "0.3.4"
-rutabaga_gfx = { git = "https://github.com/containers/libkrun", package = "krun-rutabaga-gfx", features = [
-    "virgl_renderer",
-    "virgl_renderer_next",
-] }
 vmnet = "0.5.1"
 wgpu = "29.0.3"
 winit = "0.30.13"
 zerocopy = { version = "0.8.50", features = ["derive"] }
+metal = "0.33.0"
+foreign-types = "0.5"
+raw-window-handle = "0.6"
+raw-window-metal = "1.1.0"
+core-graphics-types = "0.2"

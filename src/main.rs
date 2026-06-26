@@ -1,12 +1,9 @@
-use crate::virtio::input::keys::*;
-use applevisor::prelude::*;
-use applevisor_sys::{hv_ipa_granule_t::HV_IPA_GRANULE_4KB, hv_vm_config_set_ipa_granule};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use rutabaga_gfx::{
-    RUTABAGA_CAPSET_VENUS, Rutabaga, RutabagaBuilder,
-    RutabagaComponentType::{self, VirglRenderer},
-    RutabagaFence, RutabagaFenceHandler, RutabagaResult, VirglRendererFlags,
+use crate::virtio::{
+    input::keys::*,
+    virgl_ffi::{VirglFence, VirglRenderer},
 };
+use applevisor::prelude::*;
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use std::{
     fs::File,
     io::{self, Read, Write},
@@ -25,9 +22,11 @@ use winit::{
     window::{Window, WindowId},
 };
 
+mod angle_egl;
 mod audio;
 mod clipboard;
 mod helpers;
+mod iosurface;
 mod irq;
 mod kick;
 mod linux;
@@ -246,6 +245,8 @@ struct AppState<'a> {
     front: Vec<u32>,
     present_w: usize,
     present_h: usize,
+    dirty_rect: Option<(usize, usize, usize, usize)>,
+    iosurface_id: Option<u32>,
     last_seq: u64,
 
     last_mouse_pos: Option<(f64, f64)>,
@@ -262,15 +263,35 @@ impl<'a> AppState<'a> {
         self.vm.vcpus_exit(&[self.handle.clone()]).unwrap();
     }
 
-    fn blit(&mut self) {
+    fn blit(&mut self) -> bool {
         if let Some(p) = self.presenter.as_mut() {
             if self.present_w > 0 && self.present_h > 0 {
                 let t0 = std::time::Instant::now();
-                p.present(&self.front, self.present_w as u32, self.present_h as u32);
+
+                let full = (0, 0, self.present_w, self.present_h);
+                let (x, y, w, h) = self.dirty_rect.unwrap_or(full);
+
+                let presented = p.present_iosurface_or_rect(
+                    self.iosurface_id,
+                    &self.front,
+                    self.present_w as u32,
+                    self.present_h as u32,
+                    x as u32,
+                    y as u32,
+                    w as u32,
+                    h as u32,
+                );
+
                 self.stat_update_ns += t0.elapsed().as_nanos();
-                self.stat_presented += 1;
+                if presented {
+                    self.stat_presented += 1;
+                    self.dirty_rect = None;
+                }
+                return presented;
             }
         }
+
+        false
     }
 
     fn poll_display(&mut self) -> bool {
@@ -285,12 +306,51 @@ impl<'a> AppState<'a> {
 
         self.present_w = display.width;
         self.present_h = display.height;
+        self.iosurface_id = display.iosurface_id;
+        let native_copy_frame = self.iosurface_id.is_some();
 
-        if self.front.len() != display.pixels.len() {
+        let full_dirty = (0, 0, display.width, display.height);
+        let mut dirty = display.dirty_rect.take().unwrap_or(full_dirty);
+
+        let resized = self.front.len() != display.pixels.len();
+        if resized {
             self.front.resize(display.pixels.len(), 0);
+            dirty = full_dirty;
         }
-        self.front.copy_from_slice(&display.pixels);
-        display.dirty = false;
+
+        let (x, y, w, h) = dirty;
+        let x = x.min(display.width);
+        let y = y.min(display.height);
+        let w = w.min(display.width.saturating_sub(x));
+        let h = h.min(display.height.saturating_sub(y));
+
+        if w != 0 && h != 0 {
+            if !native_copy_frame {
+                for row in 0..h {
+                    let src_off = (y + row) * display.width + x;
+                    let dst_off = (y + row) * self.present_w + x;
+                    self.front[dst_off..dst_off + w]
+                        .copy_from_slice(&display.pixels[src_off..src_off + w]);
+                }
+            }
+
+            let new_dirty = (x, y, w, h);
+            self.dirty_rect = match self.dirty_rect {
+                Some((old_x, old_y, old_w, old_h)) => {
+                    let old_x1 = old_x.saturating_add(old_w);
+                    let old_y1 = old_y.saturating_add(old_h);
+                    let new_x1 = x.saturating_add(w);
+                    let new_y1 = y.saturating_add(h);
+                    let nx0 = old_x.min(x);
+                    let ny0 = old_y.min(y);
+                    let nx1 = old_x1.max(new_x1);
+                    let ny1 = old_y1.max(new_y1);
+                    Some((nx0, ny0, nx1 - nx0, ny1 - ny0))
+                }
+                None => Some(new_dirty),
+            };
+        }
+
         true
     }
 
@@ -433,52 +493,57 @@ impl<'a> ApplicationHandler for AppState<'a> {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if self.poll_display() {
-            self.blit();
-        }
+        self.poll_display();
+        self.blit();
+
         self.stat_loops += 1;
         self.print_stats();
     }
 }
 
-fn build_rutabaga(
+fn build_virglrenderer(
     fence_tx: Sender<virtio::gpu::ExternalEvent>,
     kicker: kick::Kicker,
-) -> RutabagaResult<Rutabaga> {
-    let fence_handler = RutabagaFenceHandler::new(move |fence: RutabagaFence| {
+) -> virtio::virgl_ffi::VirglResult<VirglRenderer> {
+    let poll_tx = fence_tx.clone();
+    let poll_kicker = kicker.clone();
+
+    let fence_poll_interval = std::env::var("VARMINT_FENCE_POLL_US")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|&v| v > 0)
+        .map(std::time::Duration::from_micros)
+        .unwrap_or_else(|| {
+            let ms = std::env::var("VARMINT_FENCE_POLL_MS")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .filter(|&v| v > 0)
+                .unwrap_or(1);
+            std::time::Duration::from_millis(ms)
+        });
+
+    thread::spawn(move || {
+        loop {
+            std::thread::sleep(fence_poll_interval);
+            if poll_tx
+                .send(virtio::gpu::ExternalEvent::PollRendererFences)
+                .is_err()
+            {
+                break;
+            }
+            poll_kicker.kick();
+        }
+    });
+
+    let renderer = VirglRenderer::new(move |fence: VirglFence| {
         let _ = fence_tx.send(virtio::gpu::ExternalEvent::FenceSignaled {
-            ring_idx: fence.ring_idx,
+            ring_idx: fence.ring_idx as u8,
             fence_id: fence.fence_id,
         });
         kicker.kick();
-    });
+    })?;
 
-    let capset_mask: u64 = 1u64 << RUTABAGA_CAPSET_VENUS;
-
-    let virgl_flags: u32 = 0;
-
-    let rutabaga = RutabagaBuilder::new(VirglRenderer, virgl_flags, capset_mask)
-        .set_use_external_blob(true)
-        .build(fence_handler, None)?;
-
-    let n = rutabaga.get_num_capsets();
-    eprintln!("rutabaga: num_capsets={}", n);
-
-    for i in 0..n {
-        match rutabaga.get_capset_info(i) {
-            Ok((id, ver, size)) => {
-                eprintln!(
-                    "rutabaga: capset[{}]: id={} version={} size={}",
-                    i, id, ver, size
-                );
-            }
-            Err(e) => {
-                eprintln!("rutabaga: capset[{}]: error={:?}", i, e);
-            }
-        }
-    }
-
-    Ok(rutabaga)
+    Ok(renderer)
 }
 
 fn run_loop(
@@ -815,7 +880,7 @@ fn vmm_thread(
 
     let mut uart_irq = irq::IrqLine::new(spi_int_start + UART_SPI_OFFSET, false);
 
-    let virtio_blk_dev = virtio::Blk::new("dev0.img", 28 * 1024 * 1024 * 1024);
+    let virtio_blk_dev = virtio::Blk::new("dev0.img", 40 * 1024 * 1024 * 1024);
     let mut virtio_blk = virtio::MmioTransport::new(virtio_blk_dev);
     let mut virtio_blk_irq = irq::IrqLine::new(spi_int_start + VIRTBLK_SPI_OFFSET, false);
 
@@ -840,8 +905,9 @@ fn vmm_thread(
         let kicker = kick::Kicker::spawn(s, vm, vcpu.get_handle());
 
         let (fence_tx, fence_rx) = std::sync::mpsc::channel::<virtio::gpu::ExternalEvent>();
-        let mut rutabaga = build_rutabaga(fence_tx, kicker.clone()).expect("rutabaga init failed");
-        let virtio_gpu_dev = virtio::Gpu::new(display, &mut rutabaga);
+        let mut renderer =
+            build_virglrenderer(fence_tx, kicker.clone()).expect("virglrenderer init failed");
+        let virtio_gpu_dev = virtio::Gpu::new(display, &mut renderer);
         let mut virtio_gpu = virtio::MmioTransport::new(virtio_gpu_dev);
 
         let (_audio_backend, period_sink, audio_rx) =
@@ -922,7 +988,9 @@ fn main() -> Result<()> {
 
     // winit event loop must be created and run on the main thread
     let event_loop = EventLoop::new().unwrap();
-    event_loop.set_control_flow(ControlFlow::Poll);
+    event_loop.set_control_flow(ControlFlow::WaitUntil(
+        std::time::Instant::now() + std::time::Duration::from_millis(8),
+    ));
 
     let vm_ref = &vm;
     let uart_ref = &uart;
@@ -957,6 +1025,8 @@ fn main() -> Result<()> {
             front: Vec::new(),
             present_w: 0,
             present_h: 0,
+            dirty_rect: None,
+            iosurface_id: None,
             last_seq: 0,
             last_mouse_pos: None,
             stat_last: std::time::Instant::now(),
