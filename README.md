@@ -14,11 +14,13 @@ It boots a Debian arm64 guest and a small set of devices:
 - virtio-console (shared clipboard)
 
 ## Graphics
-The main experiment is hardware-accelerated graphics: `guest Vulkan => Mesa Venus => virglrenderer => MoltenVK => Metal`
+The main experiment is hardware-accelerated graphics.
 
-Native arm64 Vulkan can run `vkcube` and `vkmark`.
+Supported paths:
+- Vulkan: `guest Vulkan => Mesa Venus => virglrenderer => MoltenVK => Metal`
+- OpenGL: `guest OpenGL => Mesa VirGL => virglrenderer => ANGLE => Metal`
 
-x86-64 binaries can run under FEX. Steam starts, Helltaker launches through Proton, and early Wine/DXVK experiments are starting to work.
+x86-64 binaries can run under FEX. Steam starts, Helltaker launches through Proton, and Wine/DXVK experiments are starting to work.
 
 ## Demo
 Final Fantasy XIV Dawntrail benchmark:
