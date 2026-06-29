@@ -56,7 +56,7 @@ pub struct NativeSourceInfo {
 pub struct VirglFence {
     pub fence_id: u64,
     pub ctx_id: u32,
-    pub ring_idx: u32,
+    pub ring_idx: Option<u32>,
 }
 
 #[repr(C)]
@@ -203,6 +203,7 @@ unsafe extern "C" {
 
     fn virgl_renderer_submit_cmd(buffer: *mut c_void, ctx_id: c_int, ndw: c_int) -> c_int;
 
+    fn virgl_renderer_create_fence(fence_id: c_int, ctx_id: u32) -> c_int;
     fn virgl_renderer_context_create_fence(ctx_id: u32, flags: u32, ring_idx: u32, fence_id: u64) -> c_int;
 
     fn virgl_renderer_resource_create(args: *mut ResourceCreateArgs, iov: *mut Iovec, num_iovs: u32) -> c_int;
@@ -554,12 +555,21 @@ pub struct CapsetInfo {
 
 type FenceCb = Box<dyn FnMut(VirglFence) + Send>;
 
+extern "C" fn write_fence_trampoline(cookie: *mut c_void, fence_id: u32) {
+    let cb = unsafe { &mut *(cookie as *mut FenceCb) };
+    cb(VirglFence {
+        fence_id: fence_id as u64,
+        ctx_id: 0,
+        ring_idx: None,
+    });
+}
+
 extern "C" fn write_context_fence_trampoline(cookie: *mut c_void, ctx_id: u32, ring_idx: u32, fence_id: u64) {
     let cb = unsafe { &mut *(cookie as *mut FenceCb) };
     cb(VirglFence {
         fence_id,
         ctx_id,
-        ring_idx,
+        ring_idx: Some(ring_idx),
     });
 }
 
@@ -579,7 +589,7 @@ impl VirglRenderer {
 
         let mut callbacks = Box::new(VirglRendererCallbacks {
             version: 4,
-            write_fence: None,
+            write_fence: Some(write_fence_trampoline),
 
             create_gl_context: Some(create_gl_context_trampoline),
             destroy_gl_context: Some(destroy_gl_context_trampoline),
@@ -759,7 +769,12 @@ impl VirglRenderer {
     }
 
     pub fn create_fence(&self, fence: VirglFence) -> VirglResult<()> {
-        let ret = unsafe { virgl_renderer_context_create_fence(fence.ctx_id, 0, fence.ring_idx, fence.fence_id) };
+        let ret = if let Some(ring_idx) = fence.ring_idx {
+            unsafe { virgl_renderer_context_create_fence(fence.ctx_id, 0, ring_idx, fence.fence_id) }
+        } else {
+            // assume no-ring fence ids fit in 32-bit
+            unsafe { virgl_renderer_create_fence(fence.fence_id as c_int, fence.ctx_id) }
+        };
 
         check(ret)
     }

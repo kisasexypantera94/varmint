@@ -378,6 +378,7 @@ struct CtrlHeader {
 }
 
 const FLAG_FENCE: u32 = 1 << 0;
+const FLAG_RING_IDX: u32 = 1 << 1;
 
 struct Resource {
     format: u32,
@@ -441,6 +442,8 @@ struct Config {
 }
 
 struct PendingFence {
+    ctx_id: u32,
+    ring_idx: Option<u8>,
     fence_id: u64,
     token: ChainToken,
     written: u32,
@@ -456,7 +459,7 @@ pub struct Gpu<'a> {
 
     events_read: u32,
 
-    pending_fences: VecDeque<PendingFence>,
+    pending_fences: Vec<PendingFence>,
     submit_buf: Vec<u8>,
     renderer: &'a mut VirglRenderer,
 }
@@ -475,7 +478,7 @@ impl<'a> Gpu<'a> {
             scanout_width: width as u32,
             scanout_height: height as u32,
             events_read: 0,
-            pending_fences: VecDeque::new(),
+            pending_fences: Vec::new(),
             submit_buf: Vec::new(),
             renderer,
         }
@@ -861,6 +864,7 @@ impl<'a> Gpu<'a> {
 
         let payload_offset = size_of::<CmdSubmit3d>();
         let readable_len = chain.readable_len();
+        let has_ring_idx = (hdr.flags & FLAG_RING_IDX) != 0;
 
         if req.size as usize > readable_len.saturating_sub(payload_offset) {
             eprintln!(
@@ -903,7 +907,7 @@ impl<'a> Gpu<'a> {
             let fence = VirglFence {
                 fence_id: hdr.fence_id,
                 ctx_id: hdr.ctx_ud,
-                ring_idx: hdr.ring_idx.into(),
+                ring_idx: has_ring_idx.then_some(hdr.ring_idx.into()),
             };
 
             if let Err(err) = self.renderer.create_fence(fence) {
@@ -919,7 +923,9 @@ impl<'a> Gpu<'a> {
 
             let written = Gpu::write_response(chain, CtrlType::RespOkNoData, hdr, mem);
 
-            self.pending_fences.push_back(PendingFence {
+            self.pending_fences.push(PendingFence {
+                ctx_id: hdr.ctx_ud,
+                ring_idx: has_ring_idx.then_some(hdr.ring_idx),
                 fence_id: hdr.fence_id,
                 token,
                 written,
@@ -1661,8 +1667,15 @@ impl<'a> Gpu<'a> {
 }
 
 pub enum ExternalEvent {
-    DisplayResized { width: u32, height: u32 },
-    FenceSignaled { ring_idx: u8, fence_id: u64 },
+    DisplayResized {
+        width: u32,
+        height: u32,
+    },
+    FenceSignaled {
+        ctx_id: u32,
+        ring_idx: Option<u8>,
+        fence_id: u64,
+    },
     PollRendererFences,
 }
 
@@ -1686,15 +1699,24 @@ impl<'a> ExternalEventHandler for Gpu<'a> {
                     self.renderer.poll_ctxs();
                 }
             }
-            ExternalEvent::FenceSignaled { ring_idx, fence_id } => {
+            ExternalEvent::FenceSignaled {
+                ctx_id,
+                ring_idx,
+                fence_id,
+            } => {
                 let mut i = 0;
 
                 while i < self.pending_fences.len() {
                     let p = &self.pending_fences[i];
 
-                    // TODO: dirty hack, need to look at flags, context_id and ring_idx
-                    if p.fence_id <= fence_id {
-                        let p = self.pending_fences.remove(i).unwrap();
+                    let same_timeline = match (p.ring_idx, ring_idx) {
+                        (Some(pr), Some(sr)) => p.ctx_id == ctx_id && pr == sr,
+                        (None, None) => true,
+                        _ => false,
+                    };
+
+                    if same_timeline && p.fence_id <= fence_id {
+                        let p = self.pending_fences.remove(i);
 
                         emit(Effect::Complete {
                             token: p.token,

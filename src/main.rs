@@ -500,7 +500,8 @@ fn build_virglrenderer(
 
     let renderer = VirglRenderer::new(move |fence: VirglFence| {
         let _ = fence_tx.send(virtio::gpu::ExternalEvent::FenceSignaled {
-            ring_idx: fence.ring_idx as u8,
+            ctx_id: fence.ctx_id,
+            ring_idx: fence.ring_idx.map(|r| r as u8),
             fence_id: fence.fence_id,
         });
         kicker.kick();
