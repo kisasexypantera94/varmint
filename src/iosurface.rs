@@ -1,105 +1,67 @@
-use std::{ffi::c_void, ptr};
-
-type CFIndex = isize;
-type CFAllocatorRef = *const c_void;
-type CFTypeRef = *const c_void;
-type CFStringRef = *const c_void;
-type CFNumberRef = *const c_void;
-type CFMutableDictionaryRef = *mut c_void;
-type CFDictionaryRef = *const c_void;
+use objc2_core_foundation::{CFDictionary, CFNumber, CFNumberType, CFRetained, CFString};
+use objc2_io_surface::{
+    IOSurfaceRef as ObjcIOSurfaceRef, kIOSurfaceBytesPerElement, kIOSurfaceBytesPerRow, kIOSurfaceHeight,
+    kIOSurfacePixelFormat, kIOSurfaceWidth,
+};
+use std::ffi::c_void;
 
 pub type IOSurfaceRef = *mut c_void;
 
-#[repr(C)]
-struct CFDictionaryKeyCallBacks {
-    _private: [usize; 6],
-}
-
-#[repr(C)]
-struct CFDictionaryValueCallBacks {
-    _private: [usize; 5],
-}
-
-#[link(name = "CoreFoundation", kind = "framework")]
-unsafe extern "C" {
-    static kCFTypeDictionaryKeyCallBacks: CFDictionaryKeyCallBacks;
-    static kCFTypeDictionaryValueCallBacks: CFDictionaryValueCallBacks;
-
-    fn CFDictionaryCreateMutable(
-        allocator: CFAllocatorRef,
-        capacity: CFIndex,
-        key_callbacks: *const CFDictionaryKeyCallBacks,
-        value_callbacks: *const CFDictionaryValueCallBacks,
-    ) -> CFMutableDictionaryRef;
-
-    fn CFDictionarySetValue(dict: CFMutableDictionaryRef, key: *const c_void, value: *const c_void);
-
-    fn CFNumberCreate(allocator: CFAllocatorRef, the_type: i32, value_ptr: *const c_void) -> CFNumberRef;
-
-    fn CFRetain(value: CFTypeRef) -> CFTypeRef;
-    fn CFRelease(value: CFTypeRef);
-}
-
-#[link(name = "IOSurface", kind = "framework")]
-unsafe extern "C" {
-    static kIOSurfaceWidth: CFStringRef;
-    static kIOSurfaceHeight: CFStringRef;
-    static kIOSurfacePixelFormat: CFStringRef;
-    static kIOSurfaceBytesPerElement: CFStringRef;
-    static kIOSurfaceBytesPerRow: CFStringRef;
-
-    fn IOSurfaceCreate(properties: CFDictionaryRef) -> IOSurfaceRef;
-    fn IOSurfaceLookup(cs_id: u32) -> IOSurfaceRef;
-    fn IOSurfaceGetID(surface: IOSurfaceRef) -> u32;
-}
-
-const K_CF_NUMBER_SINT32_TYPE: i32 = 3;
 const IOSURFACE_PIXEL_FORMAT_BGRA: i32 = 0x4247_5241; // 'BGRA'
 
-fn add_i32(dict: CFMutableDictionaryRef, key: CFStringRef, value: i32) -> bool {
-    let number = unsafe {
-        CFNumberCreate(
-            ptr::null(),
-            K_CF_NUMBER_SINT32_TYPE,
-            &value as *const i32 as *const c_void,
-        )
+fn cf_i32(value: i32) -> Option<CFRetained<CFNumber>> {
+    unsafe { CFNumber::new(None, CFNumberType::SInt32Type, &value as *const i32 as *const c_void) }
+}
+
+fn bgra_properties(width: u32, height: u32) -> Option<CFRetained<CFDictionary<CFString, CFNumber>>> {
+    let width_i32 = i32::try_from(width).ok()?;
+    let height_i32 = i32::try_from(height).ok()?;
+    let bytes_per_row_i32 = i32::try_from(width.checked_mul(4)?).ok()?;
+
+    let width = cf_i32(width_i32)?;
+    let height = cf_i32(height_i32)?;
+    let pixel_format = cf_i32(IOSURFACE_PIXEL_FORMAT_BGRA)?;
+    let bytes_per_element = cf_i32(4)?;
+    let bytes_per_row = cf_i32(bytes_per_row_i32)?;
+
+    let keys: [&CFString; 5] = unsafe {
+        [
+            kIOSurfaceWidth,
+            kIOSurfaceHeight,
+            kIOSurfacePixelFormat,
+            kIOSurfaceBytesPerElement,
+            kIOSurfaceBytesPerRow,
+        ]
     };
 
-    if number.is_null() {
-        return false;
-    }
+    let values: [&CFNumber; 5] = [
+        width.as_ref(),
+        height.as_ref(),
+        pixel_format.as_ref(),
+        bytes_per_element.as_ref(),
+        bytes_per_row.as_ref(),
+    ];
 
-    unsafe {
-        CFDictionarySetValue(dict, key as *const c_void, number as *const c_void);
-        CFRelease(number as CFTypeRef);
-    }
-
-    true
+    Some(CFDictionary::from_slices(&keys, &values))
 }
 
 pub struct ScopedIOSurface {
-    ptr: IOSurfaceRef,
+    surface: CFRetained<ObjcIOSurfaceRef>,
     id: u32,
     width: u32,
     height: u32,
-    owned: bool,
 }
 
 impl ScopedIOSurface {
     pub fn lookup(id: u32, width: u32, height: u32) -> Option<Self> {
-        let ptr = unsafe { IOSurfaceLookup(id) };
-        if ptr.is_null() {
-            None
-        } else {
-            unsafe { CFRetain(ptr as CFTypeRef) };
-            Some(Self {
-                ptr,
-                width,
-                height,
-                id,
-                owned: true,
-            })
-        }
+        let surface = ObjcIOSurfaceRef::lookup(id)?;
+
+        Some(Self {
+            surface,
+            width,
+            height,
+            id,
+        })
     }
 
     pub fn new_bgra(width: u32, height: u32) -> Option<Self> {
@@ -107,55 +69,25 @@ impl ScopedIOSurface {
             return None;
         }
 
-        let dict = unsafe {
-            CFDictionaryCreateMutable(
-                ptr::null(),
-                0,
-                &kCFTypeDictionaryKeyCallBacks,
-                &kCFTypeDictionaryValueCallBacks,
-            )
-        };
+        let properties = bgra_properties(width, height)?;
 
-        if dict.is_null() {
-            return None;
-        }
-
-        let ok = add_i32(dict, unsafe { kIOSurfaceWidth }, width as i32)
-            && add_i32(dict, unsafe { kIOSurfaceHeight }, height as i32)
-            && add_i32(dict, unsafe { kIOSurfacePixelFormat }, IOSURFACE_PIXEL_FORMAT_BGRA)
-            && add_i32(dict, unsafe { kIOSurfaceBytesPerElement }, 4)
-            && add_i32(dict, unsafe { kIOSurfaceBytesPerRow }, width.saturating_mul(4) as i32);
-
-        if !ok {
-            unsafe {
-                CFRelease(dict as CFTypeRef);
-            }
-            return None;
-        }
-
-        let ptr = unsafe { IOSurfaceCreate(dict as CFDictionaryRef) };
-
-        unsafe {
-            CFRelease(dict as CFTypeRef);
-        }
-
-        if ptr.is_null() {
-            return None;
-        }
-
-        let id = unsafe { IOSurfaceGetID(ptr) };
+        let surface = unsafe { ObjcIOSurfaceRef::new(properties.as_ref())? };
+        let id = surface.id();
 
         Some(Self {
-            ptr,
+            surface,
             id,
             width,
             height,
-            owned: true,
         })
     }
 
     pub fn as_ptr(&self) -> IOSurfaceRef {
-        self.ptr
+        self.as_objc_ref() as *const ObjcIOSurfaceRef as IOSurfaceRef
+    }
+
+    pub fn as_objc_ref(&self) -> &ObjcIOSurfaceRef {
+        self.surface.as_ref()
     }
 
     pub fn id(&self) -> u32 {
@@ -168,16 +100,5 @@ impl ScopedIOSurface {
 
     pub fn height(&self) -> u32 {
         self.height
-    }
-}
-
-impl Drop for ScopedIOSurface {
-    fn drop(&mut self) {
-        if self.owned && !self.ptr.is_null() {
-            unsafe {
-                CFRelease(self.ptr as CFTypeRef);
-            }
-            self.ptr = ptr::null_mut();
-        }
     }
 }

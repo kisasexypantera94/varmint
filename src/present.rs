@@ -1,29 +1,35 @@
 use crate::iosurface::ScopedIOSurface;
-use core_graphics_types::geometry::CGSize;
-use foreign_types::ForeignType;
-use metal::{
-    CAMetalLayer, CommandQueue, Device, MTLOrigin, MTLPixelFormat, MTLRegion, MTLSize, MTLStorageMode, MTLTextureType,
-    MTLTextureUsage, MetalLayer, Texture, TextureDescriptor, TextureRef,
+use objc2::{rc::Retained, runtime::ProtocolObject};
+use objc2_foundation::NSSize;
+use objc2_metal::{
+    MTLBlitCommandEncoder, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLCreateSystemDefaultDevice,
+    MTLDevice, MTLDrawable, MTLOrigin, MTLPixelFormat, MTLRegion, MTLSize, MTLStorageMode, MTLTexture,
+    MTLTextureDescriptor, MTLTextureUsage,
 };
+use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use raw_window_metal::Layer;
-use std::ffi::{c_char, c_void};
+use std::{ffi::c_void, ptr::NonNull};
 use winit::window::Window;
+
+type MetalDevice = ProtocolObject<dyn MTLDevice>;
+type MetalCommandQueue = ProtocolObject<dyn MTLCommandQueue>;
+type MetalTexture = ProtocolObject<dyn MTLTexture>;
 
 struct IOSurfaceBackedTexture {
     surface_id: u32,
     surface: ScopedIOSurface,
-    texture: Texture,
+    texture: Retained<MetalTexture>,
 }
 
 pub struct Presenter {
     _window: Window,
 
-    layer: MetalLayer,
-    device: Device,
-    queue: CommandQueue,
+    layer: Retained<CAMetalLayer>,
+    device: Retained<MetalDevice>,
+    queue: Retained<MetalCommandQueue>,
 
-    texture: Option<Texture>,
+    texture: Option<Retained<MetalTexture>>,
     tex_w: u32,
     tex_h: u32,
 
@@ -33,45 +39,20 @@ pub struct Presenter {
     drawable_h: u32,
 }
 
-type Sel = *mut c_void;
-
-#[link(name = "objc")]
-unsafe extern "C" {
-    fn sel_registerName(name: *const c_char) -> Sel;
-    fn objc_msgSend();
-}
-
-unsafe fn new_texture_with_iosurface(
-    device: &Device,
-    desc: &TextureDescriptor,
-    surface: crate::iosurface::IOSurfaceRef,
-) -> Option<Texture> {
-    let sel_name = b"newTextureWithDescriptor:iosurface:plane:\0";
-    let sel = unsafe { sel_registerName(sel_name.as_ptr() as *const c_char) };
-
-    let send: unsafe extern "C" fn(
-        *mut c_void,
-        Sel,
-        *const c_void,
-        crate::iosurface::IOSurfaceRef,
-        usize,
-    ) -> *mut metal::MTLTexture = unsafe { std::mem::transmute(objc_msgSend as *const ()) };
-
-    let texture = unsafe {
-        send(
-            device.as_ptr() as *mut c_void,
-            sel,
-            desc.as_ptr() as *const c_void,
-            surface,
-            0,
+fn bgra_texture_descriptor(width: u32, height: u32) -> Retained<MTLTextureDescriptor> {
+    let desc = unsafe {
+        MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+            MTLPixelFormat::BGRA8Unorm,
+            width.max(1) as usize,
+            height.max(1) as usize,
+            false,
         )
     };
 
-    if texture.is_null() {
-        None
-    } else {
-        Some(unsafe { Texture::from_ptr(texture) })
-    }
+    desc.setStorageMode(MTLStorageMode::Shared);
+    desc.setUsage(MTLTextureUsage::ShaderRead);
+
+    desc
 }
 
 impl Presenter {
@@ -79,35 +60,30 @@ impl Presenter {
         let raw = window.window_handle().expect("window handle").as_raw();
 
         let raw_layer = match raw {
-            RawWindowHandle::AppKit(handle) => {
-                // SAFETY: winit's AppKit handle is a valid NSView.
-                unsafe { Layer::from_ns_view(handle.ns_view) }
-            }
+            RawWindowHandle::AppKit(handle) => unsafe { Layer::from_ns_view(handle.ns_view) },
             other => panic!("unsupported window handle for Metal presenter: {other:?}"),
         };
 
         let layer_ptr = raw_layer.into_raw();
 
-        // SAFETY: raw-window-metal returned a retained CAMetalLayer pointer.
-        let layer = unsafe { MetalLayer::from_ptr(layer_ptr.as_ptr() as *mut CAMetalLayer) };
+        let layer = unsafe { Retained::<CAMetalLayer>::from_raw(layer_ptr.as_ptr().cast()) }
+            .expect("raw-window-metal returned null CAMetalLayer");
 
-        let device = Device::system_default().expect("no Metal device");
-        let queue = device.new_command_queue();
-        layer.set_device(&device);
-        layer.set_pixel_format(MTLPixelFormat::BGRA8Unorm);
-        layer.set_framebuffer_only(false);
+        let device = MTLCreateSystemDefaultDevice().expect("no Metal device");
+        let queue = device.newCommandQueue().expect("failed to create Metal command queue");
+
+        layer.setDevice(Some(device.as_ref()));
+        layer.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
+        layer.setFramebufferOnly(false);
 
         // Guest scanout data is effectively XRGB in many paths; do not let
         // WindowServer/CoreAnimation treat guest alpha as real window alpha.
-        layer.set_opaque(true);
-        layer.remove_all_animations();
+        layer.setOpaque(true);
+        layer.removeAllAnimations();
 
-        layer.set_presents_with_transaction(false);
-        layer.set_display_sync_enabled(false);
-        layer.set_drawable_size(CGSize {
-            width: width.max(1) as f64,
-            height: height.max(1) as f64,
-        });
+        layer.setPresentsWithTransaction(false);
+        layer.setDisplaySyncEnabled(false);
+        layer.setDrawableSize(NSSize::new(width.max(1) as f64, height.max(1) as f64));
 
         Self {
             _window: window,
@@ -131,10 +107,7 @@ impl Presenter {
             return;
         }
 
-        self.layer.set_drawable_size(CGSize {
-            width: width as f64,
-            height: height as f64,
-        });
+        self.layer.setDrawableSize(NSSize::new(width as f64, height as f64));
 
         self.drawable_w = width;
         self.drawable_h = height;
@@ -145,17 +118,13 @@ impl Presenter {
             return false;
         }
 
-        let desc = TextureDescriptor::new();
-        desc.set_texture_type(MTLTextureType::D2);
-        desc.set_pixel_format(MTLPixelFormat::BGRA8Unorm);
-        desc.set_width(w as u64);
-        desc.set_height(h as u64);
-        desc.set_depth(1);
-        desc.set_mipmap_level_count(1);
-        desc.set_storage_mode(MTLStorageMode::Shared);
-        desc.set_usage(MTLTextureUsage::ShaderRead);
-
-        let texture = self.device.new_texture(&desc);
+        let desc = bgra_texture_descriptor(w, h);
+        let Some(texture) = self.device.newTextureWithDescriptor(&desc) else {
+            self.texture = None;
+            self.tex_w = 0;
+            self.tex_h = 0;
+            return false;
+        };
 
         self.texture = Some(texture);
         self.tex_w = w;
@@ -165,7 +134,7 @@ impl Presenter {
     }
 
     fn upload_rect_to_texture(
-        texture: &TextureRef,
+        texture: &MetalTexture,
         pixels: &[u32],
         pw: u32,
         ph: u32,
@@ -202,12 +171,26 @@ impl Presenter {
             return false;
         }
 
-        texture.replace_region(
-            MTLRegion::new_2d(x as u64, y as u64, w as u64, h as u64),
-            0,
-            bytes[start..].as_ptr() as *const c_void,
-            row_bytes as u64,
-        );
+        let Some(src_bytes) = NonNull::new(bytes[start..].as_ptr() as *mut c_void) else {
+            return false;
+        };
+
+        let region = MTLRegion {
+            origin: MTLOrigin {
+                x: x as usize,
+                y: y as usize,
+                z: 0,
+            },
+            size: MTLSize {
+                width: w as usize,
+                height: h as usize,
+                depth: 1,
+            },
+        };
+
+        unsafe {
+            texture.replaceRegion_mipmapLevel_withBytes_bytesPerRow(region, 0, src_bytes, row_bytes);
+        }
 
         true
     }
@@ -228,17 +211,11 @@ impl Presenter {
             return false;
         };
 
-        let desc = TextureDescriptor::new();
-        desc.set_texture_type(MTLTextureType::D2);
-        desc.set_pixel_format(MTLPixelFormat::BGRA8Unorm);
-        desc.set_width(width as u64);
-        desc.set_height(height as u64);
-        desc.set_depth(1);
-        desc.set_mipmap_level_count(1);
-        desc.set_storage_mode(MTLStorageMode::Shared);
-        desc.set_usage(MTLTextureUsage::ShaderRead);
-
-        let Some(texture) = (unsafe { new_texture_with_iosurface(&self.device, &desc, surface.as_ptr()) }) else {
+        let desc = bgra_texture_descriptor(width, height);
+        let Some(texture) = self
+            .device
+            .newTextureWithDescriptor_iosurface_plane(&desc, surface.as_objc_ref(), 0)
+        else {
             eprintln!("present: failed to create Metal texture for producer IOSurface id={surface_id}");
             self.iosurface_texture = None;
             return false;
@@ -318,41 +295,52 @@ impl Presenter {
         self.blit_texture_to_drawable(texture.as_ref(), pw, ph)
     }
 
-    fn blit_texture_to_drawable(&self, src: &TextureRef, width: u32, height: u32) -> bool {
-        let Some(drawable) = self.layer.next_drawable() else {
+    fn blit_texture_to_drawable(&self, src: &MetalTexture, width: u32, height: u32) -> bool {
+        let Some(drawable) = self.layer.nextDrawable() else {
             return false;
         };
 
         let dst = drawable.texture();
 
-        let copy_w = (width as u64).min(src.width()).min(dst.width());
-        let copy_h = (height as u64).min(src.height()).min(dst.height());
+        let copy_w = (width as usize).min(src.width()).min(dst.width());
+        let copy_h = (height as usize).min(src.height()).min(dst.height());
         if copy_w == 0 || copy_h == 0 {
             return false;
         }
 
-        let command_buffer = self.queue.new_command_buffer();
-        let blit = command_buffer.new_blit_command_encoder();
+        let Some(command_buffer) = self.queue.commandBuffer() else {
+            return false;
+        };
+        let Some(blit) = command_buffer.blitCommandEncoder() else {
+            return false;
+        };
 
-        blit.copy_from_texture(
-            src,
-            0,
-            0,
-            MTLOrigin { x: 0, y: 0, z: 0 },
-            MTLSize {
-                width: copy_w,
-                height: copy_h,
-                depth: 1,
-            },
-            dst,
-            0,
-            0,
-            MTLOrigin { x: 0, y: 0, z: 0 },
-        );
+        let source_size = MTLSize {
+            width: copy_w,
+            height: copy_h,
+            depth: 1,
+        };
 
-        blit.end_encoding();
-        command_buffer.present_drawable(drawable);
+        let zero_origin = MTLOrigin { x: 0, y: 0, z: 0 };
 
+        unsafe {
+            blit.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+                src,
+                0,
+                0,
+                zero_origin,
+                source_size,
+                dst.as_ref(),
+                0,
+                0,
+                zero_origin,
+            );
+        }
+
+        blit.endEncoding();
+
+        let drawable_for_present: &ProtocolObject<dyn MTLDrawable> = drawable.as_ref();
+        command_buffer.presentDrawable(drawable_for_present);
         command_buffer.commit();
 
         true

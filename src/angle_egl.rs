@@ -285,7 +285,7 @@ struct AngleCopySession {
 unsafe impl Send for AngleCopySession {}
 
 impl AngleCopySession {
-    unsafe fn new() -> Option<Self> {
+    fn new() -> Option<Self> {
         let egl_lib = open_library(&[
             "libEGL.dylib",
             "@rpath/libEGL.dylib",
@@ -921,52 +921,51 @@ void main() {
     }
 }
 
-static ANGLE_COPY_SESSION: std::sync::OnceLock<std::sync::Mutex<Option<AngleCopySession>>> = std::sync::OnceLock::new();
+pub struct AngleCopy {
+    session: Option<AngleCopySession>,
+}
 
-static ANGLE_COPY_INIT_FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+impl AngleCopy {
+    pub fn new() -> Self {
+        let session = AngleCopySession::new();
 
-pub fn copy_metal_texture_to_iosurface(
-    source_texture: *mut c_void,
-    target_surface: IOSurfaceRef,
-    width: u32,
-    height: u32,
-) -> bool {
-    if ANGLE_COPY_INIT_FAILED.load(std::sync::atomic::Ordering::Relaxed) {
-        return false;
-    }
-
-    let lock = ANGLE_COPY_SESSION.get_or_init(|| std::sync::Mutex::new(None));
-    let mut session = lock.lock().unwrap();
-
-    if session.is_none() {
-        *session = unsafe { AngleCopySession::new() };
         if session.is_none() {
-            ANGLE_COPY_INIT_FAILED.store(true, std::sync::atomic::Ordering::Relaxed);
-            eprintln!("angle_egl_copy: failed to initialize copy session; disabling copy path for this run");
+            panic!("angle_egl_copy: failed to initialize copy session");
+        }
+
+        Self { session }
+    }
+
+    pub fn copy_metal_texture_to_iosurface(
+        &mut self,
+        source_texture: *mut c_void,
+        target_surface: IOSurfaceRef,
+        width: u32,
+        height: u32,
+    ) -> bool {
+        let Some(sess) = self.session.as_mut() else {
             return false;
+        };
+
+        let old_display = unsafe { (sess.egl_get_current_display)() };
+        let old_draw = unsafe { (sess.egl_get_current_surface)(EGL_DRAW) };
+        let old_read = unsafe { (sess.egl_get_current_surface)(EGL_READ) };
+        let old_context = unsafe { (sess.egl_get_current_context)() };
+
+        let ok = unsafe { sess.copy_metal_texture_to_iosurface(source_texture, target_surface, width, height) };
+
+        let restore_ok = unsafe {
+            if old_display.is_null() {
+                (sess.egl_make_current)(sess.display, ptr::null_mut(), ptr::null_mut(), ptr::null_mut())
+            } else {
+                (sess.egl_make_current)(old_display, old_draw, old_read, old_context)
+            }
+        };
+
+        if restore_ok == EGL_FALSE {
+            eprintln!("angle_egl_copy: failed to restore previous EGL context");
         }
+
+        ok
     }
-
-    let sess = session.as_mut().unwrap();
-
-    let old_display = unsafe { (sess.egl_get_current_display)() };
-    let old_draw = unsafe { (sess.egl_get_current_surface)(EGL_DRAW) };
-    let old_read = unsafe { (sess.egl_get_current_surface)(EGL_READ) };
-    let old_context = unsafe { (sess.egl_get_current_context)() };
-
-    let ok = unsafe { sess.copy_metal_texture_to_iosurface(source_texture, target_surface, width, height) };
-
-    let restore_ok = unsafe {
-        if old_display.is_null() {
-            (sess.egl_make_current)(sess.display, ptr::null_mut(), ptr::null_mut(), ptr::null_mut())
-        } else {
-            (sess.egl_make_current)(old_display, old_draw, old_read, old_context)
-        }
-    };
-
-    if restore_ok == EGL_FALSE {
-        eprintln!("angle_egl_copy: failed to restore previous EGL context");
-    }
-
-    ok
 }

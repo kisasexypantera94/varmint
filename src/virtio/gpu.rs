@@ -1,12 +1,13 @@
 //! https://docs.oasis-open.org/virtio/virtio/v1.3/csd01/virtio-v1.3-csd01.html#x1-4040006
 use crate::{
+    angle_egl,
     iosurface::ScopedIOSurface,
     virtio::{
         chain::ChainData,
         common,
         device::{ChainAction, ChainToken, Device, Effect, ExternalEventHandler, ShmRegion},
         virgl_ffi::{
-            Iovec, ResourceCreate3D, ResourceCreateBlob as VirglResourceCreateBlob, Transfer3D, VirglFence,
+            self, Iovec, ResourceCreate3D, ResourceCreateBlob as VirglResourceCreateBlob, Transfer3D, VirglFence,
             VirglRenderer,
         },
     },
@@ -14,12 +15,7 @@ use crate::{
 use applevisor::memory::Memory;
 use applevisor_sys::{hv_vm_map, hv_vm_unmap};
 use num_enum::TryFromPrimitive;
-use std::{
-    collections::{HashMap, VecDeque},
-    ffi::c_void,
-    mem::offset_of,
-    sync::Mutex,
-};
+use std::{collections::HashMap, ffi::c_void, mem::offset_of, sync::Mutex};
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes};
 
 const DEVICE_ID: u32 = 16;
@@ -461,6 +457,7 @@ pub struct Gpu<'a> {
 
     pending_fences: Vec<PendingFence>,
     submit_buf: Vec<u8>,
+    angle_copy: angle_egl::AngleCopy,
     renderer: &'a mut VirglRenderer,
 }
 
@@ -480,6 +477,7 @@ impl<'a> Gpu<'a> {
             events_read: 0,
             pending_fences: Vec::new(),
             submit_buf: Vec::new(),
+            angle_copy: angle_egl::AngleCopy::new(),
             renderer,
         }
     }
@@ -1319,7 +1317,7 @@ impl<'a> Gpu<'a> {
     fn copy_metal_texture_to_iosurface(
         &mut self,
         resource_id: u32,
-        native_source: crate::virtio::virgl_ffi::NativeSourceInfo,
+        native_source: virgl_ffi::NativeSourceInfo,
     ) -> Option<u32> {
         let width = native_source.width;
         let height = native_source.height;
@@ -1341,7 +1339,7 @@ impl<'a> Gpu<'a> {
             return None;
         };
 
-        let ok = crate::angle_egl::copy_metal_texture_to_iosurface(
+        let ok = self.angle_copy.copy_metal_texture_to_iosurface(
             native_source.handle as *mut c_void,
             surface.as_ptr(),
             width,
