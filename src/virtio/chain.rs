@@ -38,8 +38,7 @@ impl ChainData {
             }
 
             let n = (seg_len - offset).min(buf.len() - filled);
-            mem.read(seg.addr + offset as u64, &mut buf[filled..filled + n])
-                .ok()?;
+            mem.read(seg.addr + offset as u64, &mut buf[filled..filled + n]).ok()?;
             filled += n;
             offset = 0;
         }
@@ -47,11 +46,7 @@ impl ChainData {
         (filled == buf.len()).then_some(())
     }
 
-    pub fn read_obj<T: FromBytes + IntoBytes + Immutable>(
-        &self,
-        offset: usize,
-        mem: &Memory,
-    ) -> Option<T> {
+    pub fn read_obj<T: FromBytes + IntoBytes + Immutable>(&self, offset: usize, mem: &Memory) -> Option<T> {
         let mut v = T::new_zeroed();
         self.read_at(offset, v.as_mut_bytes(), mem)?;
         Some(v)

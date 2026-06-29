@@ -3,3 +3,4 @@
 reorder_imports = true
 group_imports = "One"
 imports_granularity = "Crate"
+max_width = 120

@@ -10,6 +10,7 @@ pub mod input;
 mod mmio;
 mod net;
 pub mod snd;
+pub mod virgl_ffi;
 mod virtq;
 
 pub use blk::Blk;

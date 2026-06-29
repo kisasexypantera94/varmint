@@ -276,29 +276,10 @@ impl Device for Input {
 }
 
 pub enum ExternalInput {
-    Key {
-        code: u16,
-        pressed: bool,
-    },
-    PointerButton {
-        button: u16,
-        pressed: bool,
-    },
-    AbsPosition {
-        x: u32,
-        y: u32,
-        width: u32,
-        height: u32,
-    },
-    Scroll {
-        horizontal: bool,
-        value: i32,
-    },
-    RawEvent {
-        ty: u16,
-        code: u16,
-        value: u32,
-    },
+    Key { code: u16, pressed: bool },
+    PointerButton { button: u16, pressed: bool },
+    AbsPosition { x: u32, y: u32, width: u32, height: u32 },
+    Scroll { horizontal: bool, value: i32 },
 }
 
 impl ExternalEventHandler for Input {
@@ -327,12 +308,7 @@ impl ExternalEventHandler for Input {
                 ev(EV_KEY, button, pressed as u32);
                 ev(EV_SYN, SYN_REPORT, 0);
             }
-            ExternalInput::AbsPosition {
-                x,
-                y,
-                width,
-                height,
-            } => {
+            ExternalInput::AbsPosition { x, y, width, height } => {
                 let x = (x as u64 * TABLET_ABS_MAX_X as u64) / (width as u64 - 1);
                 let y = (y as u64 * TABLET_ABS_MAX_Y as u64) / (height as u64 - 1);
                 ev(EV_ABS, ABS_X, x as u32);
@@ -344,7 +320,6 @@ impl ExternalEventHandler for Input {
                 ev(EV_REL, code, value as u32);
                 ev(EV_SYN, SYN_REPORT, 0);
             }
-            ExternalInput::RawEvent { ty, code, value } => ev(ty, code, value),
         }
     }
 }

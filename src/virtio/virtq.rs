@@ -110,8 +110,7 @@ impl Queue {
         mem.write_u32(ring_addr + 4, written_len).unwrap();
 
         self.last_used_idx = self.last_used_idx.wrapping_add(1);
-        mem.write_u16(self.used_addr + 2, self.last_used_idx)
-            .unwrap();
+        mem.write_u16(self.used_addr + 2, self.last_used_idx).unwrap();
     }
 
     pub fn collect_chain(&self, head_idx: u16, mem: &Memory) -> Option<ChainData> {

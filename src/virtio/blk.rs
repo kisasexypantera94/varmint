@@ -48,11 +48,7 @@ pub struct Blk {
 
 impl Blk {
     pub fn new(path: &str, host_disk_size: usize) -> Blk {
-        assert_eq!(
-            host_disk_size % 512,
-            0,
-            "disk size must be a multiple of 512"
-        );
+        assert_eq!(host_disk_size % 512, 0, "disk size must be a multiple of 512");
 
         let file = OpenOptions::new()
             .read(true)
@@ -117,9 +113,7 @@ impl Device for Blk {
                     Ok(RequestType::In) => {
                         for d in data_writable {
                             let mut buf = vec![0u8; d.len as usize];
-                            if self.file.read_at(&mut buf, disk_offset).is_err()
-                                || mem.write(d.addr, &buf).is_err()
-                            {
+                            if self.file.read_at(&mut buf, disk_offset).is_err() || mem.write(d.addr, &buf).is_err() {
                                 status = status::IOERR;
                                 break;
                             }

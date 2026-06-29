@@ -60,8 +60,7 @@ impl Deframer {
             if self.buf.len() < FRAME_LEN_PREFIX {
                 return;
             }
-            let len =
-                u32::from_le_bytes([self.buf[0], self.buf[1], self.buf[2], self.buf[3]]) as usize;
+            let len = u32::from_le_bytes([self.buf[0], self.buf[1], self.buf[2], self.buf[3]]) as usize;
 
             if len > MAX_FRAME {
                 self.buf.remove(0);

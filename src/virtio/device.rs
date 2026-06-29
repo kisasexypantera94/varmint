@@ -47,14 +47,8 @@ pub trait Device {
 }
 
 pub enum Effect<'a> {
-    Deliver {
-        queue_idx: usize,
-        parts: &'a [&'a [u8]],
-    },
-    Complete {
-        token: ChainToken,
-        written: u32,
-    },
+    Deliver { queue_idx: usize, parts: &'a [&'a [u8]] },
+    Complete { token: ChainToken, written: u32 },
     Config,
 }
 
