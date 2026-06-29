@@ -94,8 +94,6 @@ impl Presenter {
 
         let device = Device::system_default().expect("no Metal device");
         let queue = device.new_command_queue();
-        eprintln!("present: IOSurface-backed upload path enabled");
-        eprintln!("present: ANGLE MTLTexture -> IOSurface copy path enabled");
         layer.set_device(&device);
         layer.set_pixel_format(MTLPixelFormat::BGRA8Unorm);
         layer.set_framebuffer_only(false);
@@ -126,7 +124,7 @@ impl Presenter {
         }
     }
 
-    fn set_drawable_size_if_needed(&mut self, width: u32, height: u32) {
+    pub fn resize_surface(&mut self, width: u32, height: u32) {
         let width = width.max(1);
         let height = height.max(1);
 
@@ -141,10 +139,6 @@ impl Presenter {
 
         self.drawable_w = width;
         self.drawable_h = height;
-    }
-
-    pub fn resize_surface(&mut self, width: u32, height: u32) {
-        self.set_drawable_size_if_needed(width, height);
     }
 
     fn ensure_texture(&mut self, w: u32, h: u32) -> bool {
@@ -282,7 +276,7 @@ impl Presenter {
         dirty_h: u32,
     ) -> bool {
         if let Some(iosurface_id) = iosurface_id {
-            self.set_drawable_size_if_needed(pw, ph);
+            self.resize_surface(pw, ph);
 
             if self.ensure_iosurface_texture_for_id(iosurface_id, pw, ph) {
                 if let Some(backing) = self.iosurface_texture.as_ref() {
@@ -310,7 +304,7 @@ impl Presenter {
             return false;
         }
 
-        self.set_drawable_size_if_needed(pw, ph);
+        self.resize_surface(pw, ph);
 
         let force_full = self.ensure_texture(pw, ph);
 

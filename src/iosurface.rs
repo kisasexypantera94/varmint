@@ -32,11 +32,7 @@ unsafe extern "C" {
         value_callbacks: *const CFDictionaryValueCallBacks,
     ) -> CFMutableDictionaryRef;
 
-    fn CFDictionarySetValue(
-        dict: CFMutableDictionaryRef,
-        key: *const c_void,
-        value: *const c_void,
-    );
+    fn CFDictionarySetValue(dict: CFMutableDictionaryRef, key: *const c_void, value: *const c_void);
 
     fn CFNumberCreate(
         allocator: CFAllocatorRef,
@@ -44,6 +40,7 @@ unsafe extern "C" {
         value_ptr: *const c_void,
     ) -> CFNumberRef;
 
+    fn CFRetain(value: CFTypeRef) -> CFTypeRef;
     fn CFRelease(value: CFTypeRef);
 }
 
@@ -56,7 +53,7 @@ unsafe extern "C" {
     static kIOSurfaceBytesPerRow: CFStringRef;
 
     fn IOSurfaceCreate(properties: CFDictionaryRef) -> IOSurfaceRef;
-        fn IOSurfaceLookup(cs_id: u32) -> IOSurfaceRef;
+    fn IOSurfaceLookup(cs_id: u32) -> IOSurfaceRef;
     fn IOSurfaceGetID(surface: IOSurfaceRef) -> u32;
 }
 
@@ -89,6 +86,7 @@ pub struct ScopedIOSurface {
     id: u32,
     width: u32,
     height: u32,
+    owned: bool,
 }
 
 impl ScopedIOSurface {
@@ -97,11 +95,13 @@ impl ScopedIOSurface {
         if ptr.is_null() {
             None
         } else {
+            unsafe { CFRetain(ptr as CFTypeRef) };
             Some(Self {
                 ptr,
                 width,
                 height,
                 id,
+                owned: true,
             })
         }
     }
@@ -126,7 +126,11 @@ impl ScopedIOSurface {
 
         let ok = add_i32(dict, unsafe { kIOSurfaceWidth }, width as i32)
             && add_i32(dict, unsafe { kIOSurfaceHeight }, height as i32)
-            && add_i32(dict, unsafe { kIOSurfacePixelFormat }, IOSURFACE_PIXEL_FORMAT_BGRA)
+            && add_i32(
+                dict,
+                unsafe { kIOSurfacePixelFormat },
+                IOSURFACE_PIXEL_FORMAT_BGRA,
+            )
             && add_i32(dict, unsafe { kIOSurfaceBytesPerElement }, 4)
             && add_i32(
                 dict,
@@ -158,6 +162,7 @@ impl ScopedIOSurface {
             id,
             width,
             height,
+            owned: true,
         })
     }
 
@@ -180,7 +185,7 @@ impl ScopedIOSurface {
 
 impl Drop for ScopedIOSurface {
     fn drop(&mut self) {
-        if !self.ptr.is_null() {
+        if self.owned && !self.ptr.is_null() {
             unsafe {
                 CFRelease(self.ptr as CFTypeRef);
             }

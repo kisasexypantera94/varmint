@@ -2,10 +2,7 @@ use std::{
     collections::HashMap,
     ffi::{CStr, c_char, c_int, c_void},
     os::raw::c_uint,
-    sync::{
-        OnceLock,
-        atomic::{AtomicUsize, Ordering},
-    },
+    sync::OnceLock,
 };
 
 #[repr(C)]
@@ -354,125 +351,143 @@ unsafe extern "C" {
     ) -> EglBoolean;
 }
 
-static ANGLE_INIT: OnceLock<()> = OnceLock::new();
-static ANGLE_DISPLAY: AtomicUsize = AtomicUsize::new(0);
-static ANGLE_CONFIG: AtomicUsize = AtomicUsize::new(0);
-static ANGLE_SURFACE: AtomicUsize = AtomicUsize::new(0);
-static ANGLE_SHARE_CONTEXT: AtomicUsize = AtomicUsize::new(0);
+#[derive(Clone, Copy)]
+struct AngleGlobals {
+    display: EglDisplay,
+    config: EglConfig,
+    surface: EglSurface,
+    share_context: EglContext,
+}
+
+unsafe impl Send for AngleGlobals {}
+unsafe impl Sync for AngleGlobals {}
+
+static ANGLE_GLOBAL: OnceLock<Result<AngleGlobals, EglInt>> = OnceLock::new();
+
+fn angle_globals() -> Option<AngleGlobals> {
+    ANGLE_GLOBAL.get().and_then(|r| r.ok())
+}
 
 fn angle_display() -> EglDisplay {
-    ANGLE_DISPLAY.load(Ordering::SeqCst) as EglDisplay
+    angle_globals().map_or(std::ptr::null_mut(), |g| g.display)
 }
 
 fn angle_config() -> EglConfig {
-    ANGLE_CONFIG.load(Ordering::SeqCst) as EglConfig
+    angle_globals().map_or(std::ptr::null_mut(), |g| g.config)
 }
 
 fn angle_surface() -> EglSurface {
-    ANGLE_SURFACE.load(Ordering::SeqCst) as EglSurface
+    angle_globals().map_or(std::ptr::null_mut(), |g| g.surface)
 }
 
 fn angle_share_context() -> EglContext {
-    ANGLE_SHARE_CONTEXT.load(Ordering::SeqCst) as EglContext
+    angle_globals().map_or(std::ptr::null_mut(), |g| g.share_context)
 }
 
 fn angle_init_once() -> Result<(), EglInt> {
-    ANGLE_INIT.get_or_init(|| unsafe {
-        let proc_name = b"eglGetPlatformDisplayEXT\0";
-        let proc = eglGetProcAddress(proc_name.as_ptr() as *const c_char);
-        if proc.is_null() {
-            panic!("ANGLE: eglGetPlatformDisplayEXT not found");
-        }
+    match ANGLE_GLOBAL.get_or_init(|| angle_init_impl()) {
+        Ok(_) => Ok(()),
+        Err(e) => Err(*e),
+    }
+}
 
-        let get_platform_display: EglGetPlatformDisplayExt = std::mem::transmute(proc);
+fn angle_init_impl() -> Result<AngleGlobals, EglInt> {
+    let proc_name = b"eglGetPlatformDisplayEXT\0";
+    let proc = unsafe { eglGetProcAddress(proc_name.as_ptr() as *const c_char) };
+    if proc.is_null() {
+        eprintln!("ANGLE: eglGetPlatformDisplayEXT not found");
+        return Err(-1);
+    }
 
-        let (angle_backend, angle_backend_name) = (EGL_PLATFORM_ANGLE_TYPE_METAL_ANGLE, "metal");
+    let get_platform_display: EglGetPlatformDisplayExt = unsafe { std::mem::transmute(proc) };
 
-        let display_attribs = [EGL_PLATFORM_ANGLE_TYPE_ANGLE, angle_backend, EGL_NONE];
+    let display_attribs = [
+        EGL_PLATFORM_ANGLE_TYPE_ANGLE,
+        EGL_PLATFORM_ANGLE_TYPE_METAL_ANGLE,
+        EGL_NONE,
+    ];
 
-        eprintln!(
-            "ANGLE: requested backend {} ({:#x})",
-            angle_backend_name, angle_backend,
-        );
-
-        let dpy = get_platform_display(
+    let dpy = unsafe {
+        get_platform_display(
             EGL_PLATFORM_ANGLE_ANGLE,
             EGL_DEFAULT_DISPLAY,
             display_attribs.as_ptr(),
-        );
+        )
+    };
+    if dpy.is_null() {
+        let err = unsafe { eglGetError() };
+        eprintln!("ANGLE: eglGetPlatformDisplayEXT failed error={:#x}", err);
+        return Err(err);
+    }
 
-        if dpy.is_null() {
-            panic!(
-                "ANGLE: eglGetPlatformDisplayEXT failed error={:#x}",
-                eglGetError()
-            );
-        }
+    let mut major = 0;
+    let mut minor = 0;
+    if unsafe { eglInitialize(dpy, &mut major, &mut minor) } == EGL_FALSE {
+        let err = unsafe { eglGetError() };
+        eprintln!("ANGLE: eglInitialize failed error={:#x}", err);
+        return Err(err);
+    }
 
-        let mut major = 0;
-        let mut minor = 0;
-        if eglInitialize(dpy, &mut major, &mut minor) == EGL_FALSE {
-            panic!("ANGLE: eglInitialize failed error={:#x}", eglGetError());
-        }
+    if unsafe { eglBindAPI(EGL_OPENGL_ES_API) } == EGL_FALSE {
+        let err = unsafe { eglGetError() };
+        eprintln!("ANGLE: eglBindAPI failed error={:#x}", err);
+        return Err(err);
+    }
 
-        if eglBindAPI(EGL_OPENGL_ES_API) == EGL_FALSE {
-            panic!("ANGLE: eglBindAPI failed error={:#x}", eglGetError());
-        }
+    let cfg_attribs = [
+        EGL_SURFACE_TYPE,
+        EGL_PBUFFER_BIT,
+        EGL_RENDERABLE_TYPE,
+        EGL_OPENGL_ES2_BIT,
+        EGL_RED_SIZE,
+        8,
+        EGL_GREEN_SIZE,
+        8,
+        EGL_BLUE_SIZE,
+        8,
+        EGL_ALPHA_SIZE,
+        8,
+        EGL_NONE,
+    ];
 
-        let cfg_attribs = [
-            EGL_SURFACE_TYPE,
-            EGL_PBUFFER_BIT,
-            EGL_RENDERABLE_TYPE,
-            EGL_OPENGL_ES2_BIT,
-            EGL_RED_SIZE,
-            8,
-            EGL_GREEN_SIZE,
-            8,
-            EGL_BLUE_SIZE,
-            8,
-            EGL_ALPHA_SIZE,
-            8,
-            EGL_NONE,
-        ];
+    let mut cfg: EglConfig = std::ptr::null_mut();
+    let mut ncfg = 0;
+    if unsafe { eglChooseConfig(dpy, cfg_attribs.as_ptr(), &mut cfg, 1, &mut ncfg) } == EGL_FALSE
+        || ncfg < 1
+        || cfg.is_null()
+    {
+        let err = unsafe { eglGetError() };
+        eprintln!("ANGLE: eglChooseConfig failed error={:#x}", err);
+        return Err(err);
+    }
 
-        let mut cfg: EglConfig = std::ptr::null_mut();
-        let mut ncfg = 0;
-        if eglChooseConfig(dpy, cfg_attribs.as_ptr(), &mut cfg, 1, &mut ncfg) == EGL_FALSE
-            || ncfg < 1
-            || cfg.is_null()
-        {
-            panic!("ANGLE: eglChooseConfig failed error={:#x}", eglGetError());
-        }
+    let surf_attribs = [EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE];
+    let surf = unsafe { eglCreatePbufferSurface(dpy, cfg, surf_attribs.as_ptr()) };
+    if surf.is_null() {
+        let err = unsafe { eglGetError() };
+        eprintln!("ANGLE: eglCreatePbufferSurface failed error={:#x}", err);
+        return Err(err);
+    }
 
-        let surf_attribs = [EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE];
-        let surf = eglCreatePbufferSurface(dpy, cfg, surf_attribs.as_ptr());
-        if surf.is_null() {
-            panic!(
-                "ANGLE: eglCreatePbufferSurface failed error={:#x}",
-                eglGetError()
-            );
-        }
+    let ctx_attribs = [EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE];
+    let share = unsafe { eglCreateContext(dpy, cfg, std::ptr::null_mut(), ctx_attribs.as_ptr()) };
+    if share.is_null() {
+        let err = unsafe { eglGetError() };
+        eprintln!("ANGLE: eglCreateContext(share) failed error={:#x}", err);
+        return Err(err);
+    }
 
-        let ctx_attribs = [EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE];
-        let share = eglCreateContext(dpy, cfg, std::ptr::null_mut(), ctx_attribs.as_ptr());
-        if share.is_null() {
-            panic!(
-                "ANGLE: eglCreateContext(share) failed error={:#x}",
-                eglGetError()
-            );
-        }
+    eprintln!(
+        "ANGLE: initialized EGL {}.{} backend=metal display={:?} surface={:?} share_ctx={:?}",
+        major, minor, dpy, surf, share
+    );
 
-        ANGLE_DISPLAY.store(dpy as usize, Ordering::SeqCst);
-        ANGLE_CONFIG.store(cfg as usize, Ordering::SeqCst);
-        ANGLE_SURFACE.store(surf as usize, Ordering::SeqCst);
-        ANGLE_SHARE_CONTEXT.store(share as usize, Ordering::SeqCst);
-
-        eprintln!(
-            "ANGLE: initialized EGL {}.{} backend={} display={:?} surface={:?} share_ctx={:?}",
-            major, minor, angle_backend_name, dpy, surf, share
-        );
-    });
-
-    Ok(())
+    Ok(AngleGlobals {
+        display: dpy,
+        config: cfg,
+        surface: surf,
+        share_context: share,
+    })
 }
 
 extern "C" fn create_gl_context_trampoline(
@@ -502,12 +517,8 @@ extern "C" fn create_gl_context_trampoline(
     let dpy = angle_display();
     let cfg = angle_config();
 
-    // ANGLE/Metal + virglrenderer needs resources/sync objects visible across
-    // vrend contexts. Even when virglrenderer asks for shared=false, using an
-    // isolated EGL context can break transfer/sync paths with:
-    //   Wait sync failed: illegal fence object
-    //
-    // Diagnostic choice: share every vrend context with our root ANGLE context.
+    // shared=true is mandatory: an isolated context breaks
+    // transfer/sync with "Wait sync failed: illegal fence object".
     let share = angle_share_context();
     let shared = true;
 
@@ -553,12 +564,11 @@ extern "C" fn make_current_trampoline(
     scanout_idx: c_int,
     ctx: *mut c_void,
 ) -> c_int {
-    if let Err(err) = angle_init_once() {
-        eprintln!("ANGLE: init failed in make_current err={:#x}", err);
+    let dpy = angle_display();
+    if dpy.is_null() {
+        eprintln!("ANGLE: make_current with uninitialised display");
         return -1;
     }
-
-    let dpy = angle_display();
 
     let ok = if ctx.is_null() {
         unsafe {
@@ -586,11 +596,6 @@ extern "C" fn make_current_trampoline(
 }
 
 extern "C" fn get_egl_display_trampoline(_cookie: *mut c_void) -> *mut c_void {
-    if let Err(err) = angle_init_once() {
-        eprintln!("ANGLE: init failed in get_egl_display err={:#x}", err);
-        return std::ptr::null_mut();
-    }
-
     angle_display()
 }
 
@@ -965,13 +970,7 @@ impl VirglRenderer {
         }
     }
 
-    pub fn transfer_read(
-        &self,
-        ctx_id: u32,
-        resource_id: u32,
-        t: Transfer3D,
-        _buf: Option<()>,
-    ) -> VirglResult<()> {
+    pub fn transfer_read(&self, ctx_id: u32, resource_id: u32, t: Transfer3D) -> VirglResult<()> {
         let mut b = VirglBox {
             x: t.x,
             y: t.y,
@@ -1005,23 +1004,18 @@ impl VirglRenderer {
     }
 
     pub fn map_ptr(&self, resource_id: u32) -> VirglResult<u64> {
-        let (ptr, _size) = self.map_full(resource_id)?;
-        Ok(ptr)
-    }
-
-    pub fn map_full(&self, resource_id: u32) -> VirglResult<(u64, u64)> {
         let mut ptr: *mut c_void = std::ptr::null_mut();
         let mut size = 0u64;
 
         let ret = unsafe { virgl_renderer_resource_map(resource_id, &mut ptr, &mut size) };
-
         check(ret)?;
 
         if ptr.is_null() {
             return Err(VirglError(-14));
         }
 
-        Ok((ptr as u64, size))
+        let _ = size;
+        Ok(ptr as u64)
     }
 
     pub fn unmap(&self, resource_id: u32) -> VirglResult<()> {
