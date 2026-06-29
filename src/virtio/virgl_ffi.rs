@@ -147,8 +147,7 @@ struct VirglRendererCallbacks {
     version: c_int,
     write_fence: Option<extern "C" fn(*mut c_void, u32)>,
 
-    create_gl_context:
-        Option<extern "C" fn(*mut c_void, c_int, *mut VirglRendererGlCtxParam) -> *mut c_void>,
+    create_gl_context: Option<extern "C" fn(*mut c_void, c_int, *mut VirglRendererGlCtxParam) -> *mut c_void>,
     destroy_gl_context: Option<extern "C" fn(*mut c_void, *mut c_void)>,
     make_current: Option<extern "C" fn(*mut c_void, c_int, *mut c_void) -> c_int>,
 
@@ -189,23 +188,14 @@ unsafe extern "C" {
         free_user_data_cb: Option<extern "C" fn(*mut c_void)>,
     );
 
-    fn virgl_renderer_init(
-        cookie: *mut c_void,
-        flags: c_int,
-        cb: *mut VirglRendererCallbacks,
-    ) -> c_int;
+    fn virgl_renderer_init(cookie: *mut c_void, flags: c_int, cb: *mut VirglRendererCallbacks) -> c_int;
     fn virgl_renderer_context_poll(ctx_id: u32);
     fn virgl_renderer_cleanup(cookie: *mut c_void);
 
     fn virgl_renderer_get_cap_set(set: u32, max_ver: *mut u32, max_size: *mut u32);
     fn virgl_renderer_fill_caps(set: u32, version: u32, caps: *mut c_void);
 
-    fn virgl_renderer_context_create_with_flags(
-        ctx_id: u32,
-        ctx_flags: u32,
-        nlen: u32,
-        name: *const c_char,
-    ) -> c_int;
+    fn virgl_renderer_context_create_with_flags(ctx_id: u32, ctx_flags: u32, nlen: u32, name: *const c_char) -> c_int;
     fn virgl_renderer_context_destroy(handle: u32);
 
     fn virgl_renderer_ctx_attach_resource(ctx_id: c_int, res_handle: c_int);
@@ -213,27 +203,14 @@ unsafe extern "C" {
 
     fn virgl_renderer_submit_cmd(buffer: *mut c_void, ctx_id: c_int, ndw: c_int) -> c_int;
 
-    fn virgl_renderer_context_create_fence(
-        ctx_id: u32,
-        flags: u32,
-        ring_idx: u32,
-        fence_id: u64,
-    ) -> c_int;
+    fn virgl_renderer_context_create_fence(ctx_id: u32, flags: u32, ring_idx: u32, fence_id: u64) -> c_int;
 
-    fn virgl_renderer_resource_create(
-        args: *mut ResourceCreateArgs,
-        iov: *mut Iovec,
-        num_iovs: u32,
-    ) -> c_int;
+    fn virgl_renderer_resource_create(args: *mut ResourceCreateArgs, iov: *mut Iovec, num_iovs: u32) -> c_int;
 
     fn virgl_renderer_resource_create_blob(args: *const ResourceCreateBlobArgs) -> c_int;
     fn virgl_renderer_resource_unref(res_handle: u32);
 
-    fn virgl_renderer_resource_attach_iov(
-        res_handle: c_int,
-        iov: *mut Iovec,
-        num_iovs: c_int,
-    ) -> c_int;
+    fn virgl_renderer_resource_attach_iov(res_handle: c_int, iov: *mut Iovec, num_iovs: c_int) -> c_int;
 
     fn virgl_renderer_transfer_write_iov(
         handle: u32,
@@ -259,20 +236,13 @@ unsafe extern "C" {
         iovec_cnt: c_int,
     ) -> c_int;
 
-    fn virgl_renderer_resource_map(
-        res_handle: u32,
-        map: *mut *mut c_void,
-        out_size: *mut u64,
-    ) -> c_int;
+    fn virgl_renderer_resource_map(res_handle: u32, map: *mut *mut c_void, out_size: *mut u64) -> c_int;
 
     fn virgl_renderer_resource_unmap(res_handle: u32) -> c_int;
 
     fn virgl_renderer_resource_get_map_info(res_handle: u32, map_info: *mut u32) -> c_int;
 
-    fn virgl_renderer_resource_get_info_ext(
-        res_handle: c_int,
-        info: *mut VirglRendererResourceInfoExt,
-    ) -> c_int;
+    fn virgl_renderer_resource_get_info_ext(res_handle: c_int, info: *mut VirglRendererResourceInfoExt) -> c_int;
 }
 
 extern "C" fn virgl_log_trampoline(level: c_int, message: *const c_char, _user_data: *mut c_void) {
@@ -315,8 +285,7 @@ const EGL_WIDTH: EglInt = 0x3057;
 const EGL_HEIGHT: EglInt = 0x3056;
 const EGL_CONTEXT_CLIENT_VERSION: EglInt = 0x3098;
 
-type EglGetPlatformDisplayExt =
-    unsafe extern "C" fn(EglEnum, *mut c_void, *const EglInt) -> EglDisplay;
+type EglGetPlatformDisplayExt = unsafe extern "C" fn(EglEnum, *mut c_void, *const EglInt) -> EglDisplay;
 
 #[link(name = "EGL")]
 unsafe extern "C" {
@@ -331,11 +300,7 @@ unsafe extern "C" {
         config_size: EglInt,
         num_config: *mut EglInt,
     ) -> EglBoolean;
-    fn eglCreatePbufferSurface(
-        dpy: EglDisplay,
-        config: EglConfig,
-        attribs: *const EglInt,
-    ) -> EglSurface;
+    fn eglCreatePbufferSurface(dpy: EglDisplay, config: EglConfig, attribs: *const EglInt) -> EglSurface;
     fn eglCreateContext(
         dpy: EglDisplay,
         config: EglConfig,
@@ -343,12 +308,7 @@ unsafe extern "C" {
         attribs: *const EglInt,
     ) -> EglContext;
     fn eglDestroyContext(dpy: EglDisplay, ctx: EglContext) -> EglBoolean;
-    fn eglMakeCurrent(
-        dpy: EglDisplay,
-        draw: EglSurface,
-        read: EglSurface,
-        ctx: EglContext,
-    ) -> EglBoolean;
+    fn eglMakeCurrent(dpy: EglDisplay, draw: EglSurface, read: EglSurface, ctx: EglContext) -> EglBoolean;
 }
 
 #[derive(Clone, Copy)]
@@ -407,13 +367,7 @@ fn angle_init_impl() -> Result<AngleGlobals, EglInt> {
         EGL_NONE,
     ];
 
-    let dpy = unsafe {
-        get_platform_display(
-            EGL_PLATFORM_ANGLE_ANGLE,
-            EGL_DEFAULT_DISPLAY,
-            display_attribs.as_ptr(),
-        )
-    };
+    let dpy = unsafe { get_platform_display(EGL_PLATFORM_ANGLE_ANGLE, EGL_DEFAULT_DISPLAY, display_attribs.as_ptr()) };
     if dpy.is_null() {
         let err = unsafe { eglGetError() };
         eprintln!("ANGLE: eglGetPlatformDisplayEXT failed error={:#x}", err);
@@ -505,11 +459,7 @@ extern "C" fn create_gl_context_trampoline(
             (3, true)
         } else {
             let p = &*param;
-            let major = if p.major_ver > 0 {
-                p.major_ver.min(3)
-            } else {
-                3
-            };
+            let major = if p.major_ver > 0 { p.major_ver.min(3) } else { 3 };
             (major, p.shared)
         }
     };
@@ -550,20 +500,13 @@ extern "C" fn destroy_gl_context_trampoline(_cookie: *mut c_void, ctx: *mut c_vo
     let ret = unsafe { eglDestroyContext(dpy, ctx as EglContext) };
     if ret == EGL_FALSE {
         let err = unsafe { eglGetError() };
-        eprintln!(
-            "ANGLE: destroy_gl_context {:?} failed error={:#x}",
-            ctx, err
-        );
+        eprintln!("ANGLE: destroy_gl_context {:?} failed error={:#x}", ctx, err);
     } else {
         eprintln!("ANGLE: destroy_gl_context {:?}", ctx);
     }
 }
 
-extern "C" fn make_current_trampoline(
-    _cookie: *mut c_void,
-    scanout_idx: c_int,
-    ctx: *mut c_void,
-) -> c_int {
+extern "C" fn make_current_trampoline(_cookie: *mut c_void, scanout_idx: c_int, ctx: *mut c_void) -> c_int {
     let dpy = angle_display();
     if dpy.is_null() {
         eprintln!("ANGLE: make_current with uninitialised display");
@@ -571,14 +514,7 @@ extern "C" fn make_current_trampoline(
     }
 
     let ok = if ctx.is_null() {
-        unsafe {
-            eglMakeCurrent(
-                dpy,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-            )
-        }
+        unsafe { eglMakeCurrent(dpy, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()) }
     } else {
         unsafe { eglMakeCurrent(dpy, angle_surface(), angle_surface(), ctx as EglContext) }
     };
@@ -606,11 +542,7 @@ pub type VirglResult<T> = Result<T, VirglError>;
 
 #[inline]
 fn check(ret: c_int) -> VirglResult<()> {
-    if ret == 0 {
-        Ok(())
-    } else {
-        Err(VirglError(ret))
-    }
+    if ret == 0 { Ok(()) } else { Err(VirglError(ret)) }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -622,12 +554,7 @@ pub struct CapsetInfo {
 
 type FenceCb = Box<dyn FnMut(VirglFence) + Send>;
 
-extern "C" fn write_context_fence_trampoline(
-    cookie: *mut c_void,
-    ctx_id: u32,
-    ring_idx: u32,
-    fence_id: u64,
-) {
+extern "C" fn write_context_fence_trampoline(cookie: *mut c_void, ctx_id: u32, ring_idx: u32, fence_id: u64) {
     let cb = unsafe { &mut *(cookie as *mut FenceCb) };
     cb(VirglFence {
         fence_id,
@@ -697,10 +624,7 @@ impl VirglRenderer {
             unsafe { virgl_renderer_get_cap_set(id, &mut version, &mut size) };
 
             if size != 0 {
-                eprintln!(
-                    "virgl_ffi: capset id={} version={} size={}",
-                    id, version, size
-                );
+                eprintln!("virgl_ffi: capset id={} version={} size={}", id, version, size);
                 capsets.push(CapsetInfo { id, version, size });
             } else {
                 eprintln!(
@@ -762,12 +686,7 @@ impl VirglRenderer {
         Ok(caps)
     }
 
-    pub fn create_ctx(
-        &mut self,
-        ctx_id: u32,
-        context_init: u32,
-        name: Option<&str>,
-    ) -> VirglResult<()> {
+    pub fn create_ctx(&mut self, ctx_id: u32, context_init: u32, name: Option<&str>) -> VirglResult<()> {
         let context_init = if context_init == 0 {
             let selected = if self.capsets.iter().any(|c| c.id == CAPSET_VIRGL2) {
                 CAPSET_VIRGL2
@@ -779,10 +698,7 @@ impl VirglRenderer {
                 return Err(VirglError(-1));
             };
 
-            eprintln!(
-                "virgl_ffi: ctx_id={} context_init=0 -> capset {}",
-                ctx_id, selected
-            );
+            eprintln!("virgl_ffi: ctx_id={} context_init=0 -> capset {}", ctx_id, selected);
 
             selected
         } else {
@@ -837,16 +753,13 @@ impl VirglRenderer {
         let ndw = (buf.len() / 4) as c_int;
         let buf_ptr = buf.as_mut_ptr();
 
-        let ret =
-            unsafe { virgl_renderer_submit_cmd(buf_ptr as *mut c_void, ctx_id as c_int, ndw) };
+        let ret = unsafe { virgl_renderer_submit_cmd(buf_ptr as *mut c_void, ctx_id as c_int, ndw) };
 
         check(ret)
     }
 
     pub fn create_fence(&self, fence: VirglFence) -> VirglResult<()> {
-        let ret = unsafe {
-            virgl_renderer_context_create_fence(fence.ctx_id, 0, fence.ring_idx, fence.fence_id)
-        };
+        let ret = unsafe { virgl_renderer_context_create_fence(fence.ctx_id, 0, fence.ring_idx, fence.fence_id) };
 
         check(ret)
     }

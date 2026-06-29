@@ -40,9 +40,7 @@ struct CallbackState {
 }
 
 impl Backend {
-    pub fn new(
-        kicker: kick::Kicker,
-    ) -> Result<(Backend, PeriodSink, Receiver<BackendEvent>), coreaudio::Error> {
+    pub fn new(kicker: kick::Kicker) -> Result<(Backend, PeriodSink, Receiver<BackendEvent>), coreaudio::Error> {
         let (producer, consumer) = RingBuffer::new(RING_CAPACITY);
         let (tx, rx) = mpsc::channel();
 

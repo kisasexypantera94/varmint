@@ -2,9 +2,8 @@ use crate::iosurface::ScopedIOSurface;
 use core_graphics_types::geometry::CGSize;
 use foreign_types::ForeignType;
 use metal::{
-    CAMetalLayer, CommandQueue, Device, MTLOrigin, MTLPixelFormat, MTLRegion, MTLSize,
-    MTLStorageMode, MTLTextureType, MTLTextureUsage, MetalLayer, Texture, TextureDescriptor,
-    TextureRef,
+    CAMetalLayer, CommandQueue, Device, MTLOrigin, MTLPixelFormat, MTLRegion, MTLSize, MTLStorageMode, MTLTextureType,
+    MTLTextureUsage, MetalLayer, Texture, TextureDescriptor, TextureRef,
 };
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use raw_window_metal::Layer;
@@ -194,8 +193,7 @@ impl Presenter {
             return false;
         }
 
-        let bytes: &[u8] =
-            unsafe { std::slice::from_raw_parts(pixels.as_ptr() as *const u8, pixels.len() * 4) };
+        let bytes: &[u8] = unsafe { std::slice::from_raw_parts(pixels.as_ptr() as *const u8, pixels.len() * 4) };
 
         let row_bytes = pw as usize * 4;
         let start = y as usize * row_bytes + x as usize * 4;
@@ -214,12 +212,7 @@ impl Presenter {
         true
     }
 
-    fn ensure_iosurface_texture_for_id(
-        &mut self,
-        surface_id: u32,
-        width: u32,
-        height: u32,
-    ) -> bool {
+    fn ensure_iosurface_texture_for_id(&mut self, surface_id: u32, width: u32, height: u32) -> bool {
         if let Some(backing) = self.iosurface_texture.as_ref() {
             if backing.surface_id == surface_id
                 && backing.surface.width() == width
@@ -245,12 +238,8 @@ impl Presenter {
         desc.set_storage_mode(MTLStorageMode::Shared);
         desc.set_usage(MTLTextureUsage::ShaderRead);
 
-        let Some(texture) =
-            (unsafe { new_texture_with_iosurface(&self.device, &desc, surface.as_ptr()) })
-        else {
-            eprintln!(
-                "present: failed to create Metal texture for producer IOSurface id={surface_id}"
-            );
+        let Some(texture) = (unsafe { new_texture_with_iosurface(&self.device, &desc, surface.as_ptr()) }) else {
+            eprintln!("present: failed to create Metal texture for producer IOSurface id={surface_id}");
             self.iosurface_texture = None;
             return false;
         };

@@ -5,7 +5,10 @@ use crate::{
         chain::ChainData,
         common,
         device::{ChainAction, ChainToken, Device, Effect, ExternalEventHandler, ShmRegion},
-        virgl_ffi::{Iovec, ResourceCreate3D, ResourceCreateBlob as VirglResourceCreateBlob, Transfer3D, VirglFence, VirglRenderer},
+        virgl_ffi::{
+            Iovec, ResourceCreate3D, ResourceCreateBlob as VirglResourceCreateBlob, Transfer3D, VirglFence,
+            VirglRenderer,
+        },
     },
 };
 use applevisor::memory::Memory;
@@ -511,7 +514,13 @@ impl<'a> Device for Gpu<'a> {
         2
     }
 
-    fn process_chain(&mut self, queue_idx: usize, chain: &ChainData, token: ChainToken, mem: &mut Memory) -> ChainAction {
+    fn process_chain(
+        &mut self,
+        queue_idx: usize,
+        chain: &ChainData,
+        token: ChainToken,
+        mem: &mut Memory,
+    ) -> ChainAction {
         let Some(hdr) = chain.read_obj::<CtrlHeader>(0, mem) else {
             eprintln!("virtio-gpu: unreadable command header");
             return self.err(chain, CtrlType::RespErrUnspec, &CtrlHeader::new_zeroed(), mem);
@@ -626,7 +635,13 @@ impl<'a> Gpu<'a> {
         let data = match self.renderer.get_capset(req.capset_id, req.capset_version) {
             Ok(data) => data,
             Err(err) => {
-                eprintln!("GetCapset FAILED: capset_id={} version={} err={:?}", pf!(req, capset_id), pf!(req, capset_version), err,);
+                eprintln!(
+                    "GetCapset FAILED: capset_id={} version={} err={:?}",
+                    pf!(req, capset_id),
+                    pf!(req, capset_version),
+                    err,
+                );
+
                 return self.err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
             }
         };
@@ -646,7 +661,13 @@ impl<'a> Gpu<'a> {
         match self.renderer.create_ctx(hdr.ctx_ud, req.context_init, Some(name)) {
             Ok(()) => self.ok(chain, hdr, mem),
             Err(e) => {
-                eprintln!("CtxCreate FAILED ctx_id={} context_init={} err={:?}", pf!(hdr, ctx_ud), pf!(req, context_init), e,);
+                eprintln!(
+                    "CtxCreate FAILED ctx_id={} context_init={} err={:?}",
+                    pf!(hdr, ctx_ud),
+                    pf!(req, context_init),
+                    e,
+                );
+
                 self.err(chain, CtrlType::RespErrInvalidContextId, hdr, mem)
             }
         }
@@ -665,12 +686,20 @@ impl<'a> Gpu<'a> {
         let resource_id = req.resource_id;
 
         let Some(resource) = self.resources.get(&resource_id) else {
-            eprintln!("CtxAttach FAILED: resource not in local map ctx_id={} resource_id={}", pf!(hdr, ctx_ud), resource_id,);
+            eprintln!(
+                "CtxAttach FAILED: resource not in local map ctx_id={} resource_id={}",
+                pf!(hdr, ctx_ud),
+                resource_id,
+            );
             return self.err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
         };
 
         if !resource.is_3d {
-            eprintln!("CtxAttach: ignoring attach of local 2D resource {} to ctx {}", resource_id, pf!(hdr, ctx_ud),);
+            eprintln!(
+                "CtxAttach: ignoring attach of local 2D resource {} to ctx {}",
+                resource_id,
+                pf!(hdr, ctx_ud),
+            );
             return self.ok(chain, hdr, mem);
         }
 
@@ -678,7 +707,10 @@ impl<'a> Gpu<'a> {
         match self.renderer.ctx_attach_resource(hdr.ctx_ud, resource_id) {
             Ok(()) => self.ok(chain, hdr, mem),
             Err(e) => {
-                eprintln!("CtxAttach FAILED ctx_id={} resource_id={} err={:?}", ctx_ud, resource_id, e,);
+                eprintln!(
+                    "CtxAttach FAILED ctx_id={} resource_id={} err={:?}",
+                    ctx_ud, resource_id, e,
+                );
                 self.err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem)
             }
         }
@@ -696,14 +728,24 @@ impl<'a> Gpu<'a> {
         };
 
         if !resource.is_3d {
-            eprintln!("CtxDetach: ignoring detach of local 2D resource {} from ctx {}", resource_id, pf!(hdr, ctx_ud),);
+            eprintln!(
+                "CtxDetach: ignoring detach of local 2D resource {} from ctx {}",
+                resource_id,
+                pf!(hdr, ctx_ud),
+            );
+
             return self.ok(chain, hdr, mem);
         }
 
         match self.renderer.ctx_detach_resource(hdr.ctx_ud, resource_id) {
             Ok(()) => self.ok(chain, hdr, mem),
             Err(e) => {
-                eprintln!("CtxDetach FAILED ctx_id={} resource_id={} err={:?}", pf!(hdr, ctx_ud), resource_id, e,);
+                eprintln!(
+                    "CtxDetach FAILED ctx_id={} resource_id={} err={:?}",
+                    pf!(hdr, ctx_ud),
+                    resource_id,
+                    e,
+                );
                 self.err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem)
             }
         }
@@ -806,7 +848,13 @@ impl<'a> Gpu<'a> {
         self.ok(chain, hdr, mem)
     }
 
-    fn cmd_submit_3d(&mut self, chain: &ChainData, hdr: &CtrlHeader, token: ChainToken, mem: &mut Memory) -> ChainAction {
+    fn cmd_submit_3d(
+        &mut self,
+        chain: &ChainData,
+        hdr: &CtrlHeader,
+        token: ChainToken,
+        mem: &mut Memory,
+    ) -> ChainAction {
         let Some(req) = chain.read_obj::<CmdSubmit3d>(0, mem) else {
             return self.err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
@@ -828,7 +876,11 @@ impl<'a> Gpu<'a> {
         self.submit_buf.resize(req.size as usize, 0);
 
         if chain.read_at(payload_offset, &mut self.submit_buf, mem).is_none() {
-            eprintln!("Submit3d FAILED: cannot read payload ctx_id={} size={}", pf!(hdr, ctx_ud), pf!(req, size),);
+            eprintln!(
+                "Submit3d FAILED: cannot read payload ctx_id={} size={}",
+                pf!(hdr, ctx_ud),
+                pf!(req, size),
+            );
             return self.err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         }
 
@@ -906,14 +958,20 @@ impl<'a> Gpu<'a> {
             }
         } else if is_3d {
             let Some(source) = self.renderer.native_source_info(resource_id) else {
-                eprintln!("virtio-gpu: ResourceFlush failed: 3D scanout resource={} has no native source", resource_id);
+                eprintln!(
+                    "virtio-gpu: ResourceFlush failed: 3D scanout resource={} has no native source",
+                    resource_id
+                );
                 return self.err(chain, CtrlType::RespErrUnspec, hdr, mem);
             };
 
             iosurface_id = self.copy_metal_texture_to_iosurface(resource_id, source);
 
             if iosurface_id.is_none() {
-                eprintln!("virtio-gpu: ResourceFlush failed: native scanout copy failed resource={}", resource_id);
+                eprintln!(
+                    "virtio-gpu: ResourceFlush failed: native scanout copy failed resource={}",
+                    resource_id
+                );
                 return self.err(chain, CtrlType::RespErrUnspec, hdr, mem);
             }
         }
@@ -972,7 +1030,9 @@ impl<'a> Gpu<'a> {
         let blob_size = req.size;
         let nr_entries = req.nr_entries;
 
-        let create_blob_result = self.renderer.resource_create_blob(ctx_ud, resource_id, blob, iovecs_opt);
+        let create_blob_result = self
+            .renderer
+            .resource_create_blob(ctx_ud, resource_id, blob, iovecs_opt);
 
         if let Err(err) = create_blob_result {
             eprintln!(
@@ -1131,7 +1191,10 @@ impl<'a> Gpu<'a> {
             };
 
             self.scanout_resource = Some(resource_id);
-            self.display.lock().unwrap().resize(resource.width as usize, resource.height as usize);
+            self.display
+                .lock()
+                .unwrap()
+                .resize(resource.width as usize, resource.height as usize);
         }
 
         self.ok(chain, hdr, mem)
@@ -1173,12 +1236,26 @@ impl<'a> Gpu<'a> {
 
         let ok = if rect_x == 0 && rect_width == width {
             let start = rect_y * stride;
-            Gpu::read_backing(&resource.backing, transfer_offset, &mut resource.framebuffer[start..start + rect_height * stride], mem).is_some()
+
+            Gpu::read_backing(
+                &resource.backing,
+                transfer_offset,
+                &mut resource.framebuffer[start..start + rect_height * stride],
+                mem,
+            )
+            .is_some()
         } else {
             (0..rect_height).all(|row| {
                 let src_offset = transfer_offset + row * stride;
                 let dst_offset = (rect_y + row) * stride + rect_x * BYTES_PER_PIXEL;
-                Gpu::read_backing(&resource.backing, src_offset, &mut resource.framebuffer[dst_offset..dst_offset + row_len], mem).is_some()
+
+                Gpu::read_backing(
+                    &resource.backing,
+                    src_offset,
+                    &mut resource.framebuffer[dst_offset..dst_offset + row_len],
+                    mem,
+                )
+                .is_some()
             })
         };
 
@@ -1233,7 +1310,11 @@ impl<'a> Gpu<'a> {
         self.ok(chain, hdr, mem)
     }
 
-    fn copy_metal_texture_to_iosurface(&mut self, resource_id: u32, native_source: crate::virtio::virgl_ffi::NativeSourceInfo) -> Option<u32> {
+    fn copy_metal_texture_to_iosurface(
+        &mut self,
+        resource_id: u32,
+        native_source: crate::virtio::virgl_ffi::NativeSourceInfo,
+    ) -> Option<u32> {
         let width = native_source.width;
         let height = native_source.height;
 
@@ -1254,7 +1335,12 @@ impl<'a> Gpu<'a> {
             return None;
         };
 
-        let ok = crate::angle_egl::copy_metal_texture_to_iosurface(native_source.handle as *mut c_void, surface.as_ptr(), width, height);
+        let ok = crate::angle_egl::copy_metal_texture_to_iosurface(
+            native_source.handle as *mut c_void,
+            surface.as_ptr(),
+            width,
+            height,
+        );
 
         if ok {
             Some(surface.id())
@@ -1273,7 +1359,10 @@ impl<'a> Gpu<'a> {
         let height = resource.height as usize;
 
         if width == 0 || height == 0 || width > 16384 || height > 16384 {
-            eprintln!("readback_blob_scanout: invalid size res={} {}x{}", resource_id, width, height);
+            eprintln!(
+                "readback_blob_scanout: invalid size res={} {}x{}",
+                resource_id, width, height
+            );
             return false;
         }
 
@@ -1311,7 +1400,14 @@ impl<'a> Gpu<'a> {
             let src_offset = base + (rect_y + row) * src_stride + rect_x * BYTES_PER_PIXEL;
             let dst_offset = (rect_y + row) * dst_stride + rect_x * BYTES_PER_PIXEL;
 
-            if Gpu::read_backing(&resource.backing, src_offset, &mut resource.framebuffer[dst_offset..dst_offset + row_len], mem).is_none() {
+            if Gpu::read_backing(
+                &resource.backing,
+                src_offset,
+                &mut resource.framebuffer[dst_offset..dst_offset + row_len],
+                mem,
+            )
+            .is_none()
+            {
                 eprintln!(
                     "readback_blob_scanout: read_backing failed res={} row={} src_offset={} row_len={} stride={} base={}",
                     resource_id, row, src_offset, row_len, src_stride, base
@@ -1403,7 +1499,8 @@ impl<'a> Gpu<'a> {
             let need = dst.len() - written;
             let copy_len = available.min(need);
 
-            mem.read(entry.addr + in_entry_off as u64, &mut dst[written..written + copy_len]).ok()?;
+            mem.read(entry.addr + in_entry_off as u64, &mut dst[written..written + copy_len])
+                .ok()?;
 
             written += copy_len;
             src_offset = 0;
@@ -1448,12 +1545,18 @@ impl<'a> Gpu<'a> {
         let rounded_size = match align_up(size as usize, APPLE_HV_PAGE_SIZE) {
             Some(v) => v as u64,
             None => {
-                eprintln!("ResourceMapBlob FAILED: size overflow resource_id={} size={}", resource_id, size,);
+                eprintln!(
+                    "ResourceMapBlob FAILED: size overflow resource_id={} size={}",
+                    resource_id, size,
+                );
                 return self.err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
             }
         };
 
-        if offset.checked_add(rounded_size).is_none_or(|end| end > HOST_VISIBLE_SHM_SIZE) {
+        if offset
+            .checked_add(rounded_size)
+            .is_none_or(|end| end > HOST_VISIBLE_SHM_SIZE)
+        {
             eprintln!(
                 "ResourceMapBlob FAILED: rounded mapping does not fit resource_id={} offset={:#x} size={} rounded_size={} shm_size={}",
                 resource_id, offset, size, rounded_size, HOST_VISIBLE_SHM_SIZE,
@@ -1464,7 +1567,10 @@ impl<'a> Gpu<'a> {
         let map_info = match self.renderer.map_info(resource_id) {
             Ok(map_info) => map_info,
             Err(err) => {
-                eprintln!("ResourceMapBlob FAILED: map_info resource_id={} err={:?}", resource_id, err,);
+                eprintln!(
+                    "ResourceMapBlob FAILED: map_info resource_id={} err={:?}",
+                    resource_id, err,
+                );
                 return self.err(chain, CtrlType::RespErrUnspec, hdr, mem);
             }
         };
@@ -1472,7 +1578,10 @@ impl<'a> Gpu<'a> {
         let map_ptr = match self.renderer.map_ptr(resource_id) {
             Ok(map_ptr) => map_ptr,
             Err(err) => {
-                eprintln!("ResourceMapBlob FAILED: map_ptr resource_id={} err={:?}", resource_id, err,);
+                eprintln!(
+                    "ResourceMapBlob FAILED: map_ptr resource_id={} err={:?}",
+                    resource_id, err,
+                );
                 return self.err(chain, CtrlType::RespErrUnspec, hdr, mem);
             }
         };
@@ -1540,7 +1649,10 @@ impl<'a> Gpu<'a> {
         }
 
         if let Err(err) = self.renderer.unmap(resource_id) {
-            eprintln!("ResourceUnmapBlob FAILED: virgl unmap resource_id={} err={:?}", resource_id, err,);
+            eprintln!(
+                "ResourceUnmapBlob FAILED: virgl unmap resource_id={} err={:?}",
+                resource_id, err,
+            );
             return self.err(chain, CtrlType::RespErrUnspec, hdr, mem);
         }
 
@@ -1643,9 +1755,20 @@ fn map_blob_to_guest(host_addr: u64, guest_addr: u64, size: usize) -> Result<(u6
 
     let map_size = align_up(size.checked_add(host_delta as usize).ok_or(-1)?, APPLE_HV_PAGE_SIZE).ok_or(-1)?;
 
-    let ret = unsafe { hv_vm_map(host_base as *const c_void, guest_base, map_size, HV_MEMORY_READ | HV_MEMORY_WRITE) };
+    let ret = unsafe {
+        hv_vm_map(
+            host_base as *const c_void,
+            guest_base,
+            map_size,
+            HV_MEMORY_READ | HV_MEMORY_WRITE,
+        )
+    };
 
-    if ret == HV_SUCCESS { Ok((guest_base, map_size)) } else { Err(ret) }
+    if ret == HV_SUCCESS {
+        Ok((guest_base, map_size))
+    } else {
+        Err(ret)
+    }
 }
 
 fn unmap_blob_from_guest(guest_base: u64, size: usize) -> Result<(), i32> {

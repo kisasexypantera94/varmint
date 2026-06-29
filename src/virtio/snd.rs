@@ -397,8 +397,7 @@ impl Snd {
                     return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
                 };
 
-                if p.hdr.stream_id != STREAM_ID || matches!(self.stream.state, StreamState::Running)
-                {
+                if p.hdr.stream_id != STREAM_ID || matches!(self.stream.state, StreamState::Running) {
                     return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
                 }
 
@@ -429,11 +428,7 @@ impl Snd {
                     return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
                 };
 
-                if p.stream_id != STREAM_ID
-                    || matches!(
-                        self.stream.state,
-                        StreamState::Initial | StreamState::Running
-                    )
+                if p.stream_id != STREAM_ID || matches!(self.stream.state, StreamState::Initial | StreamState::Running)
                 {
                     return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
                 }
@@ -471,10 +466,7 @@ impl Snd {
                 };
 
                 if p.stream_id != STREAM_ID
-                    || !matches!(
-                        self.stream.state,
-                        StreamState::ParamsSet | StreamState::Prepared
-                    )
+                    || !matches!(self.stream.state, StreamState::ParamsSet | StreamState::Prepared)
                 {
                     return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
                 }
@@ -497,11 +489,7 @@ impl Snd {
                 match start.checked_add(count) {
                     Some(end) if end <= NUM_CHMAPS => {}
                     _ => {
-                        return ChainAction::Complete(self.respond_status(
-                            chain,
-                            Status::BadMsg,
-                            mem,
-                        ));
+                        return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
                     }
                 }
 
@@ -536,12 +524,7 @@ impl Snd {
         }
     }
 
-    fn submit_period(
-        &mut self,
-        chain: &ChainData,
-        token: ChainToken,
-        mem: &mut Memory,
-    ) -> ChainAction {
+    fn submit_period(&mut self, chain: &ChainData, token: ChainToken, mem: &mut Memory) -> ChainAction {
         const PAYLOAD_OFFSET: usize = size_of::<PcmXfer>();
 
         let Some(_pcm_xfer) = chain.read_obj::<PcmXfer>(0, mem) else {
@@ -555,10 +538,7 @@ impl Snd {
             return ChainAction::Complete(0);
         };
 
-        if !self
-            .period_sink
-            .push(self.next_period, &self.stream.period_scratch)
-        {
+        if !self.period_sink.push(self.next_period, &self.stream.period_scratch) {
             return ChainAction::Complete(0);
         }
 
@@ -583,9 +563,7 @@ impl Snd {
     }
 
     fn respond_status(&self, chain: &ChainData, status: Status, mem: &mut Memory) -> u32 {
-        let hdr = Hdr {
-            code: status as u32,
-        };
+        let hdr = Hdr { code: status as u32 };
         chain.write_response(hdr.as_bytes(), mem)
     }
 }

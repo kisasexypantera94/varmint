@@ -29,13 +29,8 @@ impl Backend {
     }
 
     pub fn mac(&self) -> [u8; 6] {
-        if let Some(Parameter::MACAddress(mac_str)) =
-            self.iface.parameters().get(ParameterKind::MACAddress)
-        {
-            let bytes: Vec<u8> = mac_str
-                .split(':')
-                .map(|s| u8::from_str_radix(s, 16).unwrap())
-                .collect();
+        if let Some(Parameter::MACAddress(mac_str)) = self.iface.parameters().get(ParameterKind::MACAddress) {
+            let bytes: Vec<u8> = mac_str.split(':').map(|s| u8::from_str_radix(s, 16).unwrap()).collect();
             bytes.try_into().unwrap()
         } else {
             panic!("vmnet did not provide MAC address");

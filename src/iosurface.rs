@@ -34,11 +34,7 @@ unsafe extern "C" {
 
     fn CFDictionarySetValue(dict: CFMutableDictionaryRef, key: *const c_void, value: *const c_void);
 
-    fn CFNumberCreate(
-        allocator: CFAllocatorRef,
-        the_type: i32,
-        value_ptr: *const c_void,
-    ) -> CFNumberRef;
+    fn CFNumberCreate(allocator: CFAllocatorRef, the_type: i32, value_ptr: *const c_void) -> CFNumberRef;
 
     fn CFRetain(value: CFTypeRef) -> CFTypeRef;
     fn CFRelease(value: CFTypeRef);
@@ -126,17 +122,9 @@ impl ScopedIOSurface {
 
         let ok = add_i32(dict, unsafe { kIOSurfaceWidth }, width as i32)
             && add_i32(dict, unsafe { kIOSurfaceHeight }, height as i32)
-            && add_i32(
-                dict,
-                unsafe { kIOSurfacePixelFormat },
-                IOSURFACE_PIXEL_FORMAT_BGRA,
-            )
+            && add_i32(dict, unsafe { kIOSurfacePixelFormat }, IOSURFACE_PIXEL_FORMAT_BGRA)
             && add_i32(dict, unsafe { kIOSurfaceBytesPerElement }, 4)
-            && add_i32(
-                dict,
-                unsafe { kIOSurfaceBytesPerRow },
-                width.saturating_mul(4) as i32,
-            );
+            && add_i32(dict, unsafe { kIOSurfaceBytesPerRow }, width.saturating_mul(4) as i32);
 
         if !ok {
             unsafe {

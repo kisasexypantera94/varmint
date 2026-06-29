@@ -75,30 +75,16 @@ unsafe extern "C" {
 
 type EglGetProcAddress = unsafe extern "C" fn(*const c_char) -> *const c_void;
 type EglGetDisplay = unsafe extern "C" fn(*mut c_void) -> EGLDisplay;
-type EglGetPlatformDisplayExt =
-    unsafe extern "C" fn(EGLenum, *mut c_void, *const EGLint) -> EGLDisplay;
+type EglGetPlatformDisplayExt = unsafe extern "C" fn(EGLenum, *mut c_void, *const EGLint) -> EGLDisplay;
 type EglInitialize = unsafe extern "C" fn(EGLDisplay, *mut EGLint, *mut EGLint) -> EGLBoolean;
 type EglBindApi = unsafe extern "C" fn(EGLenum) -> EGLBoolean;
-type EglChooseConfig = unsafe extern "C" fn(
-    EGLDisplay,
-    *const EGLint,
-    *mut EGLConfig,
-    EGLint,
-    *mut EGLint,
-) -> EGLBoolean;
-type EglCreateContext =
-    unsafe extern "C" fn(EGLDisplay, EGLConfig, EGLContext, *const EGLint) -> EGLContext;
-type EglCreatePbufferSurface =
-    unsafe extern "C" fn(EGLDisplay, EGLConfig, *const EGLint) -> EGLSurface;
-type EglCreatePbufferFromClientBuffer = unsafe extern "C" fn(
-    EGLDisplay,
-    EGLenum,
-    EGLClientBuffer,
-    EGLConfig,
-    *const EGLint,
-) -> EGLSurface;
-type EglMakeCurrent =
-    unsafe extern "C" fn(EGLDisplay, EGLSurface, EGLSurface, EGLContext) -> EGLBoolean;
+type EglChooseConfig =
+    unsafe extern "C" fn(EGLDisplay, *const EGLint, *mut EGLConfig, EGLint, *mut EGLint) -> EGLBoolean;
+type EglCreateContext = unsafe extern "C" fn(EGLDisplay, EGLConfig, EGLContext, *const EGLint) -> EGLContext;
+type EglCreatePbufferSurface = unsafe extern "C" fn(EGLDisplay, EGLConfig, *const EGLint) -> EGLSurface;
+type EglCreatePbufferFromClientBuffer =
+    unsafe extern "C" fn(EGLDisplay, EGLenum, EGLClientBuffer, EGLConfig, *const EGLint) -> EGLSurface;
+type EglMakeCurrent = unsafe extern "C" fn(EGLDisplay, EGLSurface, EGLSurface, EGLContext) -> EGLBoolean;
 type EglGetCurrentDisplay = unsafe extern "C" fn() -> EGLDisplay;
 type EglGetCurrentContext = unsafe extern "C" fn() -> EGLContext;
 type EglGetCurrentSurface = unsafe extern "C" fn(EGLint) -> EGLSurface;
@@ -108,13 +94,8 @@ type EglDestroySurface = unsafe extern "C" fn(EGLDisplay, EGLSurface) -> EGLBool
 type EglDestroyContext = unsafe extern "C" fn(EGLDisplay, EGLContext) -> EGLBoolean;
 type EglQueryString = unsafe extern "C" fn(EGLDisplay, EGLint) -> *const c_char;
 type EglGetError = unsafe extern "C" fn() -> EGLint;
-type EglCreateImageKHR = unsafe extern "C" fn(
-    EGLDisplay,
-    EGLContext,
-    EGLenum,
-    EGLClientBuffer,
-    *const EGLint,
-) -> EGLImageKHR;
+type EglCreateImageKHR =
+    unsafe extern "C" fn(EGLDisplay, EGLContext, EGLenum, EGLClientBuffer, *const EGLint) -> EGLImageKHR;
 type EglDestroyImageKHR = unsafe extern "C" fn(EGLDisplay, EGLImageKHR) -> EGLBoolean;
 
 type GlGenTextures = unsafe extern "C" fn(i32, *mut u32);
@@ -183,10 +164,7 @@ unsafe fn proc_symbol<T: Copy>(egl_get_proc_address: EglGetProcAddress, name: &s
     }
 }
 
-unsafe fn load_egl_display(
-    egl_get_proc_address: EglGetProcAddress,
-    egl_get_display: EglGetDisplay,
-) -> EGLDisplay {
+unsafe fn load_egl_display(egl_get_proc_address: EglGetProcAddress, egl_get_display: EglGetDisplay) -> EGLDisplay {
     let egl_get_platform_display_ext: Option<EglGetPlatformDisplayExt> =
         unsafe { proc_symbol(egl_get_proc_address, "eglGetPlatformDisplayEXT") };
 
@@ -196,9 +174,7 @@ unsafe fn load_egl_display(
             EGL_PLATFORM_ANGLE_TYPE_METAL_ANGLE,
             EGL_NONE,
         ];
-        let dpy = unsafe {
-            get_platform_display(EGL_PLATFORM_ANGLE_ANGLE, ptr::null_mut(), attrs.as_ptr())
-        };
+        let dpy = unsafe { get_platform_display(EGL_PLATFORM_ANGLE_ANGLE, ptr::null_mut(), attrs.as_ptr()) };
         if !dpy.is_null() {
             return dpy;
         }
@@ -230,15 +206,7 @@ unsafe fn choose_config(
 
     let mut config: EGLConfig = ptr::null_mut();
     let mut num_configs = 0;
-    if unsafe {
-        egl_choose_config(
-            display,
-            config_attribs.as_ptr(),
-            &mut config,
-            1,
-            &mut num_configs,
-        )
-    } == EGL_FALSE
+    if unsafe { egl_choose_config(display, config_attribs.as_ptr(), &mut config, 1, &mut num_configs) } == EGL_FALSE
         || num_configs == 0
         || config.is_null()
     {
@@ -332,8 +300,7 @@ impl AngleCopySession {
             "/opt/homebrew/opt/angle/lib/libGLESv2.dylib",
         ])?;
 
-        let egl_get_proc_address: EglGetProcAddress =
-            unsafe { symbol(egl_lib, "eglGetProcAddress")? };
+        let egl_get_proc_address: EglGetProcAddress = unsafe { symbol(egl_lib, "eglGetProcAddress")? };
         let egl_get_display: EglGetDisplay = unsafe { symbol(egl_lib, "eglGetDisplay")? };
         let egl_initialize: EglInitialize = unsafe { symbol(egl_lib, "eglInitialize")? };
         let egl_bind_api: EglBindApi = unsafe { symbol(egl_lib, "eglBindAPI")? };
@@ -342,19 +309,14 @@ impl AngleCopySession {
         let egl_create_pbuffer_surface: EglCreatePbufferSurface =
             unsafe { symbol(egl_lib, "eglCreatePbufferSurface")? };
         let egl_make_current: EglMakeCurrent = unsafe { symbol(egl_lib, "eglMakeCurrent")? };
-        let egl_get_current_display: EglGetCurrentDisplay =
-            unsafe { symbol(egl_lib, "eglGetCurrentDisplay")? };
-        let egl_get_current_context: EglGetCurrentContext =
-            unsafe { symbol(egl_lib, "eglGetCurrentContext")? };
-        let egl_get_current_surface: EglGetCurrentSurface =
-            unsafe { symbol(egl_lib, "eglGetCurrentSurface")? };
+        let egl_get_current_display: EglGetCurrentDisplay = unsafe { symbol(egl_lib, "eglGetCurrentDisplay")? };
+        let egl_get_current_context: EglGetCurrentContext = unsafe { symbol(egl_lib, "eglGetCurrentContext")? };
+        let egl_get_current_surface: EglGetCurrentSurface = unsafe { symbol(egl_lib, "eglGetCurrentSurface")? };
         let egl_create_pbuffer_from_client_buffer: EglCreatePbufferFromClientBuffer =
             unsafe { symbol(egl_lib, "eglCreatePbufferFromClientBuffer")? };
         let egl_bind_tex_image: EglBindTexImage = unsafe { symbol(egl_lib, "eglBindTexImage")? };
-        let egl_release_tex_image: EglReleaseTexImage =
-            unsafe { symbol(egl_lib, "eglReleaseTexImage")? };
-        let egl_destroy_surface: EglDestroySurface =
-            unsafe { symbol(egl_lib, "eglDestroySurface")? };
+        let egl_release_tex_image: EglReleaseTexImage = unsafe { symbol(egl_lib, "eglReleaseTexImage")? };
+        let egl_destroy_surface: EglDestroySurface = unsafe { symbol(egl_lib, "eglDestroySurface")? };
         let egl_query_string: EglQueryString = unsafe { symbol(egl_lib, "eglQueryString")? };
         let egl_get_error: EglGetError = unsafe { symbol(egl_lib, "eglGetError")? };
 
@@ -376,16 +338,12 @@ impl AngleCopySession {
         let gl_bind_texture: GlBindTexture = unsafe { symbol(gles_lib, "glBindTexture")? };
         let gl_tex_parameteri: GlTexParameteri = unsafe { symbol(gles_lib, "glTexParameteri")? };
         let gl_delete_textures: GlDeleteTextures = unsafe { symbol(gles_lib, "glDeleteTextures")? };
-        let gl_gen_framebuffers: GlGenFramebuffers =
-            unsafe { symbol(gles_lib, "glGenFramebuffers")? };
-        let gl_bind_framebuffer: GlBindFramebuffer =
-            unsafe { symbol(gles_lib, "glBindFramebuffer")? };
-        let gl_framebuffer_texture_2d: GlFramebufferTexture2D =
-            unsafe { symbol(gles_lib, "glFramebufferTexture2D")? };
+        let gl_gen_framebuffers: GlGenFramebuffers = unsafe { symbol(gles_lib, "glGenFramebuffers")? };
+        let gl_bind_framebuffer: GlBindFramebuffer = unsafe { symbol(gles_lib, "glBindFramebuffer")? };
+        let gl_framebuffer_texture_2d: GlFramebufferTexture2D = unsafe { symbol(gles_lib, "glFramebufferTexture2D")? };
         let gl_check_framebuffer_status: GlCheckFramebufferStatus =
             unsafe { symbol(gles_lib, "glCheckFramebufferStatus")? };
-        let gl_delete_framebuffers: GlDeleteFramebuffers =
-            unsafe { symbol(gles_lib, "glDeleteFramebuffers")? };
+        let gl_delete_framebuffers: GlDeleteFramebuffers = unsafe { symbol(gles_lib, "glDeleteFramebuffers")? };
         let gl_finish: GlFinish = unsafe { symbol(gles_lib, "glFinish")? };
         let gl_flush: GlFlush = unsafe { symbol(gles_lib, "glFlush")? };
 
@@ -396,33 +354,29 @@ impl AngleCopySession {
         let gl_delete_shader: GlDeleteShader = unsafe { symbol(gles_lib, "glDeleteShader")? };
         let gl_create_program: GlCreateProgram = unsafe { symbol(gles_lib, "glCreateProgram")? };
         let gl_attach_shader: GlAttachShader = unsafe { symbol(gles_lib, "glAttachShader")? };
-        let gl_bind_attrib_location: GlBindAttribLocation =
-            unsafe { symbol(gles_lib, "glBindAttribLocation")? };
+        let gl_bind_attrib_location: GlBindAttribLocation = unsafe { symbol(gles_lib, "glBindAttribLocation")? };
         let gl_link_program: GlLinkProgram = unsafe { symbol(gles_lib, "glLinkProgram")? };
         let gl_get_programiv: GlGetProgramiv = unsafe { symbol(gles_lib, "glGetProgramiv")? };
         let gl_delete_program: GlDeleteProgram = unsafe { symbol(gles_lib, "glDeleteProgram")? };
         let gl_use_program: GlUseProgram = unsafe { symbol(gles_lib, "glUseProgram")? };
-        let gl_get_uniform_location: GlGetUniformLocation =
-            unsafe { symbol(gles_lib, "glGetUniformLocation")? };
+        let gl_get_uniform_location: GlGetUniformLocation = unsafe { symbol(gles_lib, "glGetUniformLocation")? };
         let gl_uniform1i: GlUniform1i = unsafe { symbol(gles_lib, "glUniform1i")? };
         let gl_viewport: GlViewport = unsafe { symbol(gles_lib, "glViewport")? };
         let gl_active_texture: GlActiveTexture = unsafe { symbol(gles_lib, "glActiveTexture")? };
         let gl_enable_vertex_attrib_array: GlEnableVertexAttribArray =
             unsafe { symbol(gles_lib, "glEnableVertexAttribArray")? };
-        let gl_vertex_attrib_pointer: GlVertexAttribPointer =
-            unsafe { symbol(gles_lib, "glVertexAttribPointer")? };
+        let gl_vertex_attrib_pointer: GlVertexAttribPointer = unsafe { symbol(gles_lib, "glVertexAttribPointer")? };
         let gl_draw_arrays: GlDrawArrays = unsafe { symbol(gles_lib, "glDrawArrays")? };
 
-        let gl_egl_image_target_texture_2d_oes: GlEGLImageTargetTexture2DOES = if let Some(f) =
-            unsafe { proc_symbol(egl_get_proc_address, "glEGLImageTargetTexture2DOES") }
-        {
-            f
-        } else if let Some(f) = unsafe { symbol(gles_lib, "glEGLImageTargetTexture2DOES") } {
-            f
-        } else {
-            eprintln!("angle_egl_copy: missing glEGLImageTargetTexture2DOES");
-            return None;
-        };
+        let gl_egl_image_target_texture_2d_oes: GlEGLImageTargetTexture2DOES =
+            if let Some(f) = unsafe { proc_symbol(egl_get_proc_address, "glEGLImageTargetTexture2DOES") } {
+                f
+            } else if let Some(f) = unsafe { symbol(gles_lib, "glEGLImageTargetTexture2DOES") } {
+                f
+            } else {
+                eprintln!("angle_egl_copy: missing glEGLImageTargetTexture2DOES");
+                return None;
+            };
 
         let display = unsafe { load_egl_display(egl_get_proc_address, egl_get_display) };
         if display.is_null() {
@@ -463,26 +417,21 @@ impl AngleCopySession {
             return None;
         }
 
-        let Some(config) = (unsafe { choose_config(display, egl_choose_config, egl_get_error) })
-        else {
+        let Some(config) = (unsafe { choose_config(display, egl_choose_config, egl_get_error) }) else {
             return None;
         };
 
         let context_attribs = [EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE];
-        let context = unsafe {
-            egl_create_context(display, config, ptr::null_mut(), context_attribs.as_ptr())
-        };
+        let context = unsafe { egl_create_context(display, config, ptr::null_mut(), context_attribs.as_ptr()) };
         if context.is_null() {
-            eprintln!(
-                "angle_egl_copy: eglCreateContext failed err=0x{:x}",
-                unsafe { egl_get_error() }
-            );
+            eprintln!("angle_egl_copy: eglCreateContext failed err=0x{:x}", unsafe {
+                egl_get_error()
+            });
             return None;
         }
 
         let dummy_attribs = [EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE];
-        let dummy_surface =
-            unsafe { egl_create_pbuffer_surface(display, config, dummy_attribs.as_ptr()) };
+        let dummy_surface = unsafe { egl_create_pbuffer_surface(display, config, dummy_attribs.as_ptr()) };
         if dummy_surface.is_null() {
             eprintln!(
                 "angle_egl_copy: eglCreatePbufferSurface(dummy) failed err=0x{:x}",
@@ -491,8 +440,7 @@ impl AngleCopySession {
             return None;
         }
 
-        if unsafe { egl_make_current(display, dummy_surface, dummy_surface, context) } == EGL_FALSE
-        {
+        if unsafe { egl_make_current(display, dummy_surface, dummy_surface, context) } == EGL_FALSE {
             eprintln!("angle_egl_copy: eglMakeCurrent failed err=0x{:x}", unsafe {
                 egl_get_error()
             });
@@ -526,9 +474,7 @@ impl AngleCopySession {
             return None;
         }
 
-        eprintln!(
-            "angle_egl_copy: initialized persistent ANGLE IOSurface copy session (EGL {major}.{minor})"
-        );
+        eprintln!("angle_egl_copy: initialized persistent ANGLE IOSurface copy session (EGL {major}.{minor})");
 
         Some(Self {
             display,
@@ -596,12 +542,7 @@ impl AngleCopySession {
         }
     }
 
-    unsafe fn ensure_source_cache(
-        &mut self,
-        source_texture: *mut c_void,
-        width: u32,
-        height: u32,
-    ) -> Option<u32> {
+    unsafe fn ensure_source_cache(&mut self, source_texture: *mut c_void, width: u32, height: u32) -> Option<u32> {
         if let Some(cache) = self.source_cache.as_ref() {
             if cache.handle == source_texture && cache.width == width && cache.height == height {
                 return Some(cache.texture);
@@ -612,11 +553,7 @@ impl AngleCopySession {
             self.destroy_source_cache();
         }
 
-        let image_attribs_bgra = [
-            EGL_TEXTURE_INTERNAL_FORMAT_ANGLE,
-            GL_BGRA_EXT as EGLint,
-            EGL_NONE,
-        ];
+        let image_attribs_bgra = [EGL_TEXTURE_INTERNAL_FORMAT_ANGLE, GL_BGRA_EXT as EGLint, EGL_NONE];
         let image_attribs_default = [EGL_NONE];
 
         let mut image = unsafe {
@@ -729,8 +666,7 @@ impl AngleCopySession {
             (self.gl_tex_parameteri)(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
         }
 
-        if unsafe { (self.egl_bind_tex_image)(self.display, pbuffer, EGL_BACK_BUFFER) } == EGL_FALSE
-        {
+        if unsafe { (self.egl_bind_tex_image)(self.display, pbuffer, EGL_BACK_BUFFER) } == EGL_FALSE {
             eprintln!(
                 "angle_egl_copy: eglBindTexImage(IOSurface/cache) failed err=0x{:x}",
                 unsafe { (self.egl_get_error)() }
@@ -746,13 +682,7 @@ impl AngleCopySession {
         unsafe {
             (self.gl_gen_framebuffers)(1, &mut fbo);
             (self.gl_bind_framebuffer)(GL_FRAMEBUFFER, fbo);
-            (self.gl_framebuffer_texture_2d)(
-                GL_FRAMEBUFFER,
-                GL_COLOR_ATTACHMENT0,
-                GL_TEXTURE_2D,
-                texture,
-                0,
-            );
+            (self.gl_framebuffer_texture_2d)(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
         }
 
         let status = unsafe { (self.gl_check_framebuffer_status)(GL_FRAMEBUFFER) };
@@ -793,24 +723,16 @@ impl AngleCopySession {
             return false;
         }
 
-        if unsafe {
-            (self.egl_make_current)(
-                self.display,
-                self.dummy_surface,
-                self.dummy_surface,
-                self.context,
-            )
-        } == EGL_FALSE
+        if unsafe { (self.egl_make_current)(self.display, self.dummy_surface, self.dummy_surface, self.context) }
+            == EGL_FALSE
         {
-            eprintln!(
-                "angle_egl_copy: eglMakeCurrent(copy) failed err=0x{:x}",
-                unsafe { (self.egl_get_error)() }
-            );
+            eprintln!("angle_egl_copy: eglMakeCurrent(copy) failed err=0x{:x}", unsafe {
+                (self.egl_get_error)()
+            });
             return false;
         }
 
-        let Some(source_tex) = (unsafe { self.ensure_source_cache(source_texture, width, height) })
-        else {
+        let Some(source_tex) = (unsafe { self.ensure_source_cache(source_texture, width, height) }) else {
             return false;
         };
 
@@ -824,9 +746,7 @@ impl AngleCopySession {
             (self.gl_bind_texture)(GL_TEXTURE_2D, target_tex);
         }
 
-        if unsafe { (self.egl_bind_tex_image)(self.display, target_pbuffer, EGL_BACK_BUFFER) }
-            == EGL_FALSE
-        {
+        if unsafe { (self.egl_bind_tex_image)(self.display, target_pbuffer, EGL_BACK_BUFFER) } == EGL_FALSE {
             eprintln!(
                 "angle_egl_copy: eglBindTexImage(IOSurface/frame) failed err=0x{:x}",
                 unsafe { (self.egl_get_error)() }
@@ -1001,11 +921,9 @@ void main() {
     }
 }
 
-static ANGLE_COPY_SESSION: std::sync::OnceLock<std::sync::Mutex<Option<AngleCopySession>>> =
-    std::sync::OnceLock::new();
+static ANGLE_COPY_SESSION: std::sync::OnceLock<std::sync::Mutex<Option<AngleCopySession>>> = std::sync::OnceLock::new();
 
-static ANGLE_COPY_INIT_FAILED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+static ANGLE_COPY_INIT_FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn copy_metal_texture_to_iosurface(
     source_texture: *mut c_void,
@@ -1024,9 +942,7 @@ pub fn copy_metal_texture_to_iosurface(
         *session = unsafe { AngleCopySession::new() };
         if session.is_none() {
             ANGLE_COPY_INIT_FAILED.store(true, std::sync::atomic::Ordering::Relaxed);
-            eprintln!(
-                "angle_egl_copy: failed to initialize copy session; disabling copy path for this run"
-            );
+            eprintln!("angle_egl_copy: failed to initialize copy session; disabling copy path for this run");
             return false;
         }
     }
@@ -1038,18 +954,11 @@ pub fn copy_metal_texture_to_iosurface(
     let old_read = unsafe { (sess.egl_get_current_surface)(EGL_READ) };
     let old_context = unsafe { (sess.egl_get_current_context)() };
 
-    let ok = unsafe {
-        sess.copy_metal_texture_to_iosurface(source_texture, target_surface, width, height)
-    };
+    let ok = unsafe { sess.copy_metal_texture_to_iosurface(source_texture, target_surface, width, height) };
 
     let restore_ok = unsafe {
         if old_display.is_null() {
-            (sess.egl_make_current)(
-                sess.display,
-                ptr::null_mut(),
-                ptr::null_mut(),
-                ptr::null_mut(),
-            )
+            (sess.egl_make_current)(sess.display, ptr::null_mut(), ptr::null_mut(), ptr::null_mut())
         } else {
             (sess.egl_make_current)(old_display, old_draw, old_read, old_context)
         }
