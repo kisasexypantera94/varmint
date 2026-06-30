@@ -1,9 +1,11 @@
-use crate::virtio::{
-    chain::ChainData,
-    common,
-    device::{ChainAction, ChainToken, Device},
+use crate::{
+    memory::GuestMemory,
+    virtio::{
+        chain::ChainData,
+        common,
+        device::{ChainAction, ChainToken, Device},
+    },
 };
-use applevisor::memory::Memory;
 use num_enum::TryFromPrimitive;
 use std::{
     fs::{File, OpenOptions},
@@ -93,7 +95,7 @@ impl Device for Blk {
         _queue_idx: usize,
         chain: &ChainData,
         _token: ChainToken,
-        mem: &mut Memory,
+        mem: &GuestMemory,
     ) -> ChainAction {
         const HEADER_LEN: usize = size_of::<RequestHeader>();
 

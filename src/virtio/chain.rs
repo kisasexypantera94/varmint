@@ -1,4 +1,4 @@
-use applevisor::memory::Memory;
+use crate::memory::GuestMemory;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 #[derive(Debug, Copy, Clone)]
@@ -19,7 +19,7 @@ impl ChainData {
         self.readable_len
     }
 
-    pub fn read_at(&self, mut offset: usize, buf: &mut [u8], mem: &Memory) -> Option<()> {
+    pub fn read_at(&self, mut offset: usize, buf: &mut [u8], mem: &GuestMemory) -> Option<()> {
         let end = offset.checked_add(buf.len())?;
         if end > self.readable_len {
             return None;
@@ -46,13 +46,13 @@ impl ChainData {
         (filled == buf.len()).then_some(())
     }
 
-    pub fn read_obj<T: FromBytes + IntoBytes + Immutable>(&self, offset: usize, mem: &Memory) -> Option<T> {
+    pub fn read_obj<T: FromBytes + IntoBytes + Immutable>(&self, offset: usize, mem: &GuestMemory) -> Option<T> {
         let mut v = T::new_zeroed();
         self.read_at(offset, v.as_mut_bytes(), mem)?;
         Some(v)
     }
 
-    pub fn write_response(&self, bytes: &[u8], mem: &mut Memory) -> u32 {
+    pub fn write_response(&self, bytes: &[u8], mem: &GuestMemory) -> u32 {
         let mut written = 0usize;
 
         for seg in &self.writable {
@@ -68,7 +68,7 @@ impl ChainData {
         written as u32
     }
 
-    pub fn write_parts(&self, parts: &[&[u8]], mem: &mut Memory) -> u32 {
+    pub fn write_parts(&self, parts: &[&[u8]], mem: &GuestMemory) -> u32 {
         let mut segs = self.writable.iter();
         let mut cur = segs.next();
         let mut off = 0u32;

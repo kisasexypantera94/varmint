@@ -1,10 +1,12 @@
-use crate::virtio::{
-    chain::ChainData,
-    common,
-    device::{ChainAction, ChainToken, Device, Effect, ExternalEventHandler},
-    input::keys::*,
+use crate::{
+    memory::GuestMemory,
+    virtio::{
+        chain::ChainData,
+        common,
+        device::{ChainAction, ChainToken, Device, Effect, ExternalEventHandler},
+        input::keys::*,
+    },
 };
-use applevisor::memory::Memory;
 use num_enum::TryFromPrimitive;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
@@ -261,7 +263,7 @@ impl Device for Input {
         queue_idx: usize,
         _chain: &ChainData,
         _token: ChainToken,
-        _mem: &mut Memory,
+        _mem: &GuestMemory,
     ) -> ChainAction {
         match QueueType::try_from(queue_idx).unwrap() {
             QueueType::Event => ChainAction::Complete(0),

@@ -2,6 +2,7 @@
 use crate::{
     angle_egl,
     iosurface::ScopedIOSurface,
+    memory::GuestMemory,
     virtio::{
         chain::ChainData,
         common,
@@ -12,7 +13,6 @@ use crate::{
         },
     },
 };
-use applevisor::memory::Memory;
 use applevisor_sys::{hv_vm_map, hv_vm_unmap};
 use num_enum::TryFromPrimitive;
 use std::{collections::HashMap, ffi::c_void, mem::offset_of, sync::Mutex};
@@ -520,7 +520,7 @@ impl<'a> Device for Gpu<'a> {
         queue_idx: usize,
         chain: &ChainData,
         token: ChainToken,
-        mem: &mut Memory,
+        mem: &GuestMemory,
     ) -> ChainAction {
         let Some(hdr) = chain.read_obj::<CtrlHeader>(0, mem) else {
             eprintln!("virtio-gpu: unreadable command header");
@@ -584,15 +584,15 @@ impl<'a> Device for Gpu<'a> {
 }
 
 impl<'a> Gpu<'a> {
-    fn err(chain: &ChainData, r#type: CtrlType, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn err(chain: &ChainData, r#type: CtrlType, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         ChainAction::Complete(Gpu::write_response(chain, r#type, hdr, mem))
     }
 
-    fn ok(chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn ok(chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         ChainAction::Complete(Gpu::write_response(chain, CtrlType::RespOkNoData, hdr, mem))
     }
 
-    fn cmd_get_display_info(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn cmd_get_display_info(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         let resp_hdr = Gpu::resp_header(CtrlType::RespOkDisplayInfo, hdr);
 
         let mut resp = RespDisplayInfo::new_zeroed();
@@ -610,7 +610,7 @@ impl<'a> Gpu<'a> {
         ChainAction::Complete(chain.write_parts(&[resp_hdr.as_bytes(), resp.as_bytes()], mem))
     }
 
-    fn cmd_get_capset_info(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn cmd_get_capset_info(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         let Some(req) = chain.read_obj::<GetCapsetInfo>(0, mem) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
@@ -628,7 +628,7 @@ impl<'a> Gpu<'a> {
         ChainAction::Complete(chain.write_response(resp.as_bytes(), mem))
     }
 
-    fn cmd_get_capset(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn cmd_get_capset(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         let Some(req) = chain.read_obj::<GetCapset>(0, mem) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
@@ -651,7 +651,7 @@ impl<'a> Gpu<'a> {
         ChainAction::Complete(chain.write_parts(&[resp_hdr.as_bytes(), &data], mem))
     }
 
-    fn cmd_ctx_create(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn cmd_ctx_create(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         let Some(req) = chain.read_obj::<CtxCreate>(0, mem) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
@@ -674,12 +674,12 @@ impl<'a> Gpu<'a> {
         }
     }
 
-    fn cmd_ctx_destroy(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn cmd_ctx_destroy(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         self.renderer.destroy_ctx(hdr.ctx_ud).unwrap();
         Gpu::ok(chain, hdr, mem)
     }
 
-    fn cmd_ctx_attach_resource(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn cmd_ctx_attach_resource(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         let Some(req) = chain.read_obj::<CtxResource>(0, mem) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
@@ -717,7 +717,7 @@ impl<'a> Gpu<'a> {
         }
     }
 
-    fn cmd_ctx_detach_resource(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn cmd_ctx_detach_resource(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         let Some(req) = chain.read_obj::<CtxResource>(0, mem) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
@@ -752,7 +752,7 @@ impl<'a> Gpu<'a> {
         }
     }
 
-    fn cmd_resource_create_3d(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn cmd_resource_create_3d(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         let Some(req) = chain.read_obj::<ResourceCreate3d>(0, mem) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
@@ -795,7 +795,7 @@ impl<'a> Gpu<'a> {
         Gpu::ok(chain, hdr, mem)
     }
 
-    fn cmd_transfer_to_host_3d(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn cmd_transfer_to_host_3d(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         let Some(req) = chain.read_obj::<TransferHost3d>(0, mem) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
@@ -822,7 +822,7 @@ impl<'a> Gpu<'a> {
         Gpu::ok(chain, hdr, mem)
     }
 
-    fn cmd_transfer_from_host_3d(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn cmd_transfer_from_host_3d(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         let Some(req) = chain.read_obj::<TransferHost3d>(0, mem) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
@@ -854,7 +854,7 @@ impl<'a> Gpu<'a> {
         chain: &ChainData,
         hdr: &CtrlHeader,
         token: ChainToken,
-        mem: &mut Memory,
+        mem: &GuestMemory,
     ) -> ChainAction {
         let Some(req) = chain.read_obj::<CmdSubmit3d>(0, mem) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
@@ -935,7 +935,7 @@ impl<'a> Gpu<'a> {
         Gpu::ok(chain, hdr, mem)
     }
 
-    fn cmd_resource_flush(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn cmd_resource_flush(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         let Some(val) = chain.read_obj::<ResourceFlush>(0, mem) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
@@ -989,7 +989,7 @@ impl<'a> Gpu<'a> {
         Gpu::ok(chain, hdr, mem)
     }
 
-    fn cmd_resource_create_blob(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn cmd_resource_create_blob(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         let Some(req) = chain.read_obj::<ResourceCreateBlob>(0, mem) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
@@ -1067,7 +1067,7 @@ impl<'a> Gpu<'a> {
         Gpu::ok(chain, hdr, mem)
     }
 
-    fn cmd_resource_create_2d(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn cmd_resource_create_2d(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         let Some(val) = chain.read_obj::<ResourceCreate2d>(0, mem) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
@@ -1102,7 +1102,7 @@ impl<'a> Gpu<'a> {
         Gpu::ok(chain, hdr, mem)
     }
 
-    fn cmd_resource_unref(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn cmd_resource_unref(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         let Some(val) = chain.read_obj::<ResourceUnref>(0, mem) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
@@ -1122,7 +1122,7 @@ impl<'a> Gpu<'a> {
         Gpu::ok(chain, hdr, mem)
     }
 
-    fn cmd_resource_attach_backing(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn cmd_resource_attach_backing(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         let Some(val) = chain.read_obj::<ResourceAttachBacking>(0, mem) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
@@ -1165,7 +1165,7 @@ impl<'a> Gpu<'a> {
         Gpu::ok(chain, hdr, mem)
     }
 
-    fn cmd_resource_detach_backing(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn cmd_resource_detach_backing(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         let Some(val) = chain.read_obj::<ResourceDetachBacking>(0, mem) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
@@ -1180,7 +1180,7 @@ impl<'a> Gpu<'a> {
         Gpu::ok(chain, hdr, mem)
     }
 
-    fn cmd_set_scanout(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn cmd_set_scanout(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         let Some(val) = chain.read_obj::<SetScanout>(0, mem) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
@@ -1204,7 +1204,7 @@ impl<'a> Gpu<'a> {
         Gpu::ok(chain, hdr, mem)
     }
 
-    fn cmd_transfer_to_host_2d(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn cmd_transfer_to_host_2d(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         let Some(val) = chain.read_obj::<TransferToHost2d>(0, mem) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
@@ -1270,7 +1270,7 @@ impl<'a> Gpu<'a> {
         Gpu::ok(chain, hdr, mem)
     }
 
-    fn cmd_set_scanout_blob(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn cmd_set_scanout_blob(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         let Some(val) = chain.read_obj::<SetScanoutBlobReq>(0, mem) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
@@ -1354,7 +1354,7 @@ impl<'a> Gpu<'a> {
         }
     }
 
-    fn readback_blob_scanout(&mut self, resource_id: u32, rect: Rect, mem: &Memory) -> bool {
+    fn readback_blob_scanout(&mut self, resource_id: u32, rect: Rect, mem: &GuestMemory) -> bool {
         let Some(resource) = self.resources.get_mut(&resource_id) else {
             return false;
         };
@@ -1483,11 +1483,11 @@ impl<'a> Gpu<'a> {
         resp
     }
 
-    fn write_response(chain: &ChainData, r#type: CtrlType, req: &CtrlHeader, mem: &mut Memory) -> u32 {
+    fn write_response(chain: &ChainData, r#type: CtrlType, req: &CtrlHeader, mem: &GuestMemory) -> u32 {
         chain.write_response(Gpu::resp_header(r#type, req).as_bytes(), mem)
     }
 
-    fn read_backing(backing: &[MemEntry], mut src_offset: usize, dst: &mut [u8], mem: &Memory) -> Option<()> {
+    fn read_backing(backing: &[MemEntry], mut src_offset: usize, dst: &mut [u8], mem: &GuestMemory) -> Option<()> {
         let mut written = 0usize;
 
         for entry in backing {
@@ -1517,7 +1517,7 @@ impl<'a> Gpu<'a> {
         None
     }
 
-    fn resource_map_blob(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn resource_map_blob(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         let Some(req) = chain.read_obj::<ResourceMapBlob>(0, mem) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
@@ -1620,7 +1620,7 @@ impl<'a> Gpu<'a> {
         ChainAction::Complete(chain.write_response(resp.as_bytes(), mem))
     }
 
-    fn resource_unmap_blob(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &mut Memory) -> ChainAction {
+    fn resource_unmap_blob(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         let Some(req) = chain.read_obj::<ResourceUnmapBlob>(0, mem) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
@@ -1729,7 +1729,7 @@ impl<'a> ExternalEventHandler for Gpu<'a> {
     }
 }
 
-fn gpa_to_host(mem: &Memory, gpa: u64, len: u64) -> Option<*mut c_void> {
+fn gpa_to_host(mem: &GuestMemory, gpa: u64, len: u64) -> Option<*mut c_void> {
     let base_gpa = mem.guest_addr()?;
     let size = mem.size() as u64;
 

@@ -1,10 +1,12 @@
 //! https://docs.oasis-open.org/virtio/virtio/v1.3/csd01/virtio-v1.3-csd01.html#x1-1820002
 
-use crate::virtio::{
-    device::{self, ChainAction, ChainToken, Device, Effect, ExternalEventHandler},
-    virtq::{self, Queue},
+use crate::{
+    memory::GuestMemory,
+    virtio::{
+        device::{self, ChainAction, ChainToken, Device, Effect, ExternalEventHandler},
+        virtq::{self, Queue},
+    },
 };
-use applevisor::memory::Memory;
 use num_enum::TryFromPrimitive;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, TryFromPrimitive)]
@@ -155,7 +157,7 @@ impl<D: device::Device> Transport<D> {
         &mut self.queues_pending[self.queue_sel as usize]
     }
 
-    pub fn write(&mut self, offset: u64, size: usize, value: u64, mem: &mut Memory) {
+    pub fn write(&mut self, offset: u64, size: usize, value: u64, mem: &GuestMemory) {
         assert!(matches!(size, 1 | 2 | 4 | 8));
 
         if offset >= CONFIG_BASE {
@@ -274,7 +276,7 @@ pub fn queue_addr(lo: u32, hi: u32) -> u64 {
 }
 
 impl<D: ExternalEventHandler + Device> Transport<D> {
-    pub fn handle_external_event(&mut self, event: D::Event<'_>, mem: &mut Memory) {
+    pub fn handle_external_event(&mut self, event: D::Event<'_>, mem: &GuestMemory) {
         let queues = &mut self.queues;
         let interrupt_status = &mut self.interrupt_status;
 

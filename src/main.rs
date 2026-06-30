@@ -30,6 +30,7 @@ mod iosurface;
 mod irq;
 mod kick;
 mod linux;
+mod memory;
 mod net;
 mod present;
 mod sys_reg;
@@ -513,7 +514,7 @@ fn build_virglrenderer(
 fn run_loop(
     vm: &VirtualMachineInstance<GicEnabled>,
     vcpu: &Vcpu,
-    mem: &mut applevisor::memory::Memory,
+    mem: &memory::GuestMemory,
     uart: &Mutex<uart::Uart>,
     uart_irq: &mut irq::IrqLine,
     virtio_blk: &mut virtio::MmioTransport<virtio::Blk>,
@@ -793,8 +794,8 @@ fn vmm_thread(
 
     let (spi_int_start, _) = GicConfig::get_spi_interrupt_range()?;
 
-    let mut mem = vm.memory_create(RAM_SIZE)?;
-    mem.map(RAM_START, MemPerms::RWX)?;
+    let mut mem = memory::GuestMemory::new(vm.memory_create(RAM_SIZE)?);
+    mem.inner_mut().map(RAM_START, MemPerms::RWX)?;
     mem.write(IMAGE_START, &image)?;
     mem.write(INITRD_START, &initrd)?;
     mem.write(DTB_START, &dtb)?;
@@ -857,7 +858,7 @@ fn vmm_thread(
         run_loop(
             vm,
             &vcpu,
-            &mut mem,
+            &mem,
             uart,
             &mut uart_irq,
             &mut virtio_blk,

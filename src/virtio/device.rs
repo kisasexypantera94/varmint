@@ -1,5 +1,4 @@
-use crate::virtio::chain::ChainData;
-use applevisor::memory::Memory;
+use crate::{memory::GuestMemory, virtio::chain::ChainData};
 
 pub enum ChainAction {
     Complete(u32),
@@ -28,7 +27,7 @@ pub trait Device {
         queue_idx: usize,
         chain: &ChainData,
         token: ChainToken,
-        mem: &mut Memory,
+        mem: &GuestMemory,
     ) -> ChainAction;
 
     fn delivery_queues(&self) -> &[u16] {

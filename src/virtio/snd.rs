@@ -1,12 +1,12 @@
 use crate::{
     audio::coreaudio::PeriodSink,
+    memory::GuestMemory,
     virtio::{
         chain::ChainData,
         common,
         device::{ChainAction, ChainToken, Device, Effect, ExternalEventHandler},
     },
 };
-use applevisor::memory::Memory;
 use num_enum::TryFromPrimitive;
 use std::collections::VecDeque;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
@@ -334,7 +334,7 @@ impl Device for Snd {
         queue_idx: usize,
         chain: &ChainData,
         token: ChainToken,
-        mem: &mut Memory,
+        mem: &GuestMemory,
     ) -> ChainAction {
         match QueueType::try_from(queue_idx).unwrap() {
             QueueType::Control => self.control(chain, token, mem),
@@ -352,7 +352,7 @@ impl Device for Snd {
 }
 
 impl Snd {
-    fn control(&mut self, chain: &ChainData, token: ChainToken, mem: &mut Memory) -> ChainAction {
+    fn control(&mut self, chain: &ChainData, token: ChainToken, mem: &GuestMemory) -> ChainAction {
         let Some(hdr) = chain.read_obj::<Hdr>(0, mem) else {
             eprintln!("virtio-snd: unreadable control header");
             return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
@@ -524,7 +524,7 @@ impl Snd {
         }
     }
 
-    fn submit_period(&mut self, chain: &ChainData, token: ChainToken, mem: &mut Memory) -> ChainAction {
+    fn submit_period(&mut self, chain: &ChainData, token: ChainToken, mem: &GuestMemory) -> ChainAction {
         const PAYLOAD_OFFSET: usize = size_of::<PcmXfer>();
 
         let Some(_pcm_xfer) = chain.read_obj::<PcmXfer>(0, mem) else {
@@ -562,7 +562,7 @@ impl Snd {
         ChainAction::Deferred
     }
 
-    fn respond_status(&self, chain: &ChainData, status: Status, mem: &mut Memory) -> u32 {
+    fn respond_status(&self, chain: &ChainData, status: Status, mem: &GuestMemory) -> u32 {
         let hdr = Hdr { code: status as u32 };
         chain.write_response(hdr.as_bytes(), mem)
     }

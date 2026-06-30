@@ -1,9 +1,11 @@
-use crate::virtio::{
-    chain::ChainData,
-    common,
-    device::{ChainAction, ChainToken, Device, Effect, ExternalEventHandler},
+use crate::{
+    memory::GuestMemory,
+    virtio::{
+        chain::ChainData,
+        common,
+        device::{ChainAction, ChainToken, Device, Effect, ExternalEventHandler},
+    },
 };
-use applevisor::memory::Memory;
 use std::collections::VecDeque;
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes};
 
@@ -93,7 +95,7 @@ impl Console {
         self.ctrl_to_guest.push_back(buf);
     }
 
-    fn handle_control_tx(&mut self, chain: &ChainData, mem: &Memory) {
+    fn handle_control_tx(&mut self, chain: &ChainData, mem: &GuestMemory) {
         let Some(c) = chain.read_obj::<Control>(0, mem) else {
             return;
         };
@@ -121,7 +123,7 @@ impl Console {
         }
     }
 
-    fn handle_clip_tx(&mut self, chain: &ChainData, mem: &Memory) -> u32 {
+    fn handle_clip_tx(&mut self, chain: &ChainData, mem: &GuestMemory) -> u32 {
         let total = chain.readable_len();
         if total == 0 {
             return 0;
@@ -177,7 +179,7 @@ impl Device for Console {
         queue_idx: usize,
         chain: &ChainData,
         _token: ChainToken,
-        mem: &mut Memory,
+        mem: &GuestMemory,
     ) -> ChainAction {
         match queue_idx {
             Q_CONTROL_TX => {

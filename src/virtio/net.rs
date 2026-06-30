@@ -1,9 +1,11 @@
-use crate::virtio::{
-    chain::ChainData,
-    common,
-    device::{ChainAction, ChainToken, Device, Effect, ExternalEventHandler},
+use crate::{
+    memory::GuestMemory,
+    virtio::{
+        chain::ChainData,
+        common,
+        device::{ChainAction, ChainToken, Device, Effect, ExternalEventHandler},
+    },
 };
-use applevisor::memory::Memory;
 use num_enum::TryFromPrimitive;
 use std::collections::VecDeque;
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes};
@@ -76,7 +78,7 @@ impl Device for Net {
         queue_idx: usize,
         chain: &ChainData,
         _token: ChainToken,
-        mem: &mut Memory,
+        mem: &GuestMemory,
     ) -> ChainAction {
         match QueueType::try_from(queue_idx).unwrap() {
             QueueType::Rx => ChainAction::Complete(0),
@@ -94,7 +96,7 @@ impl Device for Net {
 }
 
 impl Net {
-    fn handle_tx(&mut self, chain: &ChainData, mem: &Memory) -> u32 {
+    fn handle_tx(&mut self, chain: &ChainData, mem: &GuestMemory) -> u32 {
         const HEADER_LEN: usize = size_of::<NetHeader>();
 
         let total = chain.readable_len();
