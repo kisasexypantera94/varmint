@@ -16,6 +16,7 @@ mod virtq;
 pub use blk::Blk;
 pub use console::Console;
 pub use gpu::Gpu;
+pub use device::Device;
 pub use input::Input;
 pub use net::Net;
 pub use snd::Snd;

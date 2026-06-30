@@ -17,12 +17,8 @@ impl GuestMemory {
         Self { inner }
     }
 
-    pub fn inner(&self) -> &Memory {
-        &self.inner
-    }
-
-    pub fn inner_mut(&mut self) -> &mut Memory {
-        &mut self.inner
+    pub fn map(&mut self, guest_addr: u64, perms: applevisor::memory::MemPerms) -> Result<()> {
+        self.inner.map(guest_addr, perms)
     }
 
     pub fn guest_addr(&self) -> Option<u64> {
@@ -58,12 +54,8 @@ impl GuestMemory {
         Ok(unsafe { self.inner.host_addr().add(offset as usize) })
     }
 
-    pub fn host_ptr(&self, guest_addr: u64, len: usize) -> Option<*mut c_void> {
-        self.checked_host_addr(guest_addr, len).ok().map(|p| p.cast())
-    }
-
     pub fn read(&self, guest_addr: u64, data: &mut [u8]) -> Result<()> {
-        self.inner.read(gpa, dst)
+        self.inner.read(guest_addr, data)
     }
 
     pub fn write(&self, guest_addr: u64, data: &[u8]) -> Result<()> {
@@ -74,10 +66,6 @@ impl GuestMemory {
         }
 
         Ok(())
-    }
-
-    pub fn read_u8(&self, guest_addr: u64) -> Result<u8> {
-        self.inner.read_u8(guest_addr)
     }
 
     pub fn read_u16(&self, guest_addr: u64) -> Result<u16> {
@@ -101,10 +89,6 @@ impl GuestMemory {
     }
 
     pub fn write_u32(&self, guest_addr: u64, value: u32) -> Result<()> {
-        self.write(guest_addr, &value.to_le_bytes())
-    }
-
-    pub fn write_u64(&self, guest_addr: u64, value: u64) -> Result<()> {
         self.write(guest_addr, &value.to_le_bytes())
     }
 }

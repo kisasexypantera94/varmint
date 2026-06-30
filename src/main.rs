@@ -9,7 +9,8 @@ use std::{
     io::{self, Read, Write},
     sync::{
         Mutex,
-        mpsc::{Receiver, Sender},
+        atomic::{AtomicBool, Ordering},
+        mpsc::{Receiver, Sender, SyncSender},
     },
     thread,
 };
@@ -80,39 +81,99 @@ const VIRTCONSOLE_START: u64 = 0x0a006000;
 const VIRTCONSOLE_SIZE: u64 = 0x1000;
 const VIRTCONSOLE_SPI_OFFSET: u32 = 38;
 
-enum MmioRegion {
-    Uart(u64),
-    VirtioBlk(u64),
-    VirtioNet(u64),
-    VirtioGpu(u64),
-    VirtioInputKeyboard(u64),
-    VirtioInputTablet(u64),
-    VirtioSnd(u64),
-    VirtioConsole(u64),
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum MmioDevice {
+    Uart,
+    VirtioBlk,
+    VirtioNet,
+    VirtioGpu,
+    VirtioInputKeyboard,
+    VirtioInputTablet,
+    VirtioSnd,
+    VirtioConsole,
 }
 
-fn classify(phys_addr: u64) -> Option<MmioRegion> {
-    const REGIONS: &[(u64, u64, fn(u64) -> MmioRegion)] = &[
-        (UART_START, UART_SIZE, MmioRegion::Uart),
-        (VIRTBLK_START, VIRTBLK_SIZE, MmioRegion::VirtioBlk),
-        (VIRTNET_START, VIRTNET_SIZE, MmioRegion::VirtioNet),
-        (VIRTGPU_START, VIRTGPU_SIZE, MmioRegion::VirtioGpu),
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum DevicePlacement {
+    Inline,
+    ThreadOwned { owner: &'static str },
+}
+
+#[derive(Debug, Copy, Clone)]
+struct MmioRoute {
+    device: MmioDevice,
+    offset: u64,
+    placement: DevicePlacement,
+}
+
+struct DeviceThreadConfig {
+    owner: &'static str,
+    devices: &'static [MmioDevice],
+}
+
+const INLINE_MMIO_OWNER: &str = "vcpu-inline";
+const GPU_MMIO_OWNER: &str = "gpu";
+
+const DEVICE_THREAD_CONFIGS: &[DeviceThreadConfig] = &[
+    DeviceThreadConfig {
+        owner: INLINE_MMIO_OWNER,
+        devices: &[
+            MmioDevice::Uart,
+            MmioDevice::VirtioBlk,
+            MmioDevice::VirtioNet,
+            MmioDevice::VirtioInputKeyboard,
+            MmioDevice::VirtioInputTablet,
+            MmioDevice::VirtioSnd,
+            MmioDevice::VirtioConsole,
+        ],
+    },
+    DeviceThreadConfig {
+        owner: GPU_MMIO_OWNER,
+        devices: &[MmioDevice::VirtioGpu],
+    },
+];
+
+fn device_placement(device: MmioDevice) -> DevicePlacement {
+    DEVICE_THREAD_CONFIGS
+        .iter()
+        .find_map(|cfg| cfg.devices.contains(&device).then_some(cfg.owner))
+        .map(|owner| {
+            if owner == INLINE_MMIO_OWNER {
+                DevicePlacement::Inline
+            } else {
+                DevicePlacement::ThreadOwned { owner }
+            }
+        })
+        .unwrap_or(DevicePlacement::Inline)
+}
+
+fn classify(phys_addr: u64) -> Option<MmioRoute> {
+    const REGIONS: &[(u64, u64, MmioDevice)] = &[
+        (UART_START, UART_SIZE, MmioDevice::Uart),
+        (VIRTBLK_START, VIRTBLK_SIZE, MmioDevice::VirtioBlk),
+        (VIRTNET_START, VIRTNET_SIZE, MmioDevice::VirtioNet),
+        (VIRTGPU_START, VIRTGPU_SIZE, MmioDevice::VirtioGpu),
         (
             VIRTINPUT_KEYBOARD_START,
             VIRTINPUT_KEYBOARD_SIZE,
-            MmioRegion::VirtioInputKeyboard,
+            MmioDevice::VirtioInputKeyboard,
         ),
         (
             VIRTINPUT_TABLET_START,
             VIRTINPUT_TABLET_SIZE,
-            MmioRegion::VirtioInputTablet,
+            MmioDevice::VirtioInputTablet,
         ),
-        (VIRTSND_START, VIRTSND_SIZE, MmioRegion::VirtioSnd),
-        (VIRTCONSOLE_START, VIRTCONSOLE_SIZE, MmioRegion::VirtioConsole),
+        (VIRTSND_START, VIRTSND_SIZE, MmioDevice::VirtioSnd),
+        (VIRTCONSOLE_START, VIRTCONSOLE_SIZE, MmioDevice::VirtioConsole),
     ];
-    REGIONS
-        .iter()
-        .find_map(|&(base, size, ctor)| (base..base + size).contains(&phys_addr).then(|| ctor(phys_addr - base)))
+
+    REGIONS.iter().find_map(|&(base, size, device)| {
+        (base..base + size).contains(&phys_addr).then(|| MmioRoute {
+            device,
+            offset: phys_addr - base,
+            placement: device_placement(device),
+        })
+    })
 }
 
 fn read_file(path: &str) -> std::io::Result<Vec<u8>> {
@@ -194,6 +255,207 @@ fn mmio_write_reg(vcpu: &Vcpu, rt: u64, value: u64) -> Result<()> {
         vcpu.set_reg(reg, value)?;
     }
     Ok(())
+}
+
+
+enum DeviceThreadRequest {
+    Mmio {
+        is_write: bool,
+        offset: u64,
+        size: usize,
+        value: u64,
+        resp: SyncSender<Option<u64>>,
+    },
+    GpuEvent(virtio::gpu::ExternalEvent),
+}
+
+fn send_gpu_mmio(
+    gpu_tx: &Sender<DeviceThreadRequest>,
+    offset: u64,
+    size: usize,
+    is_write: bool,
+    value: u64,
+) -> Option<u64> {
+    let (resp_tx, resp_rx) = std::sync::mpsc::sync_channel(0);
+    gpu_tx
+        .send(DeviceThreadRequest::Mmio {
+            is_write,
+            offset,
+            size,
+            value,
+            resp: resp_tx,
+        })
+        .expect("gpu owner thread exited");
+    resp_rx.recv().expect("gpu owner thread dropped MMIO response")
+}
+
+fn send_gpu_event(gpu_tx: &Sender<DeviceThreadRequest>, event: virtio::gpu::ExternalEvent) {
+    let _ = gpu_tx.send(DeviceThreadRequest::GpuEvent(event));
+}
+
+fn gpu_owner_thread(
+    mem: &memory::GuestMemory,
+    display: &Mutex<virtio::gpu::DisplayBuffer>,
+    rx: Receiver<DeviceThreadRequest>,
+    irq_asserted: &AtomicBool,
+    gpu_tx: Sender<DeviceThreadRequest>,
+    kicker: kick::Kicker,
+) {
+    let mut renderer = build_virglrenderer(gpu_tx, kicker).expect("virglrenderer init failed");
+    let gpu_dev = virtio::Gpu::new(display, &mut renderer);
+    let mut gpu = virtio::MmioTransport::new(gpu_dev);
+
+    let update_irq = |gpu: &mut virtio::MmioTransport<virtio::Gpu>| {
+        irq_asserted.store(gpu.is_asserted(), Ordering::SeqCst);
+    };
+
+    update_irq(&mut gpu);
+
+    while let Ok(req) = rx.recv() {
+        match req {
+            DeviceThreadRequest::Mmio {
+                is_write,
+                offset,
+                size,
+                value,
+                resp,
+            } => {
+                let ret = if is_write {
+                    gpu.write(offset, size, value, mem);
+                    None
+                } else {
+                    Some(gpu.read(offset, size))
+                };
+                update_irq(&mut gpu);
+                let _ = resp.send(ret);
+            }
+            DeviceThreadRequest::GpuEvent(event) => {
+                gpu.handle_external_event(event, mem);
+                update_irq(&mut gpu);
+            }
+        }
+    }
+}
+
+fn handle_virtio_mmio<D: virtio::Device>(
+    dev: &Mutex<virtio::MmioTransport<D>>,
+    offset: u64,
+    size: usize,
+    is_write: bool,
+    value: u64,
+    mem: &memory::GuestMemory,
+) -> Option<u64> {
+    let mut dev = dev.lock().unwrap();
+    if is_write {
+        dev.write(offset, size, value, mem);
+        None
+    } else {
+        Some(dev.read(offset, size))
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle_inline_mmio(
+    route: MmioRoute,
+    is_write: bool,
+    size: usize,
+    value: u64,
+    mem: &memory::GuestMemory,
+    uart: &Mutex<uart::Uart>,
+    virtio_blk: &Mutex<virtio::MmioTransport<virtio::Blk>>,
+    virtio_net: &Mutex<virtio::MmioTransport<virtio::Net>>,
+    iface: &Mutex<net::vmnet::Backend>,
+    virtio_input_keyboard: &Mutex<virtio::MmioTransport<virtio::Input>>,
+    virtio_input_tablet: &Mutex<virtio::MmioTransport<virtio::Input>>,
+    virtio_snd: &Mutex<virtio::MmioTransport<virtio::Snd>>,
+    virtio_console: &Mutex<virtio::MmioTransport<virtio::Console>>,
+    clipboard_out_tx: &Sender<Vec<u8>>,
+) -> Option<u64> {
+    match route.device {
+        MmioDevice::Uart => {
+            if is_write {
+                uart.lock().unwrap().write(route.offset, value as u32, |value| {
+                    io::stdout().write_all(&[value as u8]).unwrap();
+                    io::stdout().flush().unwrap();
+                });
+                None
+            } else {
+                Some(uart.lock().unwrap().read(route.offset) as u64)
+            }
+        }
+        MmioDevice::VirtioBlk => handle_virtio_mmio(virtio_blk, route.offset, size, is_write, value, mem),
+        MmioDevice::VirtioNet => {
+            let ret = handle_virtio_mmio(virtio_net, route.offset, size, is_write, value, mem);
+            if is_write {
+                while let Some(frame) = virtio_net.lock().unwrap().pop_external() {
+                    iface.lock().unwrap().write(&frame).unwrap();
+                }
+            }
+            ret
+        }
+        MmioDevice::VirtioGpu => panic!("virtio-gpu is not an inline device"),
+        MmioDevice::VirtioInputKeyboard => {
+            handle_virtio_mmio(virtio_input_keyboard, route.offset, size, is_write, value, mem)
+        }
+        MmioDevice::VirtioInputTablet => {
+            handle_virtio_mmio(virtio_input_tablet, route.offset, size, is_write, value, mem)
+        }
+        MmioDevice::VirtioSnd => handle_virtio_mmio(virtio_snd, route.offset, size, is_write, value, mem),
+        MmioDevice::VirtioConsole => {
+            let ret = handle_virtio_mmio(virtio_console, route.offset, size, is_write, value, mem);
+            if is_write {
+                let mut virtio_console = virtio_console.lock().unwrap();
+                while let Some(bytes) = virtio_console.pop_external() {
+                    let _ = clipboard_out_tx.send(bytes);
+                }
+                virtio_console.handle_external_event(virtio::console::ExternalEvent::RxAvailable, mem);
+            }
+            ret
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle_routed_mmio(
+    route: MmioRoute,
+    is_write: bool,
+    size: usize,
+    value: u64,
+    mem: &memory::GuestMemory,
+    uart: &Mutex<uart::Uart>,
+    virtio_blk: &Mutex<virtio::MmioTransport<virtio::Blk>>,
+    virtio_net: &Mutex<virtio::MmioTransport<virtio::Net>>,
+    iface: &Mutex<net::vmnet::Backend>,
+    gpu_tx: &Sender<DeviceThreadRequest>,
+    virtio_input_keyboard: &Mutex<virtio::MmioTransport<virtio::Input>>,
+    virtio_input_tablet: &Mutex<virtio::MmioTransport<virtio::Input>>,
+    virtio_snd: &Mutex<virtio::MmioTransport<virtio::Snd>>,
+    virtio_console: &Mutex<virtio::MmioTransport<virtio::Console>>,
+    clipboard_out_tx: &Sender<Vec<u8>>,
+) -> Option<u64> {
+    match route.placement {
+        DevicePlacement::Inline => handle_inline_mmio(
+            route,
+            is_write,
+            size,
+            value,
+            mem,
+            uart,
+            virtio_blk,
+            virtio_net,
+            iface,
+            virtio_input_keyboard,
+            virtio_input_tablet,
+            virtio_snd,
+            virtio_console,
+            clipboard_out_tx,
+        ),
+        DevicePlacement::ThreadOwned { owner } => {
+            assert_eq!(owner, GPU_MMIO_OWNER, "unknown MMIO owner thread");
+            assert_eq!(route.device, MmioDevice::VirtioGpu, "only virtio-gpu has a thread owner for now");
+            send_gpu_mmio(gpu_tx, route.offset, size, is_write, value)
+        }
+    }
 }
 
 enum HostInputEvent {
@@ -469,10 +731,10 @@ impl<'a> ApplicationHandler for AppState<'a> {
 }
 
 fn build_virglrenderer(
-    fence_tx: Sender<virtio::gpu::ExternalEvent>,
+    gpu_tx: Sender<DeviceThreadRequest>,
     kicker: kick::Kicker,
 ) -> virtio::virgl_ffi::VirglResult<VirglRenderer> {
-    let poll_tx = fence_tx.clone();
+    let poll_tx = gpu_tx.clone();
     let poll_kicker = kicker.clone();
 
     let fence_poll_interval = std::env::var("VARMINT_FENCE_POLL_US")
@@ -492,7 +754,10 @@ fn build_virglrenderer(
     thread::spawn(move || {
         loop {
             std::thread::sleep(fence_poll_interval);
-            if poll_tx.send(virtio::gpu::ExternalEvent::PollRendererFences).is_err() {
+            if poll_tx
+                .send(DeviceThreadRequest::GpuEvent(virtio::gpu::ExternalEvent::PollRendererFences))
+                .is_err()
+            {
                 break;
             }
             poll_kicker.kick();
@@ -500,11 +765,11 @@ fn build_virglrenderer(
     });
 
     let renderer = VirglRenderer::new(move |fence: VirglFence| {
-        let _ = fence_tx.send(virtio::gpu::ExternalEvent::FenceSignaled {
+        let _ = gpu_tx.send(DeviceThreadRequest::GpuEvent(virtio::gpu::ExternalEvent::FenceSignaled {
             ctx_id: fence.ctx_id,
             ring_idx: fence.ring_idx.map(|r| r as u8),
             fence_id: fence.fence_id,
-        });
+        }));
         kicker.kick();
     })?;
 
@@ -517,35 +782,35 @@ fn run_loop(
     mem: &memory::GuestMemory,
     uart: &Mutex<uart::Uart>,
     uart_irq: &mut irq::IrqLine,
-    virtio_blk: &mut virtio::MmioTransport<virtio::Blk>,
+    virtio_blk: &Mutex<virtio::MmioTransport<virtio::Blk>>,
     virtio_blk_irq: &mut irq::IrqLine,
-    virtio_net: &mut virtio::MmioTransport<virtio::Net>,
+    virtio_net: &Mutex<virtio::MmioTransport<virtio::Net>>,
     virtio_net_irq: &mut irq::IrqLine,
-    iface: &mut net::vmnet::Backend,
-    virtio_gpu: &mut virtio::MmioTransport<virtio::Gpu>,
+    iface: &Mutex<net::vmnet::Backend>,
+    gpu_tx: &Sender<DeviceThreadRequest>,
+    virtio_gpu_irq_asserted: &AtomicBool,
     virtio_gpu_irq: &mut irq::IrqLine,
-    virtio_input_keyboard: &mut virtio::MmioTransport<virtio::Input>,
+    virtio_input_keyboard: &Mutex<virtio::MmioTransport<virtio::Input>>,
     virtio_input_keyboard_irq: &mut irq::IrqLine,
-    virtio_input_tablet: &mut virtio::MmioTransport<virtio::Input>,
+    virtio_input_tablet: &Mutex<virtio::MmioTransport<virtio::Input>>,
     virtio_input_tablet_irq: &mut irq::IrqLine,
-    virtio_snd: &mut virtio::MmioTransport<virtio::Snd>,
+    virtio_snd: &Mutex<virtio::MmioTransport<virtio::Snd>>,
     virtio_snd_irq: &mut irq::IrqLine,
-    virtio_console: &mut virtio::MmioTransport<virtio::Console>,
+    virtio_console: &Mutex<virtio::MmioTransport<virtio::Console>>,
     virtio_console_irq: &mut irq::IrqLine,
     clipboard_in_rx: &Receiver<Vec<u8>>,
     clipboard_out_tx: &Sender<Vec<u8>>,
     input_rx: &Receiver<HostInputEvent>,
     display_rx: &Receiver<HostDisplayEvent>,
     audio_rx: &Receiver<audio::coreaudio::BackendEvent>,
-    fence_rx: &Receiver<virtio::gpu::ExternalEvent>,
 ) -> Result<()> {
-    let mut net_buf = vec![0; iface.max_packet_size() as usize];
+    let mut net_buf = vec![0; iface.lock().unwrap().max_packet_size() as usize];
 
     loop {
         loop {
-            let n_read = iface.read(&mut net_buf).unwrap();
+            let n_read = iface.lock().unwrap().read(&mut net_buf).unwrap();
             if n_read > 0 {
-                virtio_net.handle_external_event(&net_buf[..n_read], mem);
+                virtio_net.lock().unwrap().handle_external_event(&net_buf[..n_read], mem);
             } else {
                 break;
             }
@@ -557,7 +822,7 @@ fn run_loop(
             use virtio::input::ExternalInput;
             match event {
                 HostInputEvent::Key { code, pressed } => {
-                    virtio_input_keyboard.handle_external_event(ExternalInput::Key { code, pressed }, mem);
+                    virtio_input_keyboard.lock().unwrap().handle_external_event(ExternalInput::Key { code, pressed }, mem);
                 }
 
                 HostInputEvent::PointerMove { x, y, width, height } => {
@@ -567,13 +832,14 @@ fn run_loop(
                 HostInputEvent::PointerButton { button, pressed } => {
                     if let Some((x, y, width, height)) = last_pointer_move.take() {
                         virtio_input_tablet
+                            .lock().unwrap()
                             .handle_external_event(ExternalInput::AbsPosition { x, y, width, height }, mem);
                     }
-                    virtio_input_tablet.handle_external_event(ExternalInput::PointerButton { button, pressed }, mem);
+                    virtio_input_tablet.lock().unwrap().handle_external_event(ExternalInput::PointerButton { button, pressed }, mem);
                 }
 
                 HostInputEvent::Scroll { horizontal, value } => {
-                    virtio_input_tablet.handle_external_event(ExternalInput::Scroll { horizontal, value }, mem);
+                    virtio_input_tablet.lock().unwrap().handle_external_event(ExternalInput::Scroll { horizontal, value }, mem);
                 }
             }
         }
@@ -581,40 +847,39 @@ fn run_loop(
         while let Ok(event) = display_rx.try_recv() {
             match event {
                 HostDisplayEvent::Resize { width, height } => {
-                    virtio_gpu.handle_external_event(virtio::gpu::ExternalEvent::DisplayResized { width, height }, mem);
+                    send_gpu_event(gpu_tx, virtio::gpu::ExternalEvent::DisplayResized { width, height });
                 }
             }
         }
 
         if let Some((x, y, width, height)) = last_pointer_move {
             virtio_input_tablet
+                .lock()
+                .unwrap()
                 .handle_external_event(virtio::input::ExternalInput::AbsPosition { x, y, width, height }, mem);
         }
 
         while let Ok(event) = audio_rx.try_recv() {
             match event {
                 audio::coreaudio::BackendEvent::PeriodElapsed(seq) => {
-                    virtio_snd.handle_external_event(virtio::snd::ExternalEvent::PeriodElapsed(seq), mem);
+                    virtio_snd.lock().unwrap().handle_external_event(virtio::snd::ExternalEvent::PeriodElapsed(seq), mem);
                 }
             }
         }
 
-        while let Ok(event) = fence_rx.try_recv() {
-            virtio_gpu.handle_external_event(event, mem);
-        }
 
         while let Ok(payload) = clipboard_in_rx.try_recv() {
-            virtio_console.handle_external_event(virtio::console::ExternalEvent::HostClipboard(&payload), mem);
+            virtio_console.lock().unwrap().handle_external_event(virtio::console::ExternalEvent::HostClipboard(&payload), mem);
         }
 
         uart_irq.sync(vm, uart.lock().unwrap().is_asserted())?;
-        virtio_blk_irq.sync(vm, virtio_blk.is_asserted())?;
-        virtio_net_irq.sync(vm, virtio_net.is_asserted())?;
-        virtio_gpu_irq.sync(vm, virtio_gpu.is_asserted())?;
-        virtio_input_keyboard_irq.sync(vm, virtio_input_keyboard.is_asserted())?;
-        virtio_input_tablet_irq.sync(vm, virtio_input_tablet.is_asserted())?;
-        virtio_snd_irq.sync(vm, virtio_snd.is_asserted())?;
-        virtio_console_irq.sync(vm, virtio_console.is_asserted())?;
+        virtio_blk_irq.sync(vm, virtio_blk.lock().unwrap().is_asserted())?;
+        virtio_net_irq.sync(vm, virtio_net.lock().unwrap().is_asserted())?;
+        virtio_gpu_irq.sync(vm, virtio_gpu_irq_asserted.load(Ordering::SeqCst))?;
+        virtio_input_keyboard_irq.sync(vm, virtio_input_keyboard.lock().unwrap().is_asserted())?;
+        virtio_input_tablet_irq.sync(vm, virtio_input_tablet.lock().unwrap().is_asserted())?;
+        virtio_snd_irq.sync(vm, virtio_snd.lock().unwrap().is_asserted())?;
+        virtio_console_irq.sync(vm, virtio_console.lock().unwrap().is_asserted())?;
 
         vcpu.run()?;
         let exit = vcpu.get_exit_info();
@@ -650,101 +915,37 @@ fn run_loop(
                         let rt = (esr_el2_like >> 16) & 0b11111;
                         let size = 1usize << ((esr_el2_like >> 22) & 0b11);
 
-                        match classify(phys_addr) {
-                            Some(MmioRegion::Uart(offset)) => {
-                                if is_write {
-                                    let value = mmio_read_reg(vcpu, rt)?;
-                                    uart.lock().unwrap().write(offset, value, |value| {
-                                        io::stdout().write_all(&[value as u8]).unwrap();
-                                        io::stdout().flush().unwrap();
-                                    });
-                                } else {
-                                    let value = uart.lock().unwrap().read(offset);
-                                    mmio_write_reg(vcpu, rt, value as u64)?;
-                                }
-                            }
-                            Some(MmioRegion::VirtioBlk(offset)) => {
-                                if is_write {
-                                    let value = mmio_read_reg(vcpu, rt)?;
-                                    virtio_blk.write(offset, size, value as u64, mem);
-                                } else {
-                                    let value = virtio_blk.read(offset, size);
-                                    mmio_write_reg(vcpu, rt, value)?;
-                                }
-                            }
-                            Some(MmioRegion::VirtioNet(offset)) => {
-                                if is_write {
-                                    let value = mmio_read_reg(vcpu, rt)?;
-                                    virtio_net.write(offset, size, value as u64, mem);
-                                    while let Some(frame) = virtio_net.pop_external() {
-                                        iface.write(&frame).unwrap();
-                                    }
-                                } else {
-                                    let value = virtio_net.read(offset, size);
-                                    mmio_write_reg(vcpu, rt, value)?;
-                                }
-                            }
-                            Some(MmioRegion::VirtioGpu(offset)) => {
-                                if is_write {
-                                    let value = mmio_read_reg(vcpu, rt)?;
-                                    virtio_gpu.write(offset, size, value as u64, mem);
-                                } else {
-                                    let value = virtio_gpu.read(offset, size);
-                                    mmio_write_reg(vcpu, rt, value)?;
-                                }
-                            }
-                            Some(MmioRegion::VirtioInputKeyboard(offset)) => {
-                                if is_write {
-                                    let value = mmio_read_reg(vcpu, rt)?;
-                                    virtio_input_keyboard.write(offset, size, value as u64, mem);
-                                } else {
-                                    let value = virtio_input_keyboard.read(offset, size);
-                                    mmio_write_reg(vcpu, rt, value)?;
-                                }
-                            }
-                            Some(MmioRegion::VirtioInputTablet(offset)) => {
-                                if is_write {
-                                    let value = mmio_read_reg(vcpu, rt)?;
-                                    virtio_input_tablet.write(offset, size, value as u64, mem);
-                                } else {
-                                    let value = virtio_input_tablet.read(offset, size);
-                                    mmio_write_reg(vcpu, rt, value)?;
-                                }
-                            }
-                            Some(MmioRegion::VirtioSnd(offset)) => {
-                                if is_write {
-                                    let value = mmio_read_reg(vcpu, rt)?;
-                                    virtio_snd.write(offset, size, value as u64, mem);
-                                } else {
-                                    let value = virtio_snd.read(offset, size);
-                                    mmio_write_reg(vcpu, rt, value)?;
-                                }
-                            }
-                            Some(MmioRegion::VirtioConsole(offset)) => {
-                                if is_write {
-                                    let value = mmio_read_reg(vcpu, rt)?;
-                                    virtio_console.write(offset, size, value as u64, mem);
-                                    while let Some(bytes) = virtio_console.pop_external() {
-                                        let _ = clipboard_out_tx.send(bytes);
-                                    }
-                                    virtio_console
-                                        .handle_external_event(virtio::console::ExternalEvent::RxAvailable, mem);
-                                } else {
-                                    let value = virtio_console.read(offset, size);
-                                    mmio_write_reg(vcpu, rt, value)?;
-                                }
-                            }
-                            None => {
-                                panic!(
-                                    "unhandled data abort trap: ec={}, rt={}, {}, esr=0x{:x}, pc=0x{:x}, addr=0x{:x}",
-                                    ec,
-                                    rt,
-                                    if is_write { "write" } else { "read" },
-                                    esr_el2_like,
-                                    pc,
-                                    phys_addr,
-                                );
-                            }
+                        let Some(route) = classify(phys_addr) else {
+                            panic!(
+                                "unhandled data abort trap: ec={}, rt={}, {}, esr=0x{:x}, pc=0x{:x}, addr=0x{:x}",
+                                ec,
+                                rt,
+                                if is_write { "write" } else { "read" },
+                                esr_el2_like,
+                                pc,
+                                phys_addr,
+                            );
+                        };
+
+                        let value = if is_write { mmio_read_reg(vcpu, rt)? as u64 } else { 0 };
+                        if let Some(read_value) = handle_routed_mmio(
+                            route,
+                            is_write,
+                            size,
+                            value,
+                            mem,
+                            uart,
+                            virtio_blk,
+                            virtio_net,
+                            iface,
+                            gpu_tx,
+                            virtio_input_keyboard,
+                            virtio_input_tablet,
+                            virtio_snd,
+                            virtio_console,
+                            clipboard_out_tx,
+                        ) {
+                            mmio_write_reg(vcpu, rt, read_value)?;
                         }
 
                         vcpu.set_reg(Reg::PC, pc + 4)?;
@@ -795,7 +996,7 @@ fn vmm_thread(
     let (spi_int_start, _) = GicConfig::get_spi_interrupt_range()?;
 
     let mut mem = memory::GuestMemory::new(vm.memory_create(RAM_SIZE)?);
-    mem.inner_mut().map(RAM_START, MemPerms::RWX)?;
+    mem.map(RAM_START, MemPerms::RWX)?;
     mem.write(IMAGE_START, &image)?;
     mem.write(INITRD_START, &initrd)?;
     mem.write(DTB_START, &dtb)?;
@@ -810,39 +1011,47 @@ fn vmm_thread(
     let mut uart_irq = irq::IrqLine::new(spi_int_start + UART_SPI_OFFSET, false);
 
     let virtio_blk_dev = virtio::Blk::new("dev0.img", 40 * 1024 * 1024 * 1024);
-    let mut virtio_blk = virtio::MmioTransport::new(virtio_blk_dev);
+    let virtio_blk = Mutex::new(virtio::MmioTransport::new(virtio_blk_dev));
     let mut virtio_blk_irq = irq::IrqLine::new(spi_int_start + VIRTBLK_SPI_OFFSET, false);
 
-    let mut iface = net::vmnet::Backend::new().unwrap();
-    let virtio_net_dev = virtio::Net::new(iface.mac());
-    let mut virtio_net = virtio::MmioTransport::new(virtio_net_dev);
+    let iface = Mutex::new(net::vmnet::Backend::new().unwrap());
+    let virtio_net_dev = virtio::Net::new(iface.lock().unwrap().mac());
+    let virtio_net = Mutex::new(virtio::MmioTransport::new(virtio_net_dev));
     let mut virtio_net_irq = irq::IrqLine::new(spi_int_start + VIRTNET_SPI_OFFSET, false);
 
     let mut virtio_gpu_irq = irq::IrqLine::new(spi_int_start + VIRTGPU_SPI_OFFSET, false);
 
     let virtio_input_keyboard_dev = virtio::Input::keyboard();
-    let mut virtio_input_keyboard = virtio::MmioTransport::new(virtio_input_keyboard_dev);
+    let virtio_input_keyboard = Mutex::new(virtio::MmioTransport::new(virtio_input_keyboard_dev));
     let mut virtio_input_keyboard_irq = irq::IrqLine::new(spi_int_start + VIRTINPUT_KEYBOARD_SPI_OFFSET, false);
 
     let virtio_input_tablet_dev = virtio::Input::tablet();
-    let mut virtio_input_tablet = virtio::MmioTransport::new(virtio_input_tablet_dev);
+    let virtio_input_tablet = Mutex::new(virtio::MmioTransport::new(virtio_input_tablet_dev));
     let mut virtio_input_tablet_irq = irq::IrqLine::new(spi_int_start + VIRTINPUT_TABLET_SPI_OFFSET, false);
+
+    let virtio_gpu_irq_asserted = AtomicBool::new(false);
 
     thread::scope(|s| -> Result<()> {
         let kicker = kick::Kicker::spawn(s, vm, vcpu.get_handle());
 
-        let (fence_tx, fence_rx) = std::sync::mpsc::channel::<virtio::gpu::ExternalEvent>();
-        let mut renderer = build_virglrenderer(fence_tx, kicker.clone()).expect("virglrenderer init failed");
-        let virtio_gpu_dev = virtio::Gpu::new(display, &mut renderer);
-        let mut virtio_gpu = virtio::MmioTransport::new(virtio_gpu_dev);
+        let (gpu_tx, gpu_rx) = std::sync::mpsc::channel::<DeviceThreadRequest>();
+
+        let gpu_mem = &mem;
+        let gpu_display = display;
+        let gpu_irq_asserted = &virtio_gpu_irq_asserted;
+        let gpu_owner_tx = gpu_tx.clone();
+        let gpu_kicker = kicker.clone();
+        s.spawn(move || {
+            gpu_owner_thread(gpu_mem, gpu_display, gpu_rx, gpu_irq_asserted, gpu_owner_tx, gpu_kicker);
+        });
 
         let (_audio_backend, period_sink, audio_rx) = audio::coreaudio::Backend::new(kicker.clone()).unwrap();
         let virtio_snd_dev = virtio::Snd::new(period_sink);
-        let mut virtio_snd = virtio::MmioTransport::new(virtio_snd_dev);
+        let virtio_snd = Mutex::new(virtio::MmioTransport::new(virtio_snd_dev));
         let mut virtio_snd_irq = irq::IrqLine::new(spi_int_start + VIRTSND_SPI_OFFSET, false);
 
         let virtio_console_dev = virtio::Console::new();
-        let mut virtio_console = virtio::MmioTransport::new(virtio_console_dev);
+        let virtio_console = Mutex::new(virtio::MmioTransport::new(virtio_console_dev));
         let mut virtio_console_irq = irq::IrqLine::new(spi_int_start + VIRTCONSOLE_SPI_OFFSET, false);
 
         let (clipboard_in_tx, clipboard_in_rx) = std::sync::mpsc::channel::<Vec<u8>>();
@@ -853,7 +1062,7 @@ fn vmm_thread(
             clipboard::run(clipboard_in_tx, clipboard_out_rx, move || clipboard_kicker.kick());
         });
 
-        iface.set_event_callback(move || kicker.kick()).unwrap();
+        iface.lock().unwrap().set_event_callback(move || kicker.kick()).unwrap();
 
         run_loop(
             vm,
@@ -861,27 +1070,27 @@ fn vmm_thread(
             &mem,
             uart,
             &mut uart_irq,
-            &mut virtio_blk,
+            &virtio_blk,
             &mut virtio_blk_irq,
-            &mut virtio_net,
+            &virtio_net,
             &mut virtio_net_irq,
-            &mut iface,
-            &mut virtio_gpu,
+            &iface,
+            &gpu_tx,
+            &virtio_gpu_irq_asserted,
             &mut virtio_gpu_irq,
-            &mut virtio_input_keyboard,
+            &virtio_input_keyboard,
             &mut virtio_input_keyboard_irq,
-            &mut virtio_input_tablet,
+            &virtio_input_tablet,
             &mut virtio_input_tablet_irq,
-            &mut virtio_snd,
+            &virtio_snd,
             &mut virtio_snd_irq,
-            &mut virtio_console,
+            &virtio_console,
             &mut virtio_console_irq,
             &clipboard_in_rx,
             &clipboard_out_tx,
             &input_rx,
             &display_rx,
             &audio_rx,
-            &fence_rx,
         )
     })?;
 
