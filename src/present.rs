@@ -56,6 +56,10 @@ fn bgra_texture_descriptor(width: u32, height: u32) -> Retained<MTLTextureDescri
 }
 
 impl Presenter {
+    pub fn window(&self) -> &Window {
+        &self._window
+    }
+
     pub fn new(window: Window, width: u32, height: u32) -> Self {
         let raw = window.window_handle().expect("window handle").as_raw();
 
