@@ -729,7 +729,6 @@ struct AppState<'a> {
 
     last_mouse_pos: Option<(f64, f64)>,
     mouse_captured: bool,
-    grab_mouse_on_click: bool,
     rel_mouse_frac_dx: f64,
     rel_mouse_frac_dy: f64,
 
@@ -991,9 +990,7 @@ impl<'a> ApplicationHandler for AppState<'a> {
                     MouseButton::Middle => BTN_MIDDLE,
                     _ => return,
                 };
-                if state == ElementState::Pressed && self.grab_mouse_on_click {
-                    self.set_mouse_capture(true);
-                }
+
                 let _ = self.input_tx.send(HostInputEvent::PointerButton {
                     button: btn,
                     pressed: state == ElementState::Pressed,
@@ -1061,22 +1058,17 @@ fn build_virglrenderer(
     let poll_kicker = kicker.clone();
 
     let fence_poll_interval = std::env::var("VARMINT_FENCE_POLL_US")
+        .unwrap_or("1000".into())
+        .parse::<u64>()
         .ok()
-        .and_then(|v| v.parse::<u64>().ok())
         .filter(|&v| v > 0)
         .map(std::time::Duration::from_micros)
-        .unwrap_or_else(|| {
-            let ms = std::env::var("VARMINT_FENCE_POLL_MS")
-                .ok()
-                .and_then(|v| v.parse::<u64>().ok())
-                .filter(|&v| v > 0)
-                .unwrap_or(1);
-            std::time::Duration::from_millis(ms)
-        });
+        .expect("invalid fence poll duration");
 
     thread::spawn(move || {
         loop {
             std::thread::sleep(fence_poll_interval);
+
             if poll_tx
                 .send(DeviceThreadRequest::GpuEvent(
                     virtio::gpu::ExternalEvent::PollRendererFences,
@@ -1085,6 +1077,7 @@ fn build_virglrenderer(
             {
                 break;
             }
+
             poll_kicker.kick();
         }
     });
@@ -1097,6 +1090,7 @@ fn build_virglrenderer(
                 fence_id: fence.fence_id,
             },
         ));
+
         kicker.kick();
     })?;
 
@@ -1254,7 +1248,6 @@ fn secondary_vcpu_thread(
 fn vmm_thread(
     vm: &VirtualMachineInstance<GicEnabled>,
     kicker_tx: Sender<kick::Kicker>,
-    uart: &Mutex<uart::Uart>,
     display: &Mutex<virtio::gpu::DisplayBuffer>,
     input_rx: Receiver<HostInputEvent>,
     display_rx: Receiver<HostDisplayEvent>,
@@ -1263,20 +1256,10 @@ fn vmm_thread(
     let initrd = read_file("/Users/dvgr/varmint-kernels/debian-4k/initrd.img-6.12.90+deb13.1-arm64").unwrap();
     let dtb = read_file("./artifacts/guest.dtb").unwrap();
 
-    let image_header = linux::parse_image_header(&image).unwrap();
-    eprintln!("Image header: {:?}", image_header);
-
     let boot_vcpu = vm.vcpu_create()?;
+
     boot_vcpu.set_sys_reg(SysReg::ACTLR_EL1, 1 << 1)?; // enable TSO
     boot_vcpu.set_sys_reg(SysReg::MPIDR_EL1, secondary_mpidr(BOOT_VCPU_ID))?;
-
-    let (spi_int_start, _) = GicConfig::get_spi_interrupt_range()?;
-
-    let mut mem = memory::GuestMemory::new(vm.memory_create(RAM_SIZE)?);
-    mem.map(RAM_START, MemPerms::RWX)?;
-    mem.write(IMAGE_START, &image)?;
-    mem.write(INITRD_START, &initrd)?;
-    mem.write(DTB_START, &dtb)?;
 
     boot_vcpu.set_reg(Reg::CPSR, PSTATE_EL1H_DAIF_MASKED)?; // Start in EL1
     boot_vcpu.set_reg(Reg::PC, IMAGE_START)?;
@@ -1285,6 +1268,15 @@ fn vmm_thread(
     boot_vcpu.set_reg(Reg::X2, 0)?;
     boot_vcpu.set_reg(Reg::X3, 0)?;
 
+    let mut mem = memory::GuestMemory::new(vm.memory_create(RAM_SIZE)?);
+    mem.map(RAM_START, MemPerms::RWX)?;
+    mem.write(IMAGE_START, &image)?;
+    mem.write(INITRD_START, &initrd)?;
+    mem.write(DTB_START, &dtb)?;
+
+    let (spi_int_start, _) = GicConfig::get_spi_interrupt_range()?;
+
+    let uart = Mutex::new(uart::Uart::new());
     let uart_irq = Mutex::new(irq::IrqLine::new(spi_int_start + UART_SPI_OFFSET, false));
 
     let virtio_blk_dev = virtio::Blk::new("dev0.img", 40 * 1024 * 1024 * 1024);
@@ -1311,8 +1303,8 @@ fn vmm_thread(
     let virtio_input_mouse = Mutex::new(virtio::MmioTransport::new(virtio_input_mouse_dev));
     let virtio_input_mouse_irq = Mutex::new(irq::IrqLine::new(spi_int_start + VIRTINPUT_MOUSE_SPI_OFFSET, false));
 
-    let mut secondary_boot_txs = Vec::with_capacity(NUM_VCPUS - 1);
-    let mut secondary_boot_rxs = Vec::with_capacity(NUM_VCPUS - 1);
+    let mut secondary_boot_txs = Vec::new();
+    let mut secondary_boot_rxs = Vec::new();
     for _ in FIRST_SECONDARY_VCPU_ID..NUM_VCPUS {
         let (tx, rx) = std::sync::mpsc::sync_channel::<SecondaryStart>(1);
         secondary_boot_txs.push(tx);
@@ -1329,8 +1321,10 @@ fn vmm_thread(
         let kicker = kick::Kicker::spawn(s, vm, vec![boot_vcpu.get_handle()]);
         kicker_tx.send(kicker.clone()).unwrap();
 
-        let (gpu_tx, gpu_rx) = std::sync::mpsc::channel::<DeviceThreadRequest>();
+        let stdin_kicker = kicker.clone();
+        s.spawn(|| stdin_thread(stdin_kicker, &uart));
 
+        let (gpu_tx, gpu_rx) = std::sync::mpsc::channel::<DeviceThreadRequest>();
         let gpu_mem = mem_ref;
         let gpu_display = display;
         let gpu_irq_asserted = virtio_gpu_irq_asserted_ref;
@@ -1367,7 +1361,7 @@ fn vmm_thread(
 
         thread::scope(|ss| -> Result<()> {
             let devices = VmDevices {
-                uart,
+                uart: &uart,
                 blk: &virtio_blk,
                 net: &virtio_net,
                 gpu_tx: &gpu_tx,
@@ -1378,6 +1372,7 @@ fn vmm_thread(
                 snd: &virtio_snd,
                 console: &virtio_console,
             };
+
             let irqs = VmIrqs {
                 uart: &uart_irq,
                 blk: &virtio_blk_irq,
@@ -1389,6 +1384,7 @@ fn vmm_thread(
                 snd: &virtio_snd_irq,
                 console: &virtio_console_irq,
             };
+
             let secondary_boot_txs_ref = &secondary_boot_txs;
             let secondary_online_ref = &secondary_online;
 
@@ -1433,6 +1429,7 @@ fn vmm_thread(
                     audio_rx,
                     host_kicker,
                 );
+
                 host_events.run();
             });
 
@@ -1469,7 +1466,6 @@ fn main() -> Result<()> {
 
     let vm = VirtualMachine::with_gic(vm_cfg, gic_config)?;
 
-    let uart = Mutex::new(uart::Uart::new());
     let display = Mutex::new(virtio::gpu::DisplayBuffer::new());
 
     let (kicker_tx, kicker_rx) = std::sync::mpsc::channel();
@@ -1482,21 +1478,14 @@ fn main() -> Result<()> {
         std::time::Instant::now() + std::time::Duration::from_millis(8),
     ));
 
-    let vm_ref = &vm;
-    let uart_ref = &uart;
-    let display_ref = &display;
-
     thread::scope(|s| {
-        s.spawn(move || vmm_thread(vm_ref, kicker_tx, uart_ref, display_ref, input_rx, display_rx));
+        s.spawn(|| vmm_thread(&vm, kicker_tx, &display, input_rx, display_rx));
 
         let kicker = kicker_rx.recv().unwrap();
 
-        let stdin_kicker = kicker.clone();
-        s.spawn(move || stdin_thread(stdin_kicker, uart_ref));
-
         let mut app = AppState {
             kicker,
-            display: display_ref,
+            display: &display,
             input_tx,
             display_tx,
             presenter: None,
@@ -1510,9 +1499,6 @@ fn main() -> Result<()> {
             last_seq: 0,
             last_mouse_pos: None,
             mouse_captured: false,
-            grab_mouse_on_click: std::env::var("VARMINT_GRAB_MOUSE_ON_CLICK")
-                .map(|v| v != "0")
-                .unwrap_or(false),
             rel_mouse_frac_dx: 0.0,
             rel_mouse_frac_dy: 0.0,
             stat_last: std::time::Instant::now(),
