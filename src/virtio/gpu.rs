@@ -6,7 +6,7 @@ use crate::{
     virtio::{
         chain::ChainData,
         common,
-        device::{ChainAction, ChainToken, Device, Effect, ExternalEventHandler, ShmRegion},
+        device::{ChainAction, ChainToken, Device, DeviceContext, ExternalEventHandler, ShmRegion},
         virgl_ffi::{
             self, Iovec, ResourceCreate3D, ResourceCreateBlob as VirglResourceCreateBlob, Transfer3D, VirglFence,
             VirglRenderer,
@@ -515,6 +515,34 @@ impl<'a> Device for Gpu<'a> {
         2
     }
 
+    fn queue_notified(&mut self, queue_idx: usize, ctx: &mut DeviceContext<'_>) {
+        while let Some(chain) = ctx.pop_chain(queue_idx) {
+            match self.process_chain(queue_idx, &chain.data, chain.token, ctx.mem()) {
+                ChainAction::Complete(written) => ctx.complete(chain.token, written),
+                ChainAction::Deferred => {}
+            }
+        }
+    }
+
+    fn reset(&mut self) {
+        self.resources.clear();
+        self.scanout_resource = None;
+        self.pending_fences.clear();
+    }
+
+    fn shared_memory_region(&self, id: u32) -> Option<ShmRegion> {
+        if id as u64 == HOST_VISIBLE_SHM_ID {
+            Some(ShmRegion {
+                base: HOST_VISIBLE_SHM_BASE,
+                len: HOST_VISIBLE_SHM_SIZE,
+            })
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> Gpu<'a> {
     fn process_chain(
         &mut self,
         queue_idx: usize,
@@ -565,25 +593,6 @@ impl<'a> Device for Gpu<'a> {
         }
     }
 
-    fn reset(&mut self) {
-        self.resources.clear();
-        self.scanout_resource = None;
-        self.pending_fences.clear();
-    }
-
-    fn shared_memory_region(&self, id: u32) -> Option<ShmRegion> {
-        if id as u64 == HOST_VISIBLE_SHM_ID {
-            Some(ShmRegion {
-                base: HOST_VISIBLE_SHM_BASE,
-                len: HOST_VISIBLE_SHM_SIZE,
-            })
-        } else {
-            None
-        }
-    }
-}
-
-impl<'a> Gpu<'a> {
     fn err(chain: &ChainData, r#type: CtrlType, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
         ChainAction::Complete(Gpu::write_response(chain, r#type, hdr, mem))
     }
@@ -1680,7 +1689,7 @@ pub enum ExternalEvent {
 impl<'a> ExternalEventHandler for Gpu<'a> {
     type Event<'b> = ExternalEvent;
 
-    fn on_event(&mut self, event: ExternalEvent, mut emit: impl FnMut(Effect)) {
+    fn on_event(&mut self, event: ExternalEvent, ctx: &mut DeviceContext<'_>) {
         match event {
             ExternalEvent::DisplayResized { width, height } => {
                 if width == 0 || height == 0 {
@@ -1690,7 +1699,7 @@ impl<'a> ExternalEventHandler for Gpu<'a> {
                 self.scanout_width = width;
                 self.scanout_height = height;
                 self.events_read |= EVENT_DISPLAY;
-                emit(Effect::Config);
+                ctx.config_changed();
             }
             ExternalEvent::PollRendererFences => {
                 if !self.pending_fences.is_empty() {
@@ -1716,10 +1725,7 @@ impl<'a> ExternalEventHandler for Gpu<'a> {
                     if same_timeline && p.fence_id <= fence_id {
                         let p = self.pending_fences.remove(i);
 
-                        emit(Effect::Complete {
-                            token: p.token,
-                            written: p.written,
-                        });
+                        ctx.complete(p.token, p.written);
                     } else {
                         i += 1;
                     }

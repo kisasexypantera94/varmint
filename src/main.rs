@@ -221,7 +221,7 @@ fn send_gpu_mmio(
         return None;
     }
 
-    let (resp_tx, resp_rx) = std::sync::mpsc::sync_channel(1024);
+    let (resp_tx, resp_rx) = std::sync::mpsc::sync_channel(0);
     gpu_tx
         .send(DeviceThreadRequest::Mmio {
             is_write,
@@ -242,19 +242,13 @@ fn gpu_owner_thread(
     mem: &memory::GuestMemory,
     display: &Mutex<virtio::gpu::DisplayBuffer>,
     rx: Receiver<DeviceThreadRequest>,
-    irq_asserted: &AtomicBool,
+    irq: irq::IrqLine,
     gpu_tx: Sender<DeviceThreadRequest>,
     kicker: kick::Kicker,
 ) {
-    let mut renderer = build_virglrenderer(gpu_tx, kicker).expect("virglrenderer init failed");
+    let mut renderer = build_virglrenderer(gpu_tx).expect("virglrenderer init failed");
     let gpu_dev = virtio::Gpu::new(display, &mut renderer);
-    let mut gpu = virtio::MmioTransport::new(gpu_dev);
-
-    let update_irq = |gpu: &mut virtio::MmioTransport<virtio::Gpu>| {
-        irq_asserted.store(gpu.is_asserted(), Ordering::SeqCst);
-    };
-
-    update_irq(&mut gpu);
+    let mut gpu = virtio::MmioTransport::new(gpu_dev, irq);
 
     while let Ok(req) = rx.recv() {
         match req {
@@ -271,16 +265,17 @@ fn gpu_owner_thread(
                 } else {
                     Some(gpu.read(offset, size))
                 };
-                update_irq(&mut gpu);
                 let _ = resp.send(ret);
             }
             DeviceThreadRequest::MmioWriteAsync { offset, size, value } => {
-                gpu.write(offset, size, value, mem);
-                update_irq(&mut gpu);
+                if gpu.write(offset, size, value, mem) {
+                    kicker.kick();
+                }
             }
             DeviceThreadRequest::GpuEvent(event) => {
-                gpu.handle_external_event(event, mem);
-                update_irq(&mut gpu);
+                if gpu.handle_external_event(event, mem) {
+                    kicker.kick();
+                }
             }
         }
     }
@@ -303,7 +298,6 @@ fn handle_virtio_mmio<D: virtio::Device>(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn handle_inline_mmio(
     route: MmioRoute,
     is_write: bool,
@@ -311,8 +305,6 @@ fn handle_inline_mmio(
     value: u64,
     mem: &memory::GuestMemory,
     devices: &VmDevices<'_>,
-    net_out_tx: &Sender<Vec<u8>>,
-    clipboard_out_tx: &Sender<Vec<u8>>,
 ) -> Option<u64> {
     match route.device {
         MmioDevice::Uart => {
@@ -327,15 +319,7 @@ fn handle_inline_mmio(
             }
         }
         MmioDevice::VirtioBlk => handle_virtio_mmio(devices.blk, route.offset, size, is_write, value, mem),
-        MmioDevice::VirtioNet => {
-            let ret = handle_virtio_mmio(devices.net, route.offset, size, is_write, value, mem);
-            if is_write {
-                while let Some(frame) = devices.net.lock().unwrap().pop_external() {
-                    let _ = net_out_tx.send(frame);
-                }
-            }
-            ret
-        }
+        MmioDevice::VirtioNet => handle_virtio_mmio(devices.net, route.offset, size, is_write, value, mem),
         MmioDevice::VirtioGpu => panic!("virtio-gpu is not an inline device"),
         MmioDevice::VirtioInputKeyboard => {
             handle_virtio_mmio(devices.keyboard, route.offset, size, is_write, value, mem)
@@ -343,21 +327,10 @@ fn handle_inline_mmio(
         MmioDevice::VirtioInputTablet => handle_virtio_mmio(devices.tablet, route.offset, size, is_write, value, mem),
         MmioDevice::VirtioInputMouse => handle_virtio_mmio(devices.mouse, route.offset, size, is_write, value, mem),
         MmioDevice::VirtioSnd => handle_virtio_mmio(devices.snd, route.offset, size, is_write, value, mem),
-        MmioDevice::VirtioConsole => {
-            let ret = handle_virtio_mmio(devices.console, route.offset, size, is_write, value, mem);
-            if is_write {
-                let mut virtio_console = devices.console.lock().unwrap();
-                while let Some(bytes) = virtio_console.pop_external() {
-                    let _ = clipboard_out_tx.send(bytes);
-                }
-                virtio_console.handle_external_event(virtio::console::ExternalEvent::RxAvailable, mem);
-            }
-            ret
-        }
+        MmioDevice::VirtioConsole => handle_virtio_mmio(devices.console, route.offset, size, is_write, value, mem),
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn handle_routed_mmio(
     route: MmioRoute,
     is_write: bool,
@@ -365,13 +338,9 @@ fn handle_routed_mmio(
     value: u64,
     mem: &memory::GuestMemory,
     devices: &VmDevices<'_>,
-    net_out_tx: &Sender<Vec<u8>>,
-    clipboard_out_tx: &Sender<Vec<u8>>,
 ) -> Option<u64> {
     match route.placement {
-        DevicePlacement::Inline => {
-            handle_inline_mmio(route, is_write, size, value, mem, devices, net_out_tx, clipboard_out_tx)
-        }
+        DevicePlacement::Inline => handle_inline_mmio(route, is_write, size, value, mem, devices),
         DevicePlacement::ThreadOwned { owner } => {
             assert_eq!(owner, GPU_MMIO_OWNER, "unknown MMIO owner thread");
             assert_eq!(
@@ -421,65 +390,11 @@ struct VmDevices<'a> {
     blk: &'a Mutex<virtio::MmioTransport<virtio::Blk>>,
     net: &'a Mutex<virtio::MmioTransport<virtio::Net>>,
     gpu_tx: &'a Sender<DeviceThreadRequest>,
-    gpu_irq_asserted: &'a AtomicBool,
     keyboard: &'a Mutex<virtio::MmioTransport<virtio::Input>>,
     tablet: &'a Mutex<virtio::MmioTransport<virtio::Input>>,
     mouse: &'a Mutex<virtio::MmioTransport<virtio::Input>>,
     snd: &'a Mutex<virtio::MmioTransport<virtio::Snd>>,
     console: &'a Mutex<virtio::MmioTransport<virtio::Console>>,
-}
-
-#[derive(Clone, Copy)]
-struct VmIrqs<'a> {
-    uart: &'a Mutex<irq::IrqLine>,
-    blk: &'a Mutex<irq::IrqLine>,
-    net: &'a Mutex<irq::IrqLine>,
-    gpu: &'a Mutex<irq::IrqLine>,
-    keyboard: &'a Mutex<irq::IrqLine>,
-    tablet: &'a Mutex<irq::IrqLine>,
-    mouse: &'a Mutex<irq::IrqLine>,
-    snd: &'a Mutex<irq::IrqLine>,
-    console: &'a Mutex<irq::IrqLine>,
-}
-
-fn sync_all_irqs(vm: &VirtualMachineInstance<GicEnabled>, devices: &VmDevices<'_>, irqs: &VmIrqs<'_>) -> Result<()> {
-    irqs.uart
-        .lock()
-        .unwrap()
-        .sync(vm, devices.uart.lock().unwrap().is_asserted())?;
-    irqs.blk
-        .lock()
-        .unwrap()
-        .sync(vm, devices.blk.lock().unwrap().is_asserted())?;
-    irqs.net
-        .lock()
-        .unwrap()
-        .sync(vm, devices.net.lock().unwrap().is_asserted())?;
-    irqs.gpu
-        .lock()
-        .unwrap()
-        .sync(vm, devices.gpu_irq_asserted.load(Ordering::SeqCst))?;
-    irqs.keyboard
-        .lock()
-        .unwrap()
-        .sync(vm, devices.keyboard.lock().unwrap().is_asserted())?;
-    irqs.tablet
-        .lock()
-        .unwrap()
-        .sync(vm, devices.tablet.lock().unwrap().is_asserted())?;
-    irqs.mouse
-        .lock()
-        .unwrap()
-        .sync(vm, devices.mouse.lock().unwrap().is_asserted())?;
-    irqs.snd
-        .lock()
-        .unwrap()
-        .sync(vm, devices.snd.lock().unwrap().is_asserted())?;
-    irqs.console
-        .lock()
-        .unwrap()
-        .sync(vm, devices.console.lock().unwrap().is_asserted())?;
-    Ok(())
 }
 
 struct HostEventPump<'a> {
@@ -1050,12 +965,8 @@ impl<'a> ApplicationHandler for AppState<'a> {
     }
 }
 
-fn build_virglrenderer(
-    gpu_tx: Sender<DeviceThreadRequest>,
-    kicker: kick::Kicker,
-) -> virtio::virgl_ffi::VirglResult<VirglRenderer> {
+fn build_virglrenderer(gpu_tx: Sender<DeviceThreadRequest>) -> virtio::virgl_ffi::VirglResult<VirglRenderer> {
     let poll_tx = gpu_tx.clone();
-    let poll_kicker = kicker.clone();
 
     let fence_poll_interval = std::env::var("VARMINT_FENCE_POLL_US")
         .unwrap_or("1000".into())
@@ -1077,8 +988,6 @@ fn build_virglrenderer(
             {
                 break;
             }
-
-            poll_kicker.kick();
         }
     });
 
@@ -1090,28 +999,20 @@ fn build_virglrenderer(
                 fence_id: fence.fence_id,
             },
         ));
-
-        kicker.kick();
     })?;
 
     Ok(renderer)
 }
 
 fn run_loop(
-    vm: &VirtualMachineInstance<GicEnabled>,
     vcpu: &Vcpu,
     vcpu_id: usize,
     mem: &memory::GuestMemory,
     devices: VmDevices<'_>,
-    irqs: VmIrqs<'_>,
-    net_out_tx: &Sender<Vec<u8>>,
     secondary_boot_txs: &[SyncSender<SecondaryStart>],
     secondary_online: &[AtomicBool],
-    clipboard_out_tx: &Sender<Vec<u8>>,
 ) -> Result<()> {
     loop {
-        sync_all_irqs(vm, &devices, &irqs)?;
-
         vcpu.run()?;
         let exit = vcpu.get_exit_info();
 
@@ -1164,16 +1065,7 @@ fn run_loop(
                         };
 
                         let value = if is_write { mmio_read_reg(vcpu, rt)? as u64 } else { 0 };
-                        if let Some(read_value) = handle_routed_mmio(
-                            route,
-                            is_write,
-                            size,
-                            value,
-                            mem,
-                            &devices,
-                            net_out_tx,
-                            clipboard_out_tx,
-                        ) {
+                        if let Some(read_value) = handle_routed_mmio(route, is_write, size, value, mem, &devices) {
                             mmio_write_reg(vcpu, rt, read_value)?;
                         }
 
@@ -1201,7 +1093,6 @@ fn run_loop(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn secondary_vcpu_thread(
     vm: &VirtualMachineInstance<GicEnabled>,
     vcpu_id: usize,
@@ -1209,11 +1100,8 @@ fn secondary_vcpu_thread(
     kicker: kick::Kicker,
     mem: &memory::GuestMemory,
     devices: VmDevices<'_>,
-    irqs: VmIrqs<'_>,
-    net_out_tx: &Sender<Vec<u8>>,
     secondary_boot_txs: &[SyncSender<SecondaryStart>],
     secondary_online: &[AtomicBool],
-    clipboard_out_tx: &Sender<Vec<u8>>,
 ) -> Result<()> {
     let vcpu = vm.vcpu_create()?;
     vcpu.set_sys_reg(SysReg::ACTLR_EL1, 1 << 1)?; // enable TSO
@@ -1228,18 +1116,7 @@ fn secondary_vcpu_thread(
         vcpu.set_reg(Reg::X2, 0)?;
         vcpu.set_reg(Reg::X3, 0)?;
 
-        run_loop(
-            vm,
-            &vcpu,
-            vcpu_id,
-            mem,
-            devices,
-            irqs,
-            net_out_tx,
-            secondary_boot_txs,
-            secondary_online,
-            clipboard_out_tx,
-        )?;
+        run_loop(&vcpu, vcpu_id, mem, devices, secondary_boot_txs, secondary_online)?;
     }
 
     Ok(())
@@ -1276,32 +1153,44 @@ fn vmm_thread(
 
     let (spi_int_start, _) = GicConfig::get_spi_interrupt_range()?;
 
-    let uart = Mutex::new(uart::Uart::new());
-    let uart_irq = Mutex::new(irq::IrqLine::new(spi_int_start + UART_SPI_OFFSET, false));
+    let uart = Mutex::new(uart::Uart::new(irq::IrqLine::new(vm, spi_int_start + UART_SPI_OFFSET)));
+
+    let (clipboard_in_tx, clipboard_in_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    let (clipboard_out_tx, clipboard_out_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    let (net_out_tx, net_out_rx) = std::sync::mpsc::channel::<Vec<u8>>();
 
     let virtio_blk_dev = virtio::Blk::new("dev0.img", 40 * 1024 * 1024 * 1024);
-    let virtio_blk = Mutex::new(virtio::MmioTransport::new(virtio_blk_dev));
-    let virtio_blk_irq = Mutex::new(irq::IrqLine::new(spi_int_start + VIRTBLK_SPI_OFFSET, false));
+    let virtio_blk = Mutex::new(virtio::MmioTransport::new(
+        virtio_blk_dev,
+        irq::IrqLine::new(vm, spi_int_start + VIRTBLK_SPI_OFFSET),
+    ));
 
     let iface = Mutex::new(net::vmnet::Backend::new().unwrap());
-    let virtio_net_dev = virtio::Net::new(iface.lock().unwrap().mac());
-    let virtio_net = Mutex::new(virtio::MmioTransport::new(virtio_net_dev));
-    let virtio_net_irq = Mutex::new(irq::IrqLine::new(spi_int_start + VIRTNET_SPI_OFFSET, false));
+    let virtio_net_dev = virtio::Net::new(iface.lock().unwrap().mac(), net_out_tx);
+    let virtio_net = Mutex::new(virtio::MmioTransport::new(
+        virtio_net_dev,
+        irq::IrqLine::new(vm, spi_int_start + VIRTNET_SPI_OFFSET),
+    ));
 
-    let virtio_gpu_irq = Mutex::new(irq::IrqLine::new(spi_int_start + VIRTGPU_SPI_OFFSET, false));
-    let virtio_gpu_irq_asserted = AtomicBool::new(false);
+    let virtio_gpu_irq = irq::IrqLine::new(vm, spi_int_start + VIRTGPU_SPI_OFFSET);
 
     let virtio_input_keyboard_dev = virtio::Input::keyboard();
-    let virtio_input_keyboard = Mutex::new(virtio::MmioTransport::new(virtio_input_keyboard_dev));
-    let virtio_input_keyboard_irq = Mutex::new(irq::IrqLine::new(spi_int_start + VIRTINPUT_KEYBOARD_SPI_OFFSET, false));
+    let virtio_input_keyboard = Mutex::new(virtio::MmioTransport::new(
+        virtio_input_keyboard_dev,
+        irq::IrqLine::new(vm, spi_int_start + VIRTINPUT_KEYBOARD_SPI_OFFSET),
+    ));
 
     let virtio_input_tablet_dev = virtio::Input::tablet();
-    let virtio_input_tablet = Mutex::new(virtio::MmioTransport::new(virtio_input_tablet_dev));
-    let virtio_input_tablet_irq = Mutex::new(irq::IrqLine::new(spi_int_start + VIRTINPUT_TABLET_SPI_OFFSET, false));
+    let virtio_input_tablet = Mutex::new(virtio::MmioTransport::new(
+        virtio_input_tablet_dev,
+        irq::IrqLine::new(vm, spi_int_start + VIRTINPUT_TABLET_SPI_OFFSET),
+    ));
 
     let virtio_input_mouse_dev = virtio::Input::mouse();
-    let virtio_input_mouse = Mutex::new(virtio::MmioTransport::new(virtio_input_mouse_dev));
-    let virtio_input_mouse_irq = Mutex::new(irq::IrqLine::new(spi_int_start + VIRTINPUT_MOUSE_SPI_OFFSET, false));
+    let virtio_input_mouse = Mutex::new(virtio::MmioTransport::new(
+        virtio_input_mouse_dev,
+        irq::IrqLine::new(vm, spi_int_start + VIRTINPUT_MOUSE_SPI_OFFSET),
+    ));
 
     let mut secondary_boot_txs = Vec::new();
     let mut secondary_boot_rxs = Vec::new();
@@ -1315,7 +1204,6 @@ fn vmm_thread(
         .collect();
 
     let mem_ref = &mem;
-    let virtio_gpu_irq_asserted_ref = &virtio_gpu_irq_asserted;
 
     thread::scope(|s| -> Result<()> {
         let kicker = kick::Kicker::spawn(s, vm, vec![boot_vcpu.get_handle()]);
@@ -1327,25 +1215,24 @@ fn vmm_thread(
         let (gpu_tx, gpu_rx) = std::sync::mpsc::channel::<DeviceThreadRequest>();
         let gpu_mem = mem_ref;
         let gpu_display = display;
-        let gpu_irq_asserted = virtio_gpu_irq_asserted_ref;
         let gpu_owner_tx = gpu_tx.clone();
         let gpu_kicker = kicker.clone();
         s.spawn(move || {
-            gpu_owner_thread(gpu_mem, gpu_display, gpu_rx, gpu_irq_asserted, gpu_owner_tx, gpu_kicker);
+            gpu_owner_thread(gpu_mem, gpu_display, gpu_rx, virtio_gpu_irq, gpu_owner_tx, gpu_kicker);
         });
 
         let (_audio_backend, period_sink, audio_rx) = audio::coreaudio::Backend::new(kicker.clone()).unwrap();
         let virtio_snd_dev = virtio::Snd::new(period_sink);
-        let virtio_snd = Mutex::new(virtio::MmioTransport::new(virtio_snd_dev));
-        let virtio_snd_irq = Mutex::new(irq::IrqLine::new(spi_int_start + VIRTSND_SPI_OFFSET, false));
+        let virtio_snd = Mutex::new(virtio::MmioTransport::new(
+            virtio_snd_dev,
+            irq::IrqLine::new(vm, spi_int_start + VIRTSND_SPI_OFFSET),
+        ));
 
-        let virtio_console_dev = virtio::Console::new();
-        let virtio_console = Mutex::new(virtio::MmioTransport::new(virtio_console_dev));
-        let virtio_console_irq = Mutex::new(irq::IrqLine::new(spi_int_start + VIRTCONSOLE_SPI_OFFSET, false));
-
-        let (clipboard_in_tx, clipboard_in_rx) = std::sync::mpsc::channel::<Vec<u8>>();
-        let (clipboard_out_tx, clipboard_out_rx) = std::sync::mpsc::channel::<Vec<u8>>();
-        let (net_out_tx, net_out_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        let virtio_console_dev = virtio::Console::new(clipboard_out_tx);
+        let virtio_console = Mutex::new(virtio::MmioTransport::new(
+            virtio_console_dev,
+            irq::IrqLine::new(vm, spi_int_start + VIRTCONSOLE_SPI_OFFSET),
+        ));
 
         let clipboard_kicker = kicker.clone();
         s.spawn(move || {
@@ -1365,24 +1252,11 @@ fn vmm_thread(
                 blk: &virtio_blk,
                 net: &virtio_net,
                 gpu_tx: &gpu_tx,
-                gpu_irq_asserted: virtio_gpu_irq_asserted_ref,
                 keyboard: &virtio_input_keyboard,
                 tablet: &virtio_input_tablet,
                 mouse: &virtio_input_mouse,
                 snd: &virtio_snd,
                 console: &virtio_console,
-            };
-
-            let irqs = VmIrqs {
-                uart: &uart_irq,
-                blk: &virtio_blk_irq,
-                net: &virtio_net_irq,
-                gpu: &virtio_gpu_irq,
-                keyboard: &virtio_input_keyboard_irq,
-                tablet: &virtio_input_tablet_irq,
-                mouse: &virtio_input_mouse_irq,
-                snd: &virtio_snd_irq,
-                console: &virtio_console_irq,
             };
 
             let secondary_boot_txs_ref = &secondary_boot_txs;
@@ -1391,10 +1265,7 @@ fn vmm_thread(
             for (secondary_index, boot_rx) in secondary_boot_rxs.into_iter().enumerate() {
                 let vcpu_id = FIRST_SECONDARY_VCPU_ID + secondary_index;
                 let secondary_kicker = kicker.clone();
-                let secondary_net_out_tx = net_out_tx.clone();
-                let secondary_clipboard_out_tx = clipboard_out_tx.clone();
                 let secondary_devices = devices;
-                let secondary_irqs = irqs;
 
                 ss.spawn(move || {
                     secondary_vcpu_thread(
@@ -1404,11 +1275,8 @@ fn vmm_thread(
                         secondary_kicker,
                         mem_ref,
                         secondary_devices,
-                        secondary_irqs,
-                        &secondary_net_out_tx,
                         secondary_boot_txs_ref,
                         secondary_online_ref,
-                        &secondary_clipboard_out_tx,
                     )
                     .unwrap();
                 });
@@ -1434,16 +1302,12 @@ fn vmm_thread(
             });
 
             run_loop(
-                vm,
                 &boot_vcpu,
                 BOOT_VCPU_ID,
                 mem_ref,
                 devices,
-                irqs,
-                &net_out_tx,
                 secondary_boot_txs_ref,
                 secondary_online_ref,
-                &clipboard_out_tx,
             )
         })?;
 

@@ -1,11 +1,7 @@
-use crate::{
-    memory::GuestMemory,
-    virtio::{
-        chain::ChainData,
-        common,
-        device::{ChainAction, ChainToken, Device, Effect, ExternalEventHandler},
-        input::keys::*,
-    },
+use crate::virtio::{
+    common,
+    device::{Device, DeviceContext, ExternalEventHandler},
+    input::keys::*,
 };
 use num_enum::TryFromPrimitive;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
@@ -25,7 +21,7 @@ enum QueueType {
 }
 
 /// https://docs.oasis-open.org/virtio/virtio/v1.3/csd01/virtio-v1.3-csd01.html#x1-2450006
-#[derive(IntoBytes, FromBytes, Immutable)]
+#[derive(IntoBytes, FromBytes, Immutable, Copy, Clone)]
 #[repr(C, packed)]
 struct Event {
     r#type: u16,
@@ -292,20 +288,14 @@ impl Device for Input {
         2
     }
 
-    fn delivery_queues(&self) -> &[u16] {
-        &[QueueType::Event as u16]
-    }
-
-    fn process_chain(
-        &mut self,
-        queue_idx: usize,
-        _chain: &ChainData,
-        _token: ChainToken,
-        _mem: &GuestMemory,
-    ) -> ChainAction {
+    fn queue_notified(&mut self, queue_idx: usize, ctx: &mut DeviceContext<'_>) {
         match QueueType::try_from(queue_idx).unwrap() {
-            QueueType::Event => ChainAction::Complete(0),
-            QueueType::Status => ChainAction::Complete(0),
+            QueueType::Event => {}
+            QueueType::Status => {
+                while let Some(chain) = ctx.pop_chain(queue_idx) {
+                    ctx.complete(chain.token, 0);
+                }
+            }
         }
     }
 
@@ -326,18 +316,17 @@ pub enum ExternalInput {
 impl ExternalEventHandler for Input {
     type Event<'a> = ExternalInput;
 
-    fn on_event(&mut self, input: ExternalInput, mut emit: impl FnMut(Effect)) {
-        let q = QueueType::Event as usize;
+    fn on_event(&mut self, input: ExternalInput, ctx: &mut DeviceContext<'_>) {
         let mut ev = |t: u16, c: u16, v: u32| {
-            emit(Effect::Deliver {
-                queue_idx: q,
-                parts: &[Event {
+            ctx.deliver(
+                QueueType::Event as usize,
+                &[Event {
                     r#type: t,
                     code: c,
                     value: v,
                 }
                 .as_bytes()],
-            });
+            )
         };
 
         match input {

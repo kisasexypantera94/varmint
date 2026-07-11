@@ -1,24 +1,28 @@
 use applevisor::prelude::*;
 
 pub struct IrqLine {
+    vm: VirtualMachineInstance<GicEnabled>,
     intid: u32,
-    last_level: bool,
+    level: bool,
 }
 
 impl IrqLine {
-    pub fn new(intid: u32, init_level: bool) -> IrqLine {
-        IrqLine {
+    pub fn new(vm: &VirtualMachineInstance<GicEnabled>, intid: u32) -> Self {
+        Self {
+            vm: vm.clone(),
             intid,
-            last_level: init_level,
+            level: false,
         }
     }
 
-    pub fn sync(&mut self, vm: &VirtualMachineInstance<GicEnabled>, level: bool) -> Result<()> {
-        if level != self.last_level {
-            self.last_level = level;
-            vm.gic_set_spi(self.intid, level)?;
+    pub fn set(&mut self, level: bool) -> bool {
+        if level == self.level {
+            return false;
         }
 
-        Ok(())
+        let rising = level;
+        self.vm.gic_set_spi(self.intid, level).unwrap();
+        self.level = level;
+        rising
     }
 }

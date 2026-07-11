@@ -1,9 +1,10 @@
 //! https://docs.oasis-open.org/virtio/virtio/v1.3/csd01/virtio-v1.3-csd01.html#x1-1820002
 
 use crate::{
+    irq::IrqLine,
     memory::GuestMemory,
     virtio::{
-        device::{self, ChainAction, ChainToken, Device, Effect, ExternalEventHandler},
+        device::{self, Device, DeviceContext, ExternalEventHandler},
         virtq::{self, Queue},
     },
 };
@@ -53,9 +54,6 @@ const VERSION: u32 = 2;
 /// "vmnt"
 const VENDOR_ID: u32 = 0x76_6d_6e_74;
 
-const INT_VRING: u32 = 1 << 0;
-const INT_CONFIG: u32 = 1 << 1;
-
 #[derive(Default, Clone)]
 struct QueuePending {
     desc_lo: u32,
@@ -81,10 +79,11 @@ pub struct Transport<D: Device> {
 
     interrupt_status: u32,
     status: u32,
+    irq: IrqLine,
 }
 
 impl<D: device::Device> Transport<D> {
-    pub fn new(device: D) -> Transport<D> {
+    pub fn new(device: D, irq: IrqLine) -> Transport<D> {
         Transport {
             queues: vec![Queue::default(); device.num_queues() as usize],
             queues_pending: vec![QueuePending::default(); device.num_queues() as usize],
@@ -95,16 +94,13 @@ impl<D: device::Device> Transport<D> {
             shm_sel: 0,
             interrupt_status: 0,
             status: 0,
+            irq,
         }
     }
 
     fn read_device_features(&self) -> u32 {
         let shift = self.device_features_sel * 32;
         (self.device.features() >> shift) as u32
-    }
-
-    pub fn is_asserted(&mut self) -> bool {
-        return self.interrupt_status != 0;
     }
 
     pub fn read(&mut self, offset: u64, size: usize) -> u64 {
@@ -157,18 +153,18 @@ impl<D: device::Device> Transport<D> {
         &mut self.queues_pending[self.queue_sel as usize]
     }
 
-    pub fn write(&mut self, offset: u64, size: usize, value: u64, mem: &GuestMemory) {
+    pub fn write(&mut self, offset: u64, size: usize, value: u64, mem: &GuestMemory) -> bool {
         assert!(matches!(size, 1 | 2 | 4 | 8));
 
         if offset >= CONFIG_BASE {
             let bytes = value.to_le_bytes();
             let cfg_offset = offset - CONFIG_BASE;
             self.device.write_config(cfg_offset, &bytes[..size]);
-            return;
+            return false;
         }
 
         let Ok(reg) = Reg::try_from(offset) else {
-            return;
+            return false;
         };
 
         assert_eq!(size, 4, "virtio-mmio register access must be 32-bit");
@@ -197,44 +193,18 @@ impl<D: device::Device> Transport<D> {
             }
             Reg::QueueNotify => {
                 let q_idx = value as usize;
-                if q_idx >= self.queues.len() {
-                    return;
-                }
-
-                if !self.device.delivery_queues().contains(&(q_idx as u16)) {
-                    let q = &mut self.queues[q_idx];
-
-                    let mut raised = false;
-                    while let Some(head_idx) = q.pop_chain(mem) {
-                        let action = match q.collect_chain(head_idx, mem) {
-                            Some(chain) => {
-                                let token = ChainToken {
-                                    queue_idx: q_idx,
-                                    head_idx,
-                                };
-                                self.device.process_chain(q_idx, &chain, token, mem)
-                            }
-                            None => ChainAction::Complete(0),
-                        };
-
-                        if let ChainAction::Complete(written) = action {
-                            q.push_used(mem, head_idx, written);
-                            raised = true;
-                        }
-                    }
-                    if raised {
-                        self.interrupt_status |= INT_VRING;
-                    }
+                if q_idx < self.queues.len() {
+                    let mut ctx = DeviceContext::new(&mut self.queues, &mut self.interrupt_status, mem);
+                    self.device.queue_notified(q_idx, &mut ctx);
                 }
             }
             Reg::InterruptAck => self.interrupt_status &= !value,
             Reg::Status => {
                 if value == 0 {
                     self.reset();
-                    return;
+                } else {
+                    self.status = value;
                 }
-
-                self.status = value;
             }
             Reg::QueueDescLow => self.current_pending_queue().desc_lo = value,
             Reg::QueueDescHigh => self.current_pending_queue().desc_hi = value,
@@ -245,10 +215,12 @@ impl<D: device::Device> Transport<D> {
             Reg::SHMSel => self.shm_sel = value,
             _ => {}
         }
+
+        self.sync_irq()
     }
 
-    pub fn pop_external(&mut self) -> Option<Vec<u8>> {
-        self.device.pop_external()
+    fn sync_irq(&mut self) -> bool {
+        self.irq.set(self.interrupt_status != 0)
     }
 
     fn reset(&mut self) {
@@ -276,25 +248,9 @@ pub fn queue_addr(lo: u32, hi: u32) -> u64 {
 }
 
 impl<D: ExternalEventHandler + Device> Transport<D> {
-    pub fn handle_external_event(&mut self, event: D::Event<'_>, mem: &GuestMemory) {
-        let queues = &mut self.queues;
-        let interrupt_status = &mut self.interrupt_status;
-
-        self.device.on_event(event, |effect| match effect {
-            Effect::Deliver { queue_idx, parts } => match queues[queue_idx].deliver(parts, mem) {
-                Some(_) => *interrupt_status |= INT_VRING,
-                None => eprintln!("virtio: queue {queue_idx} has no buffer, dropping payload"),
-            },
-            Effect::Complete { token, written } => {
-                let q = &mut queues[token.queue_idx];
-
-                // guest may have reset the device while the chain was in flight
-                if q.ready {
-                    q.push_used(mem, token.head_idx, written);
-                    *interrupt_status |= INT_VRING;
-                }
-            }
-            Effect::Config => *interrupt_status |= INT_CONFIG,
-        });
+    pub fn handle_external_event(&mut self, event: D::Event<'_>, mem: &GuestMemory) -> bool {
+        let mut ctx = DeviceContext::new(&mut self.queues, &mut self.interrupt_status, mem);
+        self.device.on_event(event, &mut ctx);
+        self.sync_irq()
     }
 }

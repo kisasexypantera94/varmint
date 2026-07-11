@@ -4,7 +4,7 @@ use crate::{
     virtio::{
         chain::ChainData,
         common,
-        device::{ChainAction, ChainToken, Device, Effect, ExternalEventHandler},
+        device::{ChainAction, ChainToken, Device, DeviceContext, ExternalEventHandler},
     },
 };
 use num_enum::TryFromPrimitive;
@@ -314,10 +314,6 @@ impl Device for Snd {
         4
     }
 
-    fn delivery_queues(&self) -> &[u16] {
-        &[QueueType::Event as u16]
-    }
-
     fn read_config(&self, offset: u64, data: &mut [u8]) {
         let cfg = Config {
             jacks: NUM_JACKS,
@@ -329,19 +325,22 @@ impl Device for Snd {
         data.copy_from_slice(&cfg.as_bytes()[offset..offset + data.len()]);
     }
 
-    fn process_chain(
-        &mut self,
-        queue_idx: usize,
-        chain: &ChainData,
-        token: ChainToken,
-        mem: &GuestMemory,
-    ) -> ChainAction {
+    fn queue_notified(&mut self, queue_idx: usize, ctx: &mut DeviceContext<'_>) {
         match QueueType::try_from(queue_idx).unwrap() {
-            QueueType::Control => self.control(chain, token, mem),
-            QueueType::Tx => self.submit_period(chain, token, mem),
-            _ => {
-                unreachable!("virtio-snd: queue {queue_idx} is not request-driven");
+            QueueType::Control | QueueType::Tx => {
+                while let Some(chain) = ctx.pop_chain(queue_idx) {
+                    let action = match QueueType::try_from(queue_idx).unwrap() {
+                        QueueType::Control => self.control(&chain.data, chain.token, ctx.mem()),
+                        QueueType::Tx => self.submit_period(&chain.data, chain.token, ctx.mem()),
+                        _ => unreachable!(),
+                    };
+
+                    if let ChainAction::Complete(written) = action {
+                        ctx.complete(chain.token, written);
+                    }
+                }
             }
+            QueueType::Event | QueueType::Rx => {}
         }
     }
 
@@ -575,7 +574,7 @@ pub enum ExternalEvent {
 impl ExternalEventHandler for Snd {
     type Event<'a> = ExternalEvent;
 
-    fn on_event(&mut self, event: ExternalEvent, mut emit: impl FnMut(Effect)) {
+    fn on_event(&mut self, event: ExternalEvent, ctx: &mut DeviceContext<'_>) {
         match event {
             ExternalEvent::PeriodElapsed(seq) => {
                 while let Some(front) = self.pending.front() {
@@ -583,17 +582,11 @@ impl ExternalEventHandler for Snd {
                         break;
                     }
                     let p = self.pending.pop_front().unwrap();
-                    emit(Effect::Complete {
-                        token: p.token,
-                        written: p.written,
-                    });
+                    ctx.complete(p.token, p.written);
                 }
                 if self.pending.is_empty() {
                     if let Some(r) = self.pending_release.take() {
-                        emit(Effect::Complete {
-                            token: r.token,
-                            written: r.written,
-                        });
+                        ctx.complete(r.token, r.written);
                     }
                 }
             }

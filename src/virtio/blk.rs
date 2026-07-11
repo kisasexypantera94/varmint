@@ -3,7 +3,7 @@ use crate::{
     virtio::{
         chain::ChainData,
         common,
-        device::{ChainAction, ChainToken, Device},
+        device::{ChainAction, Device, DeviceContext},
     },
 };
 use num_enum::TryFromPrimitive;
@@ -90,13 +90,18 @@ impl Device for Blk {
         1
     }
 
-    fn process_chain(
-        &mut self,
-        _queue_idx: usize,
-        chain: &ChainData,
-        _token: ChainToken,
-        mem: &GuestMemory,
-    ) -> ChainAction {
+    fn queue_notified(&mut self, queue_idx: usize, ctx: &mut DeviceContext<'_>) {
+        while let Some(chain) = ctx.pop_chain(queue_idx) {
+            match self.process_chain(&chain.data, ctx.mem()) {
+                ChainAction::Complete(written) => ctx.complete(chain.token, written),
+                ChainAction::Deferred => {}
+            }
+        }
+    }
+}
+
+impl Blk {
+    fn process_chain(&mut self, chain: &ChainData, mem: &GuestMemory) -> ChainAction {
         const HEADER_LEN: usize = size_of::<RequestHeader>();
 
         let Some((status_seg, data_writable)) = chain.writable.split_last() else {

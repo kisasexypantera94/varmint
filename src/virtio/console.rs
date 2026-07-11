@@ -3,10 +3,10 @@ use crate::{
     virtio::{
         chain::ChainData,
         common,
-        device::{ChainAction, ChainToken, Device, Effect, ExternalEventHandler},
+        device::{Device, DeviceContext, ExternalEventHandler},
     },
 };
-use std::collections::VecDeque;
+use std::{collections::VecDeque, sync::mpsc::Sender};
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes};
 
 const DEVICE_ID: u32 = 3;
@@ -66,17 +66,17 @@ const RX_CHUNK: usize = 4096;
 
 pub struct Console {
     config: ConsoleConfig,
-    tx_to_host: VecDeque<Vec<u8>>,
+    clipboard_tx: Sender<Vec<u8>>,
     rx_to_guest: VecDeque<Vec<u8>>,
     ctrl_to_guest: VecDeque<Vec<u8>>,
     port_open: bool,
 }
 
 impl Console {
-    pub fn new() -> Console {
+    pub fn new(clipboard_tx: Sender<Vec<u8>>) -> Console {
         Console {
             config: ConsoleConfig::new(),
-            tx_to_host: VecDeque::new(),
+            clipboard_tx,
             rx_to_guest: VecDeque::new(),
             ctrl_to_guest: VecDeque::new(),
             port_open: false,
@@ -123,7 +123,7 @@ impl Console {
         }
     }
 
-    fn handle_clip_tx(&mut self, chain: &ChainData, mem: &GuestMemory) -> u32 {
+    fn handle_clip_tx(&self, chain: &ChainData, mem: &GuestMemory) -> u32 {
         let total = chain.readable_len();
         if total == 0 {
             return 0;
@@ -133,7 +133,7 @@ impl Console {
             eprintln!("console clip TX: failed to read {total} bytes from guest memory");
             return 0;
         }
-        self.tx_to_host.push_front(buf);
+        let _ = self.clipboard_tx.send(buf);
         0
     }
 
@@ -143,6 +143,30 @@ impl Console {
         framed.extend_from_slice(payload);
         for chunk in framed.chunks(RX_CHUNK) {
             self.rx_to_guest.push_back(chunk.to_vec());
+        }
+    }
+
+    fn pump_control_rx(&mut self, ctx: &mut DeviceContext<'_>) {
+        while let Some(msg) = self.ctrl_to_guest.front() {
+            if !ctx.deliver(Q_CONTROL_RX, &[msg]) {
+                break;
+            }
+            self.ctrl_to_guest.pop_front();
+        }
+    }
+
+    fn pump_clip_rx(&mut self, ctx: &mut DeviceContext<'_>) {
+        while let Some(chunk) = self.rx_to_guest.front() {
+            if !ctx.deliver(Q_CLIP_RX, &[chunk]) {
+                break;
+            }
+            self.rx_to_guest.pop_front();
+        }
+    }
+
+    fn drain_and_complete(&mut self, queue_idx: usize, ctx: &mut DeviceContext<'_>) {
+        while let Some(chain) = ctx.pop_chain(queue_idx) {
+            ctx.complete(chain.token, 0);
         }
     }
 }
@@ -170,34 +194,30 @@ impl Device for Console {
         }
     }
 
-    fn delivery_queues(&self) -> &[u16] {
-        &[Q_PORT0_RX as u16, Q_CONTROL_RX as u16, Q_CLIP_RX as u16]
-    }
-
-    fn process_chain(
-        &mut self,
-        queue_idx: usize,
-        chain: &ChainData,
-        _token: ChainToken,
-        mem: &GuestMemory,
-    ) -> ChainAction {
+    fn queue_notified(&mut self, queue_idx: usize, ctx: &mut DeviceContext<'_>) {
         match queue_idx {
+            Q_PORT0_RX => {}
+            Q_PORT0_TX => self.drain_and_complete(queue_idx, ctx),
+            Q_CONTROL_RX => self.pump_control_rx(ctx),
             Q_CONTROL_TX => {
-                self.handle_control_tx(chain, mem);
-                ChainAction::Complete(0)
+                while let Some(chain) = ctx.pop_chain(queue_idx) {
+                    self.handle_control_tx(&chain.data, ctx.mem());
+                    ctx.complete(chain.token, 0);
+                }
+                self.pump_control_rx(ctx);
             }
-            Q_CLIP_TX => ChainAction::Complete(self.handle_clip_tx(chain, mem)),
-            Q_PORT0_TX => ChainAction::Complete(0),
-            _ => ChainAction::Complete(0),
+            Q_CLIP_RX => self.pump_clip_rx(ctx),
+            Q_CLIP_TX => {
+                while let Some(chain) = ctx.pop_chain(queue_idx) {
+                    let written = self.handle_clip_tx(&chain.data, ctx.mem());
+                    ctx.complete(chain.token, written);
+                }
+            }
+            _ => {}
         }
     }
 
-    fn pop_external(&mut self) -> Option<Vec<u8>> {
-        self.tx_to_host.pop_back()
-    }
-
     fn reset(&mut self) {
-        self.tx_to_host.clear();
         self.rx_to_guest.clear();
         self.ctrl_to_guest.clear();
         self.port_open = false;
@@ -206,33 +226,20 @@ impl Device for Console {
 
 pub enum ExternalEvent<'a> {
     HostClipboard(&'a [u8]),
-    RxAvailable,
 }
 
 impl ExternalEventHandler for Console {
     type Event<'a> = ExternalEvent<'a>;
 
-    fn on_event(&mut self, event: ExternalEvent<'_>, mut emit: impl FnMut(Effect)) {
-        if let ExternalEvent::HostClipboard(payload) = event {
-            if self.port_open {
-                self.enqueue_rx(payload);
+    fn on_event(&mut self, event: ExternalEvent<'_>, ctx: &mut DeviceContext<'_>) {
+        match event {
+            ExternalEvent::HostClipboard(payload) => {
+                if self.port_open {
+                    self.enqueue_rx(payload);
+                }
             }
         }
 
-        while let Some(msg) = self.ctrl_to_guest.front() {
-            emit(Effect::Deliver {
-                queue_idx: Q_CONTROL_RX,
-                parts: &[msg],
-            });
-            self.ctrl_to_guest.pop_front();
-        }
-
-        while let Some(chunk) = self.rx_to_guest.front() {
-            emit(Effect::Deliver {
-                queue_idx: Q_CLIP_RX,
-                parts: &[chunk],
-            });
-            self.rx_to_guest.pop_front();
-        }
+        self.pump_clip_rx(ctx);
     }
 }

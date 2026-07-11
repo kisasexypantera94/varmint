@@ -197,12 +197,4 @@ impl Queue {
         self.last_avail_idx = 0;
         self.last_used_idx = 0;
     }
-
-    pub fn deliver(&mut self, parts: &[&[u8]], mem: &GuestMemory) -> Option<u32> {
-        let head_idx = self.pop_chain(mem)?;
-        let chain = self.collect_chain(head_idx, mem)?;
-        let written = chain.write_parts(parts, mem);
-        self.push_used(mem, head_idx, written);
-        Some(written)
-    }
 }
