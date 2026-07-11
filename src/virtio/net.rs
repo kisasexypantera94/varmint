@@ -3,7 +3,6 @@ use crate::virtio::{
     device::{Device, DeviceContext, ExternalEventHandler},
 };
 use num_enum::TryFromPrimitive;
-use std::sync::mpsc::Sender;
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes};
 
 mod feature {
@@ -33,12 +32,12 @@ struct NetHeader {
 
 pub struct Net {
     mac: [u8; 6],
-    tx: Sender<Vec<u8>>,
+    tx: Box<dyn Fn(Vec<u8>) + Send>,
 }
 
 impl Net {
-    pub fn new(mac: [u8; 6], tx: Sender<Vec<u8>>) -> Net {
-        Net { mac, tx }
+    pub fn new(mac: [u8; 6], tx: impl Fn(Vec<u8>) + Send + 'static) -> Net {
+        Net { mac, tx: Box::new(tx) }
     }
 
     fn handle_tx(&self, chain: &crate::virtio::chain::ChainData, mem: &crate::memory::GuestMemory) -> u32 {
@@ -56,7 +55,7 @@ impl Net {
             return 0;
         }
 
-        let _ = self.tx.send(eth);
+        (self.tx)(eth);
         0
     }
 

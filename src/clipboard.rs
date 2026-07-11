@@ -3,7 +3,7 @@ use objc2_foundation::NSString;
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
-    sync::mpsc::{Receiver, Sender, TryRecvError},
+    sync::mpsc::{Receiver, TryRecvError},
     time::Duration,
 };
 
@@ -83,7 +83,7 @@ const FRAME_LEN_PREFIX: usize = 4;
 
 const MAX_FRAME: usize = 16 * 1024 * 1024;
 
-pub fn run(in_tx: Sender<Vec<u8>>, out_rx: Receiver<Vec<u8>>, wake: impl Fn()) {
+pub fn run(out_rx: Receiver<Vec<u8>>, mut on_input: impl FnMut(Vec<u8>)) {
     let pb = Pasteboard::general();
 
     let mut last_change = pb.change_count();
@@ -117,10 +117,7 @@ pub fn run(in_tx: Sender<Vec<u8>>, out_rx: Receiver<Vec<u8>>, wake: impl Fn()) {
                 let h = hash_bytes(&bytes);
                 if Some(h) != last_hash {
                     last_hash = Some(h);
-                    if in_tx.send(bytes).is_err() {
-                        return;
-                    }
-                    wake();
+                    on_input(bytes);
                 }
             }
         }

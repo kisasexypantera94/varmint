@@ -1,4 +1,3 @@
-use crate::kick;
 use coreaudio::audio_unit::{
     AudioUnit, Element, IOType, SampleFormat, Scope, StreamFormat,
     audio_format::LinearPcmFlags,
@@ -8,7 +7,6 @@ use coreaudio::audio_unit::{
     },
 };
 use rtrb::{Consumer, Producer, RingBuffer};
-use std::sync::mpsc::{self, Receiver, Sender};
 use zerocopy::IntoBytes;
 
 const MAX_PERIOD_BYTES: usize = 16 * 1024;
@@ -32,17 +30,18 @@ pub struct PeriodSink {
     producer: Producer<Period>,
 }
 
-struct CallbackState {
+struct CallbackState<F> {
     consumer: Consumer<Period>,
-    tx: Sender<BackendEvent>,
-    kicker: kick::Kicker,
+    on_event: F,
     current: Option<(Period, usize)>,
 }
 
 impl Backend {
-    pub fn new(kicker: kick::Kicker) -> Result<(Backend, PeriodSink, Receiver<BackendEvent>), coreaudio::Error> {
+    pub fn new<F>(on_event: F) -> Result<(Backend, PeriodSink), coreaudio::Error>
+    where
+        F: Fn(BackendEvent) + Send + 'static,
+    {
         let (producer, consumer) = RingBuffer::new(RING_CAPACITY);
-        let (tx, rx) = mpsc::channel();
 
         let mut unit = AudioUnit::new(IOType::DefaultOutput)?;
 
@@ -57,8 +56,7 @@ impl Backend {
 
         let mut state = CallbackState {
             consumer,
-            tx,
-            kicker,
+            on_event,
             current: None,
         };
 
@@ -69,11 +67,11 @@ impl Backend {
 
         unit.start()?;
 
-        Ok((Backend { _unit: unit }, PeriodSink { producer }, rx))
+        Ok((Backend { _unit: unit }, PeriodSink { producer }))
     }
 }
 
-impl CallbackState {
+impl<F: Fn(BackendEvent)> CallbackState<F> {
     fn render(&mut self, args: Args<Interleaved<i16>>) {
         let out = args.data.buffer.as_mut_bytes();
 
@@ -95,8 +93,7 @@ impl CallbackState {
 
             if *off == period.len {
                 let (done, _) = self.current.take().unwrap();
-                let _ = self.tx.send(BackendEvent::PeriodElapsed(done.seq));
-                self.kicker.kick();
+                (self.on_event)(BackendEvent::PeriodElapsed(done.seq));
             }
         }
 

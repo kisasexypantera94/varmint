@@ -380,8 +380,13 @@ enum HostInputEvent {
     },
 }
 
-enum HostDisplayEvent {
-    Resize { width: u32, height: u32 },
+enum HostEvent {
+    NetReady,
+    NetTx(Vec<u8>),
+    Input(HostInputEvent),
+    DisplayResized { width: u32, height: u32 },
+    Audio(audio::coreaudio::BackendEvent),
+    Clipboard(Vec<u8>),
 }
 
 #[derive(Clone, Copy)]
@@ -401,11 +406,7 @@ struct HostEventPump<'a> {
     mem: &'a memory::GuestMemory,
     devices: VmDevices<'a>,
     iface: &'a Mutex<net::vmnet::Backend>,
-    net_out_rx: Receiver<Vec<u8>>,
-    clipboard_in_rx: Receiver<Vec<u8>>,
-    input_rx: Receiver<HostInputEvent>,
-    display_rx: Receiver<HostDisplayEvent>,
-    audio_rx: Receiver<audio::coreaudio::BackendEvent>,
+    rx: Receiver<HostEvent>,
     kicker: kick::Kicker,
     net_buf: Vec<u8>,
 }
@@ -415,11 +416,7 @@ impl<'a> HostEventPump<'a> {
         mem: &'a memory::GuestMemory,
         devices: VmDevices<'a>,
         iface: &'a Mutex<net::vmnet::Backend>,
-        net_out_rx: Receiver<Vec<u8>>,
-        clipboard_in_rx: Receiver<Vec<u8>>,
-        input_rx: Receiver<HostInputEvent>,
-        display_rx: Receiver<HostDisplayEvent>,
-        audio_rx: Receiver<audio::coreaudio::BackendEvent>,
+        rx: Receiver<HostEvent>,
         kicker: kick::Kicker,
     ) -> Self {
         let net_buf = vec![0; iface.lock().unwrap().max_packet_size() as usize];
@@ -428,42 +425,65 @@ impl<'a> HostEventPump<'a> {
             mem,
             devices,
             iface,
-            net_out_rx,
-            clipboard_in_rx,
-            input_rx,
-            display_rx,
-            audio_rx,
+            rx,
             kicker,
             net_buf,
         }
     }
 
     fn run(&mut self) {
-        loop {
-            if self.drain_once() {
-                self.kicker.kick();
+        while let Ok(event) = self.rx.recv() {
+            let mut wake = false;
+            let mut pointer_move = None;
+
+            wake |= self.handle_event(event, &mut pointer_move);
+
+            while let Ok(event) = self.rx.try_recv() {
+                wake |= self.handle_event(event, &mut pointer_move);
             }
 
-            std::thread::sleep(std::time::Duration::from_micros(250));
+            wake |= self.flush_pointer_move(pointer_move);
+
+            if wake {
+                self.kicker.kick();
+            }
         }
     }
 
-    fn drain_once(&mut self) -> bool {
-        let mut touched = false;
-        touched |= self.drain_net();
-        touched |= self.drain_input();
-        touched |= self.drain_display();
-        touched |= self.drain_audio();
-        touched |= self.drain_clipboard();
-        touched
+    fn handle_event(&mut self, event: HostEvent, pointer_move: &mut Option<(u32, u32, u32, u32)>) -> bool {
+        match event {
+            HostEvent::NetReady => self.handle_net_ready(),
+            HostEvent::NetTx(frame) => {
+                self.iface.lock().unwrap().write(&frame).unwrap();
+                false
+            }
+            HostEvent::Input(event) => self.handle_input(event, pointer_move),
+            HostEvent::DisplayResized { width, height } => {
+                send_gpu_event(
+                    self.devices.gpu_tx,
+                    virtio::gpu::ExternalEvent::DisplayResized { width, height },
+                );
+                false
+            }
+            HostEvent::Audio(event) => match event {
+                audio::coreaudio::BackendEvent::PeriodElapsed(seq) => self
+                    .devices
+                    .snd
+                    .lock()
+                    .unwrap()
+                    .handle_external_event(virtio::snd::ExternalEvent::PeriodElapsed(seq), self.mem),
+            },
+            HostEvent::Clipboard(payload) => self
+                .devices
+                .console
+                .lock()
+                .unwrap()
+                .handle_external_event(virtio::console::ExternalEvent::HostClipboard(&payload), self.mem),
+        }
     }
 
-    fn drain_net(&mut self) -> bool {
-        let mut touched = false;
-
-        while let Ok(frame) = self.net_out_rx.try_recv() {
-            self.iface.lock().unwrap().write(&frame).unwrap();
-        }
+    fn handle_net_ready(&mut self) -> bool {
+        let mut wake = false;
 
         loop {
             let n_read = self.iface.lock().unwrap().read(&mut self.net_buf).unwrap();
@@ -471,164 +491,96 @@ impl<'a> HostEventPump<'a> {
                 break;
             }
 
-            touched = true;
-            self.devices
+            wake |= self
+                .devices
                 .net
                 .lock()
                 .unwrap()
                 .handle_external_event(&self.net_buf[..n_read], self.mem);
         }
 
-        touched
+        wake
     }
 
-    fn drain_input(&mut self) -> bool {
-        let mut touched = false;
-        let mut last_pointer_move: Option<(u32, u32, u32, u32)> = None;
+    fn handle_input(&mut self, event: HostInputEvent, pointer_move: &mut Option<(u32, u32, u32, u32)>) -> bool {
+        use virtio::input::ExternalInput;
 
-        while let Ok(event) = self.input_rx.try_recv() {
-            touched = true;
-
-            use virtio::input::ExternalInput;
-
-            match event {
-                HostInputEvent::Key { code, pressed } => {
-                    self.devices
-                        .keyboard
-                        .lock()
-                        .unwrap()
-                        .handle_external_event(ExternalInput::Key { code, pressed }, self.mem);
-                }
-                HostInputEvent::PointerMove { x, y, width, height } => {
-                    last_pointer_move = Some((x, y, width, height));
-                }
-                HostInputEvent::PointerButton {
-                    button,
-                    pressed,
-                    relative,
-                } => {
-                    if relative {
-                        self.devices
-                            .mouse
-                            .lock()
-                            .unwrap()
-                            .handle_external_event(ExternalInput::PointerButton { button, pressed }, self.mem);
-                    } else {
-                        if let Some((x, y, width, height)) = last_pointer_move.take() {
-                            self.devices
-                                .tablet
-                                .lock()
-                                .unwrap()
-                                .handle_external_event(ExternalInput::AbsPosition { x, y, width, height }, self.mem);
-                        }
-
-                        self.devices
-                            .tablet
-                            .lock()
-                            .unwrap()
-                            .handle_external_event(ExternalInput::PointerButton { button, pressed }, self.mem);
-                    }
-                }
-                HostInputEvent::Scroll {
-                    horizontal,
-                    value,
-                    relative,
-                } => {
-                    if relative {
-                        self.devices
-                            .mouse
-                            .lock()
-                            .unwrap()
-                            .handle_external_event(ExternalInput::Scroll { horizontal, value }, self.mem);
-                    } else {
-                        self.devices
-                            .tablet
-                            .lock()
-                            .unwrap()
-                            .handle_external_event(ExternalInput::Scroll { horizontal, value }, self.mem);
-                    }
-                }
-                HostInputEvent::RelativeMouseMotion { dx, dy } => {
+        match event {
+            HostInputEvent::Key { code, pressed } => self
+                .devices
+                .keyboard
+                .lock()
+                .unwrap()
+                .handle_external_event(ExternalInput::Key { code, pressed }, self.mem),
+            HostInputEvent::PointerMove { x, y, width, height } => {
+                *pointer_move = Some((x, y, width, height));
+                false
+            }
+            HostInputEvent::PointerButton {
+                button,
+                pressed,
+                relative,
+            } => {
+                if relative {
                     self.devices
                         .mouse
                         .lock()
                         .unwrap()
-                        .handle_external_event(ExternalInput::RelMotion { dx, dy }, self.mem);
-                }
-            }
-        }
-
-        if let Some((x, y, width, height)) = last_pointer_move {
-            self.devices.tablet.lock().unwrap().handle_external_event(
-                virtio::input::ExternalInput::AbsPosition { x, y, width, height },
-                self.mem,
-            );
-        }
-
-        touched
-    }
-
-    fn drain_display(&mut self) -> bool {
-        let mut touched = false;
-
-        while let Ok(event) = self.display_rx.try_recv() {
-            touched = true;
-
-            match event {
-                HostDisplayEvent::Resize { width, height } => {
-                    send_gpu_event(
-                        self.devices.gpu_tx,
-                        virtio::gpu::ExternalEvent::DisplayResized { width, height },
-                    );
-                }
-            }
-        }
-
-        touched
-    }
-
-    fn drain_audio(&mut self) -> bool {
-        let mut touched = false;
-
-        while let Ok(event) = self.audio_rx.try_recv() {
-            touched = true;
-
-            match event {
-                audio::coreaudio::BackendEvent::PeriodElapsed(seq) => {
-                    self.devices
-                        .snd
+                        .handle_external_event(ExternalInput::PointerButton { button, pressed }, self.mem)
+                } else {
+                    let mut wake = self.flush_pointer_move(pointer_move.take());
+                    wake |= self
+                        .devices
+                        .tablet
                         .lock()
                         .unwrap()
-                        .handle_external_event(virtio::snd::ExternalEvent::PeriodElapsed(seq), self.mem);
+                        .handle_external_event(ExternalInput::PointerButton { button, pressed }, self.mem);
+                    wake
                 }
             }
-        }
-
-        touched
-    }
-
-    fn drain_clipboard(&mut self) -> bool {
-        let mut touched = false;
-
-        while let Ok(payload) = self.clipboard_in_rx.try_recv() {
-            touched = true;
-
-            self.devices
-                .console
+            HostInputEvent::Scroll {
+                horizontal,
+                value,
+                relative,
+            } => {
+                if relative {
+                    self.devices
+                        .mouse
+                        .lock()
+                        .unwrap()
+                        .handle_external_event(ExternalInput::Scroll { horizontal, value }, self.mem)
+                } else {
+                    self.devices
+                        .tablet
+                        .lock()
+                        .unwrap()
+                        .handle_external_event(ExternalInput::Scroll { horizontal, value }, self.mem)
+                }
+            }
+            HostInputEvent::RelativeMouseMotion { dx, dy } => self
+                .devices
+                .mouse
                 .lock()
                 .unwrap()
-                .handle_external_event(virtio::console::ExternalEvent::HostClipboard(&payload), self.mem);
+                .handle_external_event(ExternalInput::RelMotion { dx, dy }, self.mem),
         }
+    }
 
-        touched
+    fn flush_pointer_move(&mut self, pointer_move: Option<(u32, u32, u32, u32)>) -> bool {
+        let Some((x, y, width, height)) = pointer_move else {
+            return false;
+        };
+
+        self.devices.tablet.lock().unwrap().handle_external_event(
+            virtio::input::ExternalInput::AbsPosition { x, y, width, height },
+            self.mem,
+        )
     }
 }
 
 struct AppState<'a> {
-    kicker: kick::Kicker,
     display: &'a Mutex<virtio::gpu::DisplayBuffer>,
-    input_tx: Sender<HostInputEvent>,
-    display_tx: Sender<HostDisplayEvent>,
+    host_tx: Sender<HostEvent>,
 
     presenter: Option<present::Presenter>,
 
@@ -655,10 +607,6 @@ struct AppState<'a> {
 }
 
 impl<'a> AppState<'a> {
-    fn kick_vm(&self) {
-        self.kicker.kick();
-    }
-
     fn blit(&mut self) -> bool {
         if let Some(p) = self.presenter.as_mut() {
             if self.present_w > 0 && self.present_h > 0 {
@@ -826,8 +774,7 @@ impl<'a> ApplicationHandler for AppState<'a> {
         self.surface_h = height;
         self.presenter = Some(present::Presenter::new(window, width, height));
 
-        let _ = self.display_tx.send(HostDisplayEvent::Resize { width, height });
-        self.kick_vm();
+        let _ = self.host_tx.send(HostEvent::DisplayResized { width, height });
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {
@@ -845,8 +792,7 @@ impl<'a> ApplicationHandler for AppState<'a> {
                     p.resize_surface(width, height);
                 }
 
-                let _ = self.display_tx.send(HostDisplayEvent::Resize { width, height });
-                self.kick_vm();
+                let _ = self.host_tx.send(HostEvent::DisplayResized { width, height });
 
                 self.blit();
             }
@@ -872,11 +818,10 @@ impl<'a> ApplicationHandler for AppState<'a> {
                         self.set_mouse_capture(false);
                     }
                     if let Some(linux_code) = helpers::winit_to_linux_key(code) {
-                        let _ = self.input_tx.send(HostInputEvent::Key {
+                        let _ = self.host_tx.send(HostEvent::Input(HostInputEvent::Key {
                             code: linux_code,
                             pressed,
-                        });
-                        self.kick_vm();
+                        }));
                     }
                 }
             }
@@ -887,13 +832,12 @@ impl<'a> ApplicationHandler for AppState<'a> {
                     let pos = Some((x, y));
                     if pos != self.last_mouse_pos {
                         self.last_mouse_pos = pos;
-                        let _ = self.input_tx.send(HostInputEvent::PointerMove {
+                        let _ = self.host_tx.send(HostEvent::Input(HostInputEvent::PointerMove {
                             x: x as u32,
                             y: y as u32,
                             width: self.surface_w,
                             height: self.surface_h,
-                        });
-                        self.kick_vm();
+                        }));
                     }
                 }
             }
@@ -906,12 +850,11 @@ impl<'a> ApplicationHandler for AppState<'a> {
                     _ => return,
                 };
 
-                let _ = self.input_tx.send(HostInputEvent::PointerButton {
+                let _ = self.host_tx.send(HostEvent::Input(HostInputEvent::PointerButton {
                     button: btn,
                     pressed: state == ElementState::Pressed,
                     relative: self.mouse_captured,
-                });
-                self.kick_vm();
+                }));
             }
 
             WindowEvent::MouseWheel { delta, .. } => {
@@ -921,20 +864,19 @@ impl<'a> ApplicationHandler for AppState<'a> {
                     MouseScrollDelta::PixelDelta(p) => (p.x as f32 / 32.0, p.y as f32 / 32.0),
                 };
                 if dy != 0.0 {
-                    let _ = self.input_tx.send(HostInputEvent::Scroll {
+                    let _ = self.host_tx.send(HostEvent::Input(HostInputEvent::Scroll {
                         horizontal: false,
                         value: dy.round() as i32,
                         relative: self.mouse_captured,
-                    });
+                    }));
                 }
                 if dx != 0.0 {
-                    let _ = self.input_tx.send(HostInputEvent::Scroll {
+                    let _ = self.host_tx.send(HostEvent::Input(HostInputEvent::Scroll {
                         horizontal: true,
                         value: dx.round() as i32,
                         relative: self.mouse_captured,
-                    });
+                    }));
                 }
-                self.kick_vm();
             }
 
             _ => {}
@@ -950,8 +892,9 @@ impl<'a> ApplicationHandler for AppState<'a> {
             let dx = Self::take_relative_mouse_delta(&mut self.rel_mouse_frac_dx, dx);
             let dy = Self::take_relative_mouse_delta(&mut self.rel_mouse_frac_dy, dy);
             if dx != 0 || dy != 0 {
-                let _ = self.input_tx.send(HostInputEvent::RelativeMouseMotion { dx, dy });
-                self.kick_vm();
+                let _ = self
+                    .host_tx
+                    .send(HostEvent::Input(HostInputEvent::RelativeMouseMotion { dx, dy }));
             }
         }
     }
@@ -1124,10 +1067,9 @@ fn secondary_vcpu_thread(
 
 fn vmm_thread(
     vm: &VirtualMachineInstance<GicEnabled>,
-    kicker_tx: Sender<kick::Kicker>,
     display: &Mutex<virtio::gpu::DisplayBuffer>,
-    input_rx: Receiver<HostInputEvent>,
-    display_rx: Receiver<HostDisplayEvent>,
+    host_tx: Sender<HostEvent>,
+    host_rx: Receiver<HostEvent>,
 ) -> Result<()> {
     let image = read_file("/Users/dvgr/varmint-kernels/debian-4k/vmlinuz-6.12.90+deb13.1-arm64").unwrap();
     let initrd = read_file("/Users/dvgr/varmint-kernels/debian-4k/initrd.img-6.12.90+deb13.1-arm64").unwrap();
@@ -1155,9 +1097,7 @@ fn vmm_thread(
 
     let uart = Mutex::new(uart::Uart::new(irq::IrqLine::new(vm, spi_int_start + UART_SPI_OFFSET)));
 
-    let (clipboard_in_tx, clipboard_in_rx) = std::sync::mpsc::channel::<Vec<u8>>();
     let (clipboard_out_tx, clipboard_out_rx) = std::sync::mpsc::channel::<Vec<u8>>();
-    let (net_out_tx, net_out_rx) = std::sync::mpsc::channel::<Vec<u8>>();
 
     let virtio_blk_dev = virtio::Blk::new("dev0.img", 40 * 1024 * 1024 * 1024);
     let virtio_blk = Mutex::new(virtio::MmioTransport::new(
@@ -1166,7 +1106,10 @@ fn vmm_thread(
     ));
 
     let iface = Mutex::new(net::vmnet::Backend::new().unwrap());
-    let virtio_net_dev = virtio::Net::new(iface.lock().unwrap().mac(), net_out_tx);
+    let net_tx = host_tx.clone();
+    let virtio_net_dev = virtio::Net::new(iface.lock().unwrap().mac(), move |frame| {
+        let _ = net_tx.send(HostEvent::NetTx(frame));
+    });
     let virtio_net = Mutex::new(virtio::MmioTransport::new(
         virtio_net_dev,
         irq::IrqLine::new(vm, spi_int_start + VIRTNET_SPI_OFFSET),
@@ -1207,8 +1150,6 @@ fn vmm_thread(
 
     thread::scope(|s| -> Result<()> {
         let kicker = kick::Kicker::spawn(s, vm, vec![boot_vcpu.get_handle()]);
-        kicker_tx.send(kicker.clone()).unwrap();
-
         let stdin_kicker = kicker.clone();
         s.spawn(|| stdin_thread(stdin_kicker, &uart));
 
@@ -1221,7 +1162,11 @@ fn vmm_thread(
             gpu_owner_thread(gpu_mem, gpu_display, gpu_rx, virtio_gpu_irq, gpu_owner_tx, gpu_kicker);
         });
 
-        let (_audio_backend, period_sink, audio_rx) = audio::coreaudio::Backend::new(kicker.clone()).unwrap();
+        let audio_tx = host_tx.clone();
+        let (_audio_backend, period_sink) = audio::coreaudio::Backend::new(move |event| {
+            let _ = audio_tx.send(HostEvent::Audio(event));
+        })
+        .unwrap();
         let virtio_snd_dev = virtio::Snd::new(period_sink);
         let virtio_snd = Mutex::new(virtio::MmioTransport::new(
             virtio_snd_dev,
@@ -1234,16 +1179,20 @@ fn vmm_thread(
             irq::IrqLine::new(vm, spi_int_start + VIRTCONSOLE_SPI_OFFSET),
         ));
 
-        let clipboard_kicker = kicker.clone();
+        let clipboard_tx = host_tx.clone();
         s.spawn(move || {
-            clipboard::run(clipboard_in_tx, clipboard_out_rx, move || clipboard_kicker.kick());
+            clipboard::run(clipboard_out_rx, move |payload| {
+                let _ = clipboard_tx.send(HostEvent::Clipboard(payload));
+            });
         });
 
-        let iface_kicker = kicker.clone();
+        let net_ready_tx = host_tx.clone();
         iface
             .lock()
             .unwrap()
-            .set_event_callback(move || iface_kicker.kick())
+            .set_event_callback(move || {
+                let _ = net_ready_tx.send(HostEvent::NetReady);
+            })
             .unwrap();
 
         thread::scope(|ss| -> Result<()> {
@@ -1286,17 +1235,7 @@ fn vmm_thread(
             let host_kicker = kicker.clone();
 
             ss.spawn(move || {
-                let mut host_events = HostEventPump::new(
-                    mem_ref,
-                    host_devices,
-                    &iface,
-                    net_out_rx,
-                    clipboard_in_rx,
-                    input_rx,
-                    display_rx,
-                    audio_rx,
-                    host_kicker,
-                );
+                let mut host_events = HostEventPump::new(mem_ref, host_devices, &iface, host_rx, host_kicker);
 
                 host_events.run();
             });
@@ -1332,9 +1271,7 @@ fn main() -> Result<()> {
 
     let display = Mutex::new(virtio::gpu::DisplayBuffer::new());
 
-    let (kicker_tx, kicker_rx) = std::sync::mpsc::channel();
-    let (input_tx, input_rx) = std::sync::mpsc::channel();
-    let (display_tx, display_rx) = std::sync::mpsc::channel();
+    let (host_tx, host_rx) = std::sync::mpsc::channel();
 
     // winit event loop must be created and run on the main thread
     let event_loop = EventLoop::new().unwrap();
@@ -1343,15 +1280,14 @@ fn main() -> Result<()> {
     ));
 
     thread::scope(|s| {
-        s.spawn(|| vmm_thread(&vm, kicker_tx, &display, input_rx, display_rx));
-
-        let kicker = kicker_rx.recv().unwrap();
+        let vmm_host_tx = host_tx.clone();
+        let vm_ref = &vm;
+        let display_ref = &display;
+        s.spawn(move || vmm_thread(vm_ref, display_ref, vmm_host_tx, host_rx));
 
         let mut app = AppState {
-            kicker,
             display: &display,
-            input_tx,
-            display_tx,
+            host_tx,
             presenter: None,
             surface_w: 0,
             surface_h: 0,
