@@ -1379,39 +1379,39 @@ impl<'a> Gpu<'a> {
         resource_id: u32,
         native_source: virgl_ffi::NativeSourceInfo,
     ) -> Option<u32> {
-        let width = native_source.width;
-        let height = native_source.height;
+        let (source_rect, surface_ptr, surface_id) = {
+            let scanout = self.scanout.as_mut()?;
+            if scanout.resource_id != resource_id {
+                return None;
+            }
 
-        let Some(scanout) = self.scanout.as_mut() else {
-            return None;
-        };
+            let source_rect = match &scanout.source {
+                ScanoutSource::Resource { rect } => (rect.x, rect.y, rect.width, rect.height),
+                ScanoutSource::Blob { width, height, .. } => (0, 0, *width, *height),
+            };
 
-        if scanout.resource_id != resource_id {
-            return None;
-        }
+            let recreate = scanout
+                .iosurface
+                .as_ref()
+                .is_none_or(|surface| surface.width() != source_rect.2 || surface.height() != source_rect.3);
 
-        let recreate = match scanout.iosurface.as_ref() {
-            Some(surface) => surface.width() != width || surface.height() != height,
-            None => true,
-        };
+            if recreate {
+                scanout.iosurface = ScopedIOSurface::new_bgra(source_rect.2, source_rect.3);
+            }
 
-        if recreate {
-            scanout.iosurface = ScopedIOSurface::new_bgra(width, height);
-        }
-
-        let Some(surface) = scanout.iosurface.as_ref() else {
-            return None;
+            let surface = scanout.iosurface.as_ref()?;
+            (source_rect, surface.as_ptr(), surface.id())
         };
 
         let ok = self.angle_copy.copy_metal_texture_to_iosurface(
             native_source.handle as *mut c_void,
-            surface.as_ptr(),
-            width,
-            height,
+            surface_ptr,
+            (native_source.width, native_source.height),
+            source_rect,
         );
 
         if ok {
-            Some(surface.id())
+            Some(surface_id)
         } else {
             eprintln!("virtio-gpu: ANGLE producer copy failed; falling back to readback");
             None
