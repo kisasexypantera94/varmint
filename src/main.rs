@@ -486,11 +486,15 @@ impl<'a> ApplicationHandler for AppState<'a> {
 
         let window = event_loop.create_window(attrs).unwrap();
         let PhysicalSize { width, height } = window.inner_size();
+        let logical_size = PhysicalSize::new(width, height).to_logical::<u32>(window.scale_factor());
         self.surface_w = width;
         self.surface_h = height;
         self.presenter = Some(present::Presenter::new(window, width, height));
 
-        let _ = self.host_tx.send(HostEvent::DisplayResized { width, height });
+        let _ = self.host_tx.send(HostEvent::DisplayResized {
+            width: logical_size.width,
+            height: logical_size.height,
+        });
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {
@@ -504,11 +508,21 @@ impl<'a> ApplicationHandler for AppState<'a> {
                 self.surface_h = height;
                 self.last_mouse_pos = None;
 
+                let scale_factor = self
+                    .presenter
+                    .as_ref()
+                    .map(|presenter| presenter.window().scale_factor())
+                    .unwrap_or(1.0);
+
                 if let Some(p) = self.presenter.as_mut() {
                     p.resize_surface(width, height);
                 }
 
-                let _ = self.host_tx.send(HostEvent::DisplayResized { width, height });
+                let logical_size = PhysicalSize::new(width, height).to_logical::<u32>(scale_factor);
+                let _ = self.host_tx.send(HostEvent::DisplayResized {
+                    width: logical_size.width,
+                    height: logical_size.height,
+                });
 
                 self.blit();
             }
