@@ -92,90 +92,90 @@ pub enum MmioDevice {
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum DevicePlacement {
+pub enum DeviceOwner {
     Inline,
-    ThreadOwned { owner: &'static str },
+    Gpu,
 }
 
 #[derive(Debug, Copy, Clone)]
 pub struct MmioRoute {
     pub device: MmioDevice,
     pub offset: u64,
-    pub placement: DevicePlacement,
+    pub owner: DeviceOwner,
 }
 
-struct DeviceThreadConfig {
-    owner: &'static str,
-    devices: &'static [MmioDevice],
+struct MmioRegion {
+    base: u64,
+    size: u64,
+    device: MmioDevice,
+    owner: DeviceOwner,
 }
 
-pub const INLINE_MMIO_OWNER: &str = "vcpu-inline";
-pub const GPU_MMIO_OWNER: &str = "gpu";
-
-const DEVICE_THREAD_CONFIGS: &[DeviceThreadConfig] = &[
-    DeviceThreadConfig {
-        owner: INLINE_MMIO_OWNER,
-        devices: &[
-            MmioDevice::Uart,
-            MmioDevice::VirtioBlk,
-            MmioDevice::VirtioNet,
-            MmioDevice::VirtioInputKeyboard,
-            MmioDevice::VirtioInputTablet,
-            MmioDevice::VirtioInputMouse,
-            MmioDevice::VirtioSnd,
-            MmioDevice::VirtioConsole,
-        ],
+const MMIO_REGIONS: &[MmioRegion] = &[
+    MmioRegion {
+        base: UART_START,
+        size: UART_SIZE,
+        device: MmioDevice::Uart,
+        owner: DeviceOwner::Inline,
     },
-    DeviceThreadConfig {
-        owner: GPU_MMIO_OWNER,
-        devices: &[MmioDevice::VirtioGpu],
+    MmioRegion {
+        base: VIRTBLK_START,
+        size: VIRTBLK_SIZE,
+        device: MmioDevice::VirtioBlk,
+        owner: DeviceOwner::Inline,
+    },
+    MmioRegion {
+        base: VIRTNET_START,
+        size: VIRTNET_SIZE,
+        device: MmioDevice::VirtioNet,
+        owner: DeviceOwner::Inline,
+    },
+    MmioRegion {
+        base: VIRTGPU_START,
+        size: VIRTGPU_SIZE,
+        device: MmioDevice::VirtioGpu,
+        owner: DeviceOwner::Gpu,
+    },
+    MmioRegion {
+        base: VIRTINPUT_KEYBOARD_START,
+        size: VIRTINPUT_KEYBOARD_SIZE,
+        device: MmioDevice::VirtioInputKeyboard,
+        owner: DeviceOwner::Inline,
+    },
+    MmioRegion {
+        base: VIRTINPUT_TABLET_START,
+        size: VIRTINPUT_TABLET_SIZE,
+        device: MmioDevice::VirtioInputTablet,
+        owner: DeviceOwner::Inline,
+    },
+    MmioRegion {
+        base: VIRTINPUT_MOUSE_START,
+        size: VIRTINPUT_MOUSE_SIZE,
+        device: MmioDevice::VirtioInputMouse,
+        owner: DeviceOwner::Inline,
+    },
+    MmioRegion {
+        base: VIRTSND_START,
+        size: VIRTSND_SIZE,
+        device: MmioDevice::VirtioSnd,
+        owner: DeviceOwner::Inline,
+    },
+    MmioRegion {
+        base: VIRTCONSOLE_START,
+        size: VIRTCONSOLE_SIZE,
+        device: MmioDevice::VirtioConsole,
+        owner: DeviceOwner::Inline,
     },
 ];
 
-fn device_placement(device: MmioDevice) -> DevicePlacement {
-    DEVICE_THREAD_CONFIGS
-        .iter()
-        .find_map(|cfg| cfg.devices.contains(&device).then_some(cfg.owner))
-        .map(|owner| {
-            if owner == INLINE_MMIO_OWNER {
-                DevicePlacement::Inline
-            } else {
-                DevicePlacement::ThreadOwned { owner }
-            }
-        })
-        .unwrap_or(DevicePlacement::Inline)
-}
-
 pub fn classify(phys_addr: u64) -> Option<MmioRoute> {
-    const REGIONS: &[(u64, u64, MmioDevice)] = &[
-        (UART_START, UART_SIZE, MmioDevice::Uart),
-        (VIRTBLK_START, VIRTBLK_SIZE, MmioDevice::VirtioBlk),
-        (VIRTNET_START, VIRTNET_SIZE, MmioDevice::VirtioNet),
-        (VIRTGPU_START, VIRTGPU_SIZE, MmioDevice::VirtioGpu),
-        (
-            VIRTINPUT_KEYBOARD_START,
-            VIRTINPUT_KEYBOARD_SIZE,
-            MmioDevice::VirtioInputKeyboard,
-        ),
-        (
-            VIRTINPUT_TABLET_START,
-            VIRTINPUT_TABLET_SIZE,
-            MmioDevice::VirtioInputTablet,
-        ),
-        (
-            VIRTINPUT_MOUSE_START,
-            VIRTINPUT_MOUSE_SIZE,
-            MmioDevice::VirtioInputMouse,
-        ),
-        (VIRTSND_START, VIRTSND_SIZE, MmioDevice::VirtioSnd),
-        (VIRTCONSOLE_START, VIRTCONSOLE_SIZE, MmioDevice::VirtioConsole),
-    ];
-
-    REGIONS.iter().find_map(|&(base, size, device)| {
-        (base..base + size).contains(&phys_addr).then(|| MmioRoute {
-            device,
-            offset: phys_addr - base,
-            placement: device_placement(device),
-        })
+    MMIO_REGIONS.iter().find_map(|region| {
+        (region.base..region.base + region.size)
+            .contains(&phys_addr)
+            .then(|| MmioRoute {
+                device: region.device,
+                offset: phys_addr - region.base,
+                owner: region.owner,
+            })
     })
 }

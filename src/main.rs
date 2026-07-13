@@ -1,5 +1,7 @@
 use crate::{
+    host_events::{HostEvent, HostEventPump, HostInputEvent},
     machine::*,
+    psci::{handle_psci_hvc, PsciAction, SecondaryStart},
     virtio::{
         input::keys::*,
         virgl_ffi::{VirglFence, VirglRenderer},
@@ -11,9 +13,9 @@ use std::{
     fs::File,
     io::{self, Read, Write},
     sync::{
-        Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::AtomicBool,
         mpsc::{Receiver, Sender, SyncSender},
+        Mutex,
     },
     thread,
 };
@@ -30,6 +32,7 @@ mod angle_egl;
 mod audio;
 mod clipboard;
 mod helpers;
+mod host_events;
 mod iosurface;
 mod irq;
 mod kick;
@@ -38,6 +41,7 @@ mod machine;
 mod memory;
 mod net;
 mod present;
+mod psci;
 mod sys_reg;
 mod uart;
 mod virtio;
@@ -121,74 +125,6 @@ fn mmio_write_reg(vcpu: &Vcpu, rt: u64, value: u64) -> Result<()> {
         vcpu.set_reg(reg, value)?;
     }
     Ok(())
-}
-
-#[derive(Debug, Clone, Copy)]
-struct SecondaryStart {
-    entry_point: u64,
-    context_id: u64,
-}
-
-enum PsciAction {
-    Continue,
-    CpuOff,
-}
-
-fn handle_psci_hvc(
-    vcpu: &Vcpu,
-    vcpu_id: usize,
-    secondary_boot_txs: &[SyncSender<SecondaryStart>],
-    secondary_online: &[AtomicBool],
-) -> Result<PsciAction> {
-    let function_id = vcpu.get_reg(Reg::X0)?;
-
-    let ret = match function_id {
-        PSCI_VERSION => PSCI_VERSION_0_2,
-        PSCI_CPU_ON_64 => {
-            let target_mpidr = vcpu.get_reg(Reg::X1)?;
-            let entry_point = vcpu.get_reg(Reg::X2)?;
-            let context_id = vcpu.get_reg(Reg::X3)?;
-
-            match secondary_index_for_mpidr(target_mpidr) {
-                Some(index) => {
-                    if secondary_online[index].swap(true, Ordering::SeqCst) {
-                        PSCI_ALREADY_ON
-                    } else {
-                        let start = SecondaryStart {
-                            entry_point,
-                            context_id,
-                        };
-                        match secondary_boot_txs[index].send(start) {
-                            Ok(()) => PSCI_SUCCESS,
-                            Err(_) => {
-                                secondary_online[index].store(false, Ordering::SeqCst);
-                                PSCI_DENIED
-                            }
-                        }
-                    }
-                }
-                None => PSCI_INVALID_PARAMETERS,
-            }
-        }
-        PSCI_CPU_OFF => {
-            if vcpu_id >= FIRST_SECONDARY_VCPU_ID {
-                let index = vcpu_id - FIRST_SECONDARY_VCPU_ID;
-                secondary_online[index].store(false, Ordering::SeqCst);
-                vcpu.set_reg(Reg::X0, PSCI_SUCCESS)?;
-                return Ok(PsciAction::CpuOff);
-            }
-            PSCI_DENIED
-        }
-        PSCI_SYSTEM_OFF | PSCI_SYSTEM_RESET => {
-            eprintln!("PSCI system off/reset requested");
-            PSCI_SUCCESS
-        }
-        _ => PSCI_NOT_SUPPORTED,
-    };
-
-    vcpu.set_reg(Reg::X0, ret)?;
-
-    Ok(PsciAction::Continue)
 }
 
 enum DeviceThreadRequest {
@@ -339,54 +275,10 @@ fn handle_routed_mmio(
     mem: &memory::GuestMemory,
     devices: &VmDevices<'_>,
 ) -> Option<u64> {
-    match route.placement {
-        DevicePlacement::Inline => handle_inline_mmio(route, is_write, size, value, mem, devices),
-        DevicePlacement::ThreadOwned { owner } => {
-            assert_eq!(owner, GPU_MMIO_OWNER, "unknown MMIO owner thread");
-            assert_eq!(
-                route.device,
-                MmioDevice::VirtioGpu,
-                "only virtio-gpu has a thread owner for now"
-            );
-            send_gpu_mmio(devices.gpu_tx, route.offset, size, is_write, value)
-        }
+    match route.owner {
+        DeviceOwner::Inline => handle_inline_mmio(route, is_write, size, value, mem, devices),
+        DeviceOwner::Gpu => send_gpu_mmio(devices.gpu_tx, route.offset, size, is_write, value),
     }
-}
-
-enum HostInputEvent {
-    Key {
-        code: u16,
-        pressed: bool,
-    },
-    PointerMove {
-        x: u32,
-        y: u32,
-        width: u32,
-        height: u32,
-    },
-    PointerButton {
-        button: u16,
-        pressed: bool,
-        relative: bool,
-    },
-    Scroll {
-        horizontal: bool,
-        value: i32,
-        relative: bool,
-    },
-    RelativeMouseMotion {
-        dx: i32,
-        dy: i32,
-    },
-}
-
-enum HostEvent {
-    NetReady,
-    NetTx(Vec<u8>),
-    Input(HostInputEvent),
-    DisplayResized { width: u32, height: u32 },
-    Audio(audio::coreaudio::BackendEvent),
-    Clipboard(Vec<u8>),
 }
 
 #[derive(Clone, Copy)]
@@ -400,182 +292,6 @@ struct VmDevices<'a> {
     mouse: &'a Mutex<virtio::MmioTransport<virtio::Input>>,
     snd: &'a Mutex<virtio::MmioTransport<virtio::Snd>>,
     console: &'a Mutex<virtio::MmioTransport<virtio::Console>>,
-}
-
-struct HostEventPump<'a> {
-    mem: &'a memory::GuestMemory,
-    devices: VmDevices<'a>,
-    iface: &'a Mutex<net::vmnet::Backend>,
-    rx: Receiver<HostEvent>,
-    kicker: kick::Kicker,
-    net_buf: Vec<u8>,
-}
-
-impl<'a> HostEventPump<'a> {
-    fn new(
-        mem: &'a memory::GuestMemory,
-        devices: VmDevices<'a>,
-        iface: &'a Mutex<net::vmnet::Backend>,
-        rx: Receiver<HostEvent>,
-        kicker: kick::Kicker,
-    ) -> Self {
-        let net_buf = vec![0; iface.lock().unwrap().max_packet_size() as usize];
-
-        Self {
-            mem,
-            devices,
-            iface,
-            rx,
-            kicker,
-            net_buf,
-        }
-    }
-
-    fn run(&mut self) {
-        while let Ok(event) = self.rx.recv() {
-            let mut wake = false;
-            let mut pointer_move = None;
-
-            wake |= self.handle_event(event, &mut pointer_move);
-
-            while let Ok(event) = self.rx.try_recv() {
-                wake |= self.handle_event(event, &mut pointer_move);
-            }
-
-            wake |= self.flush_pointer_move(pointer_move);
-
-            if wake {
-                self.kicker.kick();
-            }
-        }
-    }
-
-    fn handle_event(&mut self, event: HostEvent, pointer_move: &mut Option<(u32, u32, u32, u32)>) -> bool {
-        match event {
-            HostEvent::NetReady => self.handle_net_ready(),
-            HostEvent::NetTx(frame) => {
-                self.iface.lock().unwrap().write(&frame).unwrap();
-                false
-            }
-            HostEvent::Input(event) => self.handle_input(event, pointer_move),
-            HostEvent::DisplayResized { width, height } => {
-                send_gpu_event(
-                    self.devices.gpu_tx,
-                    virtio::gpu::ExternalEvent::DisplayResized { width, height },
-                );
-                false
-            }
-            HostEvent::Audio(event) => match event {
-                audio::coreaudio::BackendEvent::PeriodElapsed(seq) => self
-                    .devices
-                    .snd
-                    .lock()
-                    .unwrap()
-                    .handle_external_event(virtio::snd::ExternalEvent::PeriodElapsed(seq), self.mem),
-            },
-            HostEvent::Clipboard(payload) => self
-                .devices
-                .console
-                .lock()
-                .unwrap()
-                .handle_external_event(virtio::console::ExternalEvent::HostClipboard(&payload), self.mem),
-        }
-    }
-
-    fn handle_net_ready(&mut self) -> bool {
-        let mut wake = false;
-
-        loop {
-            let n_read = self.iface.lock().unwrap().read(&mut self.net_buf).unwrap();
-            if n_read == 0 {
-                break;
-            }
-
-            wake |= self
-                .devices
-                .net
-                .lock()
-                .unwrap()
-                .handle_external_event(&self.net_buf[..n_read], self.mem);
-        }
-
-        wake
-    }
-
-    fn handle_input(&mut self, event: HostInputEvent, pointer_move: &mut Option<(u32, u32, u32, u32)>) -> bool {
-        use virtio::input::ExternalInput;
-
-        match event {
-            HostInputEvent::Key { code, pressed } => self
-                .devices
-                .keyboard
-                .lock()
-                .unwrap()
-                .handle_external_event(ExternalInput::Key { code, pressed }, self.mem),
-            HostInputEvent::PointerMove { x, y, width, height } => {
-                *pointer_move = Some((x, y, width, height));
-                false
-            }
-            HostInputEvent::PointerButton {
-                button,
-                pressed,
-                relative,
-            } => {
-                if relative {
-                    self.devices
-                        .mouse
-                        .lock()
-                        .unwrap()
-                        .handle_external_event(ExternalInput::PointerButton { button, pressed }, self.mem)
-                } else {
-                    let mut wake = self.flush_pointer_move(pointer_move.take());
-                    wake |= self
-                        .devices
-                        .tablet
-                        .lock()
-                        .unwrap()
-                        .handle_external_event(ExternalInput::PointerButton { button, pressed }, self.mem);
-                    wake
-                }
-            }
-            HostInputEvent::Scroll {
-                horizontal,
-                value,
-                relative,
-            } => {
-                if relative {
-                    self.devices
-                        .mouse
-                        .lock()
-                        .unwrap()
-                        .handle_external_event(ExternalInput::Scroll { horizontal, value }, self.mem)
-                } else {
-                    self.devices
-                        .tablet
-                        .lock()
-                        .unwrap()
-                        .handle_external_event(ExternalInput::Scroll { horizontal, value }, self.mem)
-                }
-            }
-            HostInputEvent::RelativeMouseMotion { dx, dy } => self
-                .devices
-                .mouse
-                .lock()
-                .unwrap()
-                .handle_external_event(ExternalInput::RelMotion { dx, dy }, self.mem),
-        }
-    }
-
-    fn flush_pointer_move(&mut self, pointer_move: Option<(u32, u32, u32, u32)>) -> bool {
-        let Some((x, y, width, height)) = pointer_move else {
-            return false;
-        };
-
-        self.devices.tablet.lock().unwrap().handle_external_event(
-            virtio::input::ExternalInput::AbsPosition { x, y, width, height },
-            self.mem,
-        )
-    }
 }
 
 struct AppState<'a> {
