@@ -383,11 +383,24 @@ struct Resource {
     backing: Vec<MemEntry>,
     framebuffer: Vec<u8>,
     kind: ResourceKind,
+}
 
-    scanout_stride: u32,
-    scanout_offset: u64,
-
+struct Scanout {
+    resource_id: u32,
+    source: ScanoutSource,
     iosurface: Option<ScopedIOSurface>,
+}
+
+enum ScanoutSource {
+    Resource {
+        rect: Rect,
+    },
+    Blob {
+        width: u32,
+        height: u32,
+        stride: u32,
+        offset: u64,
+    },
 }
 
 enum ResourceKind {
@@ -460,7 +473,7 @@ struct PendingFence {
 
 pub struct Gpu<'a> {
     resources: HashMap<u32, Resource>,
-    scanout_resource: Option<u32>,
+    scanout: Option<Scanout>,
     display: &'a Mutex<DisplayBuffer>,
 
     scanout_width: u32,
@@ -483,7 +496,7 @@ impl<'a> Gpu<'a> {
 
         Gpu {
             resources: HashMap::new(),
-            scanout_resource: None,
+            scanout: None,
             display,
             scanout_width: width as u32,
             scanout_height: height as u32,
@@ -811,9 +824,6 @@ impl<'a> Gpu<'a> {
                 backing: Vec::new(),
                 framebuffer: Vec::new(),
                 kind: ResourceKind::Renderer3d,
-                scanout_stride: req.width.saturating_mul(BYTES_PER_PIXEL as u32),
-                scanout_offset: 0,
-                iosurface: None,
             },
         );
 
@@ -968,7 +978,7 @@ impl<'a> Gpu<'a> {
         let resource_id = val.resource_id;
         let flush_rect = val.r;
 
-        if self.scanout_resource != Some(resource_id) {
+        if self.scanout.as_ref().map(|scanout| scanout.resource_id) != Some(resource_id) {
             return Gpu::ok(chain, hdr, mem);
         }
 
@@ -1089,9 +1099,6 @@ impl<'a> Gpu<'a> {
                     size: req.size,
                     mapping: None,
                 }),
-                scanout_stride: 0,
-                scanout_offset: 0,
-                iosurface: None,
             },
         );
 
@@ -1126,9 +1133,6 @@ impl<'a> Gpu<'a> {
                 backing: Vec::new(),
                 framebuffer: Vec::new(),
                 kind: ResourceKind::Local2d,
-                scanout_offset: 0,
-                scanout_stride: 0,
-                iosurface: None,
             },
         );
 
@@ -1237,17 +1241,22 @@ impl<'a> Gpu<'a> {
         let resource_id = val.resource_id;
 
         if resource_id == 0 {
-            self.scanout_resource = None;
+            self.scanout = None;
         } else {
-            let Some(resource) = self.resources.get(&resource_id) else {
+            if !self.resources.contains_key(&resource_id) {
                 return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
-            };
+            }
 
-            self.scanout_resource = Some(resource_id);
+            self.scanout = Some(Scanout {
+                resource_id,
+                source: ScanoutSource::Resource { rect: val.r },
+                iosurface: None,
+            });
+
             self.display
                 .lock()
                 .unwrap()
-                .resize(resource.width as usize, resource.height as usize);
+                .resize(val.r.width as usize, val.r.height as usize);
         }
 
         Gpu::ok(chain, hdr, mem)
@@ -1327,14 +1336,13 @@ impl<'a> Gpu<'a> {
         let scanout_id = val.scanout_id;
         let width = val.width;
         let height = val.height;
-        let format = val.format;
 
         if scanout_id != 0 {
             return Gpu::err(chain, CtrlType::RespErrInvalidScanoutId, hdr, mem);
         }
 
         if resource_id == 0 {
-            self.scanout_resource = None;
+            self.scanout = None;
             return Gpu::ok(chain, hdr, mem);
         }
 
@@ -1342,21 +1350,25 @@ impl<'a> Gpu<'a> {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         }
 
-        let Some(resource) = self.resources.get_mut(&resource_id) else {
+        if !self.resources.contains_key(&resource_id) {
             return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
-        };
+        }
 
-        resource.width = width;
-        resource.height = height;
-        resource.format = format;
-        resource.scanout_stride = if val.strides[0] != 0 {
-            val.strides[0]
-        } else {
-            width.saturating_mul(BYTES_PER_PIXEL as u32)
-        };
-        resource.scanout_offset = val.offsets[0] as u64;
+        self.scanout = Some(Scanout {
+            resource_id,
+            source: ScanoutSource::Blob {
+                width,
+                height,
+                stride: if val.strides[0] != 0 {
+                    val.strides[0]
+                } else {
+                    width.saturating_mul(BYTES_PER_PIXEL as u32)
+                },
+                offset: val.offsets[0] as u64,
+            },
+            iosurface: None,
+        });
 
-        self.scanout_resource = Some(resource_id);
         self.display.lock().unwrap().resize(width as usize, height as usize);
 
         Gpu::ok(chain, hdr, mem)
@@ -1370,20 +1382,24 @@ impl<'a> Gpu<'a> {
         let width = native_source.width;
         let height = native_source.height;
 
-        let Some(resource) = self.resources.get_mut(&resource_id) else {
+        let Some(scanout) = self.scanout.as_mut() else {
             return None;
         };
 
-        let recreate = match resource.iosurface.as_ref() {
+        if scanout.resource_id != resource_id {
+            return None;
+        }
+
+        let recreate = match scanout.iosurface.as_ref() {
             Some(surface) => surface.width() != width || surface.height() != height,
             None => true,
         };
 
         if recreate {
-            resource.iosurface = ScopedIOSurface::new_bgra(width, height);
+            scanout.iosurface = ScopedIOSurface::new_bgra(width, height);
         }
 
-        let Some(surface) = resource.iosurface.as_ref() else {
+        let Some(surface) = scanout.iosurface.as_ref() else {
             return None;
         };
 
@@ -1403,12 +1419,32 @@ impl<'a> Gpu<'a> {
     }
 
     fn readback_blob_scanout(&mut self, resource_id: u32, rect: Rect, mem: &GuestMemory) -> bool {
-        let Some(resource) = self.resources.get_mut(&resource_id) else {
+        let Some(Scanout {
+            resource_id: scanout_resource_id,
+            source: ScanoutSource::Blob {
+                width,
+                height,
+                stride,
+                offset,
+            },
+            ..
+        }) = self.scanout.as_ref()
+        else {
             return false;
         };
 
-        let width = resource.width as usize;
-        let height = resource.height as usize;
+        if *scanout_resource_id != resource_id {
+            return false;
+        }
+
+        let width = *width as usize;
+        let height = *height as usize;
+        let src_stride = *stride as usize;
+        let base = *offset as usize;
+
+        let Some(resource) = self.resources.get_mut(&resource_id) else {
+            return false;
+        };
 
         if width == 0 || height == 0 || width > 16384 || height > 16384 {
             eprintln!(
@@ -1422,12 +1458,6 @@ impl<'a> Gpu<'a> {
             eprintln!("readback_blob_scanout: no backing res={}", resource_id);
             return false;
         }
-
-        let src_stride = if resource.scanout_stride != 0 {
-            resource.scanout_stride as usize
-        } else {
-            width * BYTES_PER_PIXEL
-        };
 
         let dst_stride = width * BYTES_PER_PIXEL;
         let fb_len = height * dst_stride;
@@ -1446,7 +1476,6 @@ impl<'a> Gpu<'a> {
         }
 
         let row_len = rect_w * BYTES_PER_PIXEL;
-        let base = resource.scanout_offset as usize;
 
         for row in 0..rect_h {
             let src_offset = base + (rect_y + row) * src_stride + rect_x * BYTES_PER_PIXEL;
@@ -1471,34 +1500,76 @@ impl<'a> Gpu<'a> {
         true
     }
 
-    fn publish_display_rect(&self, _resource_id: u32, resource: &Resource, rect: Rect, iosurface_id: Option<u32>) {
+    fn publish_display_rect(&self, resource_id: u32, resource: &Resource, rect: Rect, iosurface_id: Option<u32>) {
+        let Some(scanout) = self.scanout.as_ref() else {
+            return;
+        };
+
+        if scanout.resource_id != resource_id {
+            return;
+        }
+
+        let (source_x, source_y, source_width, source_height, src_stride) = match &scanout.source {
+            ScanoutSource::Resource { rect } => (
+                rect.x as usize,
+                rect.y as usize,
+                rect.width as usize,
+                rect.height as usize,
+                resource.width as usize * BYTES_PER_PIXEL,
+            ),
+            ScanoutSource::Blob { width, height, .. } => (
+                0,
+                0,
+                *width as usize,
+                *height as usize,
+                *width as usize * BYTES_PER_PIXEL,
+            ),
+        };
+
+        let flush_x0 = rect.x as usize;
+        let flush_y0 = rect.y as usize;
+        let flush_x1 = flush_x0.saturating_add(rect.width as usize);
+        let flush_y1 = flush_y0.saturating_add(rect.height as usize);
+        let source_x1 = source_x.saturating_add(source_width);
+        let source_y1 = source_y.saturating_add(source_height);
+
+        let src_x0 = flush_x0.max(source_x);
+        let src_y0 = flush_y0.max(source_y);
+        let src_x1 = flush_x1.min(source_x1);
+        let src_y1 = flush_y1.min(source_y1);
+
+        if src_x0 >= src_x1 || src_y0 >= src_y1 {
+            return;
+        }
+
         let mut display = self.display.lock().unwrap();
 
-        let res_width = resource.width as usize;
-        let res_height = resource.height as usize;
-
-        let x0 = (rect.x as usize).min(res_width).min(display.width);
-        let y0 = (rect.y as usize).min(res_height).min(display.height);
-        let x1 = ((rect.x + rect.width) as usize).min(res_width).min(display.width);
-        let y1 = ((rect.y + rect.height) as usize).min(res_height).min(display.height);
+        let x0 = (src_x0 - source_x).min(display.width);
+        let y0 = (src_y0 - source_y).min(display.height);
+        let x1 = (src_x1 - source_x).min(display.width);
+        let y1 = (src_y1 - source_y).min(display.height);
 
         if x0 >= x1 || y0 >= y1 {
             return;
         }
 
         if iosurface_id.is_none() {
-            let src_stride = res_width * BYTES_PER_PIXEL;
-            if resource.framebuffer.len() < y1 * src_stride {
+            let copy_src_x0 = source_x + x0;
+            let copy_src_y0 = source_y + y0;
+            let copy_src_x1 = source_x + x1;
+            let copy_src_y1 = source_y + y1;
+
+            if resource.framebuffer.len() < copy_src_y1 * src_stride {
                 return;
             }
 
             let dst_w = display.width;
             let dst = display.pixels.as_mut_slice();
 
-            for y in y0..y1 {
-                let s = y * src_stride;
-                let src = &resource.framebuffer[s + x0 * BYTES_PER_PIXEL..s + x1 * BYTES_PER_PIXEL];
-                let drow = &mut dst[y * dst_w + x0..y * dst_w + x1];
+            for (src_y, dst_y) in (copy_src_y0..copy_src_y1).zip(y0..y1) {
+                let s = src_y * src_stride;
+                let src = &resource.framebuffer[s + copy_src_x0 * BYTES_PER_PIXEL..s + copy_src_x1 * BYTES_PER_PIXEL];
+                let drow = &mut dst[dst_y * dst_w + x0..dst_y * dst_w + x1];
                 drow.as_mut_bytes().copy_from_slice(src);
             }
         }
@@ -1743,8 +1814,8 @@ impl<'a> Gpu<'a> {
             return;
         };
 
-        if self.scanout_resource == Some(resource_id) {
-            self.scanout_resource = None;
+        if self.scanout.as_ref().map(|scanout| scanout.resource_id) == Some(resource_id) {
+            self.scanout = None;
         }
 
         match resource.kind {
