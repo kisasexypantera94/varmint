@@ -382,15 +382,28 @@ struct Resource {
     height: u32,
     backing: Vec<MemEntry>,
     framebuffer: Vec<u8>,
-    is_3d: bool,
-    mapped_gpa: Option<u64>,
-    mapped_size: usize,
-    blob_size: u64,
+    kind: ResourceKind,
 
     scanout_stride: u32,
     scanout_offset: u64,
 
     iosurface: Option<ScopedIOSurface>,
+}
+
+enum ResourceKind {
+    Local2d,
+    Renderer3d,
+    RendererBlob(BlobResource),
+}
+
+struct BlobResource {
+    size: u64,
+    mapping: Option<BlobMapping>,
+}
+
+struct BlobMapping {
+    guest_addr: u64,
+    size: usize,
 }
 
 pub struct DisplayBuffer {
@@ -525,8 +538,9 @@ impl<'a> Device for Gpu<'a> {
     }
 
     fn reset(&mut self) {
-        self.resources.clear();
-        self.scanout_resource = None;
+        while let Some(resource_id) = self.resources.keys().next().copied() {
+            self.destroy_resource(resource_id);
+        }
         self.pending_fences.clear();
     }
 
@@ -704,7 +718,7 @@ impl<'a> Gpu<'a> {
             return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
         };
 
-        if !resource.is_3d {
+        if matches!(&resource.kind, ResourceKind::Local2d) {
             eprintln!(
                 "CtxAttach: ignoring attach of local 2D resource {} to ctx {}",
                 resource_id,
@@ -737,7 +751,7 @@ impl<'a> Gpu<'a> {
             return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
         };
 
-        if !resource.is_3d {
+        if matches!(&resource.kind, ResourceKind::Local2d) {
             eprintln!(
                 "CtxDetach: ignoring detach of local 2D resource {} from ctx {}",
                 resource_id,
@@ -766,6 +780,11 @@ impl<'a> Gpu<'a> {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
 
+        let resource_id = req.resource_id;
+        if self.resources.contains_key(&resource_id) {
+            return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
+        }
+
         let info = ResourceCreate3D {
             target: req.target,
             format: req.format,
@@ -791,10 +810,7 @@ impl<'a> Gpu<'a> {
                 height: req.height,
                 backing: Vec::new(),
                 framebuffer: Vec::new(),
-                is_3d: true,
-                mapped_gpa: None,
-                mapped_size: 0,
-                blob_size: 0,
+                kind: ResourceKind::Renderer3d,
                 scanout_stride: req.width.saturating_mul(BYTES_PER_PIXEL as u32),
                 scanout_offset: 0,
                 iosurface: None,
@@ -960,32 +976,33 @@ impl<'a> Gpu<'a> {
             return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
         };
 
-        let is_3d = resource.is_3d;
-        let is_guest_backed_blob = resource.blob_size != 0 && !resource.backing.is_empty();
-
         let mut iosurface_id = None;
 
-        if is_guest_backed_blob {
-            if !self.readback_blob_scanout(resource_id, flush_rect, mem) {
-                return Gpu::err(chain, CtrlType::RespErrUnspec, hdr, mem);
+        match &resource.kind {
+            ResourceKind::Local2d => {}
+            ResourceKind::RendererBlob(_) if !resource.backing.is_empty() => {
+                if !self.readback_blob_scanout(resource_id, flush_rect, mem) {
+                    return Gpu::err(chain, CtrlType::RespErrUnspec, hdr, mem);
+                }
             }
-        } else if is_3d {
-            let Some(source) = self.renderer.native_source_info(resource_id) else {
-                eprintln!(
-                    "virtio-gpu: ResourceFlush failed: 3D scanout resource={} has no native source",
-                    resource_id
-                );
-                return Gpu::err(chain, CtrlType::RespErrUnspec, hdr, mem);
-            };
+            ResourceKind::Renderer3d | ResourceKind::RendererBlob(_) => {
+                let Some(source) = self.renderer.native_source_info(resource_id) else {
+                    eprintln!(
+                        "virtio-gpu: ResourceFlush failed: 3D scanout resource={} has no native source",
+                        resource_id
+                    );
+                    return Gpu::err(chain, CtrlType::RespErrUnspec, hdr, mem);
+                };
 
-            iosurface_id = self.copy_metal_texture_to_iosurface(resource_id, source);
+                iosurface_id = self.copy_metal_texture_to_iosurface(resource_id, source);
 
-            if iosurface_id.is_none() {
-                eprintln!(
-                    "virtio-gpu: ResourceFlush failed: native scanout copy failed resource={}",
-                    resource_id
-                );
-                return Gpu::err(chain, CtrlType::RespErrUnspec, hdr, mem);
+                if iosurface_id.is_none() {
+                    eprintln!(
+                        "virtio-gpu: ResourceFlush failed: native scanout copy failed resource={}",
+                        resource_id
+                    );
+                    return Gpu::err(chain, CtrlType::RespErrUnspec, hdr, mem);
+                }
             }
         }
 
@@ -1002,6 +1019,11 @@ impl<'a> Gpu<'a> {
         let Some(req) = chain.read_obj::<ResourceCreateBlob>(0, mem) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
+
+        let resource_id = req.resource_id;
+        if self.resources.contains_key(&resource_id) {
+            return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
+        }
 
         let mut iovecs = Vec::with_capacity(req.nr_entries as usize);
         let mut backing = Vec::with_capacity(req.nr_entries as usize);
@@ -1063,10 +1085,10 @@ impl<'a> Gpu<'a> {
                 height: 0,
                 backing,
                 framebuffer: Vec::new(),
-                is_3d: true,
-                mapped_gpa: None,
-                mapped_size: 0,
-                blob_size: req.size,
+                kind: ResourceKind::RendererBlob(BlobResource {
+                    size: req.size,
+                    mapping: None,
+                }),
                 scanout_stride: 0,
                 scanout_offset: 0,
                 iosurface: None,
@@ -1080,6 +1102,11 @@ impl<'a> Gpu<'a> {
         let Some(val) = chain.read_obj::<ResourceCreate2d>(0, mem) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
+
+        let resource_id = val.resource_id;
+        if self.resources.contains_key(&resource_id) {
+            return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
+        }
 
         if val.format != 2 {
             eprintln!("virtio-gpu: unsupported format: {}", { val.format });
@@ -1098,12 +1125,9 @@ impl<'a> Gpu<'a> {
                 height: val.height,
                 backing: Vec::new(),
                 framebuffer: Vec::new(),
-                is_3d: false,
+                kind: ResourceKind::Local2d,
                 scanout_offset: 0,
                 scanout_stride: 0,
-                mapped_gpa: None,
-                mapped_size: 0,
-                blob_size: 0,
                 iosurface: None,
             },
         );
@@ -1117,16 +1141,11 @@ impl<'a> Gpu<'a> {
         };
 
         let resource_id = val.resource_id;
-
-        if let Some(resource) = self.resources.remove(&resource_id)
-            && resource.is_3d
-        {
-            self.renderer.resource_unref(resource_id);
+        if !self.resources.contains_key(&resource_id) {
+            return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
         }
 
-        if self.scanout_resource == Some(resource_id) {
-            self.scanout_resource = None;
-        }
+        self.destroy_resource(val.resource_id);
 
         Gpu::ok(chain, hdr, mem)
     }
@@ -1149,6 +1168,14 @@ impl<'a> Gpu<'a> {
             return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
         };
 
+        if !resource.backing.is_empty() {
+            return Gpu::err(chain, CtrlType::RespErrUnspec, hdr, mem);
+        }
+
+        if n_entries == 0 {
+            return Gpu::ok(chain, hdr, mem);
+        }
+
         let mut backing = Vec::with_capacity(n_entries);
         for i in 0..n_entries {
             let Some(entry) = chain.read_obj::<MemEntry>(entries_base + i * entry_size, mem) else {
@@ -1157,16 +1184,21 @@ impl<'a> Gpu<'a> {
             backing.push(entry);
         }
 
-        let renderer_backing = backing
-            .iter()
-            .map(|b| Iovec {
-                iov_base: gpa_to_host(mem, b.addr, b.length as u64).unwrap(),
-                iov_len: b.length as usize,
-            })
-            .collect();
+        if matches!(&resource.kind, ResourceKind::Renderer3d | ResourceKind::RendererBlob(_)) {
+            let mut renderer_backing = Vec::with_capacity(backing.len());
+            for entry in &backing {
+                let Some(iov_base) = gpa_to_host(mem, entry.addr, entry.length as u64) else {
+                    return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
+                };
+                renderer_backing.push(Iovec {
+                    iov_base,
+                    iov_len: entry.length as usize,
+                });
+            }
 
-        if resource.is_3d {
-            self.renderer.attach_backing(resource_id, renderer_backing).unwrap();
+            if self.renderer.attach_backing(resource_id, renderer_backing).is_err() {
+                return Gpu::err(chain, CtrlType::RespErrUnspec, hdr, mem);
+            }
         }
 
         resource.backing = backing;
@@ -1183,6 +1215,14 @@ impl<'a> Gpu<'a> {
         let Some(resource) = self.resources.get_mut(&resource_id) else {
             return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
         };
+
+        if resource.backing.is_empty() {
+            return Gpu::err(chain, CtrlType::RespErrUnspec, hdr, mem);
+        }
+
+        if matches!(&resource.kind, ResourceKind::Renderer3d | ResourceKind::RendererBlob(_)) {
+            self.renderer.detach_backing(resource_id);
+        }
 
         resource.backing.clear();
 
@@ -1223,9 +1263,12 @@ impl<'a> Gpu<'a> {
             return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
         };
 
+        if matches!(&resource.kind, ResourceKind::Renderer3d | ResourceKind::RendererBlob(_)) {
+            return Gpu::ok(chain, hdr, mem);
+        }
+
         let width = resource.width as usize;
         let height = resource.height as usize;
-        let is_3d = resource.is_3d;
         let stride = width * BYTES_PER_PIXEL;
 
         let rect_x = val.r.x as usize;
@@ -1236,10 +1279,6 @@ impl<'a> Gpu<'a> {
 
         if rect_x + rect_width > width || rect_y + rect_height > height {
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
-        }
-
-        if is_3d {
-            return Gpu::ok(chain, hdr, mem);
         }
 
         let fb_len = height * stride;
@@ -1539,10 +1578,20 @@ impl<'a> Gpu<'a> {
             return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
         };
 
-        let size = resource.blob_size;
-        if size == 0 {
-            eprintln!("ResourceMapBlob FAILED: resource_id={} has zero blob_size", resource_id,);
+        let ResourceKind::RendererBlob(blob) = &resource.kind else {
+            eprintln!("ResourceMapBlob FAILED: resource_id={} is not a blob", resource_id);
             return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
+        };
+
+        let size = blob.size;
+        if size == 0 {
+            eprintln!("ResourceMapBlob FAILED: resource_id={} has zero blob size", resource_id);
+            return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
+        }
+
+        if blob.mapping.is_some() {
+            eprintln!("ResourceMapBlob FAILED: resource_id={} is already mapped", resource_id);
+            return Gpu::err(chain, CtrlType::RespErrUnspec, hdr, mem);
         }
 
         let align = APPLE_HV_PAGE_SIZE as u64;
@@ -1608,17 +1657,34 @@ impl<'a> Gpu<'a> {
                     "ResourceMapBlob FAILED: hv_vm_map resource_id={} map_ptr={:#x} guest_addr={:#x} size={} err={:#x}",
                     resource_id, map_ptr, guest_addr, size, err,
                 );
+
+                if let Err(unmap_err) = self.renderer.unmap(resource_id) {
+                    eprintln!(
+                        "ResourceMapBlob cleanup FAILED: virgl unmap resource_id={} err={:?}",
+                        resource_id, unmap_err,
+                    );
+                }
+
                 return Gpu::err(chain, CtrlType::RespErrUnspec, hdr, mem);
             }
         };
 
         let Some(resource) = self.resources.get_mut(&resource_id) else {
             let _ = unmap_blob_from_guest(mapped_gpa, mapped_size);
+            let _ = self.renderer.unmap(resource_id);
             return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
         };
 
-        resource.mapped_gpa = Some(mapped_gpa);
-        resource.mapped_size = mapped_size;
+        let ResourceKind::RendererBlob(blob) = &mut resource.kind else {
+            let _ = unmap_blob_from_guest(mapped_gpa, mapped_size);
+            let _ = self.renderer.unmap(resource_id);
+            return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
+        };
+
+        blob.mapping = Some(BlobMapping {
+            guest_addr: mapped_gpa,
+            size: mapped_size,
+        });
 
         let resp = RespMapInfo {
             hdr: Gpu::resp_header(CtrlType::RespOkMapInfo, hdr),
@@ -1636,30 +1702,30 @@ impl<'a> Gpu<'a> {
 
         let resource_id = req.resource_id;
 
-        let (mapped_gpa, mapped_size) = {
-            let Some(resource) = self.resources.get_mut(&resource_id) else {
-                eprintln!("ResourceUnmapBlob FAILED: unknown resource_id={}", resource_id,);
-                return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
-            };
-
-            let Some(mapped_gpa) = resource.mapped_gpa.take() else {
-                eprintln!("ResourceUnmapBlob FAILED: resource_id={} is not mapped", resource_id,);
-                return Gpu::err(chain, CtrlType::RespErrUnspec, hdr, mem);
-            };
-
-            let mapped_size = resource.mapped_size;
-            resource.mapped_size = 0;
-
-            (mapped_gpa, mapped_size)
+        let Some(resource) = self.resources.get_mut(&resource_id) else {
+            eprintln!("ResourceUnmapBlob FAILED: unknown resource_id={}", resource_id);
+            return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
         };
 
-        if let Err(err) = unmap_blob_from_guest(mapped_gpa, mapped_size) {
+        let ResourceKind::RendererBlob(blob) = &mut resource.kind else {
+            eprintln!("ResourceUnmapBlob FAILED: resource_id={} is not a blob", resource_id);
+            return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
+        };
+
+        let Some(mapping) = blob.mapping.as_ref() else {
+            eprintln!("ResourceUnmapBlob FAILED: resource_id={} is not mapped", resource_id);
+            return Gpu::err(chain, CtrlType::RespErrUnspec, hdr, mem);
+        };
+
+        if let Err(err) = unmap_blob_from_guest(mapping.guest_addr, mapping.size) {
             eprintln!(
                 "ResourceUnmapBlob FAILED: hv_vm_unmap resource_id={} guest_addr={:#x} size={} err={:#x}",
-                resource_id, mapped_gpa, mapped_size, err,
+                resource_id, mapping.guest_addr, mapping.size, err,
             );
             return Gpu::err(chain, CtrlType::RespErrUnspec, hdr, mem);
         }
+
+        blob.mapping = None;
 
         if let Err(err) = self.renderer.unmap(resource_id) {
             eprintln!(
@@ -1670,6 +1736,40 @@ impl<'a> Gpu<'a> {
         }
 
         Gpu::ok(chain, hdr, mem)
+    }
+
+    fn destroy_resource(&mut self, resource_id: u32) {
+        let Some(resource) = self.resources.remove(&resource_id) else {
+            return;
+        };
+
+        if self.scanout_resource == Some(resource_id) {
+            self.scanout_resource = None;
+        }
+
+        match resource.kind {
+            ResourceKind::Local2d => {}
+            ResourceKind::Renderer3d => self.renderer.resource_unref(resource_id),
+            ResourceKind::RendererBlob(blob) => {
+                if let Some(mapping) = blob.mapping {
+                    if let Err(err) = unmap_blob_from_guest(mapping.guest_addr, mapping.size) {
+                        eprintln!(
+                            "destroy_resource: hv_vm_unmap resource_id={} guest_addr={:#x} size={} err={:#x}",
+                            resource_id, mapping.guest_addr, mapping.size, err,
+                        );
+                    }
+
+                    if let Err(err) = self.renderer.unmap(resource_id) {
+                        eprintln!(
+                            "destroy_resource: virgl unmap resource_id={} err={:?}",
+                            resource_id, err
+                        );
+                    }
+                }
+
+                self.renderer.resource_unref(resource_id);
+            }
+        }
     }
 }
 

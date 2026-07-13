@@ -212,6 +212,7 @@ unsafe extern "C" {
     fn virgl_renderer_resource_unref(res_handle: u32);
 
     fn virgl_renderer_resource_attach_iov(res_handle: c_int, iov: *mut Iovec, num_iovs: c_int) -> c_int;
+    fn virgl_renderer_resource_detach_iov(res_handle: c_int, iov: *mut *mut Iovec, num_iovs: *mut c_int);
 
     fn virgl_renderer_transfer_write_iov(
         handle: u32,
@@ -804,18 +805,18 @@ impl VirglRenderer {
     }
 
     pub fn resource_create_blob(
-        &self,
+        &mut self,
         ctx_id: u32,
         resource_id: u32,
         blob: ResourceCreateBlob,
         iovecs: Option<Vec<Iovec>>,
     ) -> VirglResult<()> {
-        let c_iovs = iovecs.unwrap_or_default();
+        let iovecs = iovecs.unwrap_or_default().into_boxed_slice();
 
-        let (iov_ptr, num_iovs) = if c_iovs.is_empty() {
+        let (iov_ptr, num_iovs) = if iovecs.is_empty() {
             (std::ptr::null(), 0u32)
         } else {
-            (c_iovs.as_ptr(), c_iovs.len() as u32)
+            (iovecs.as_ptr(), iovecs.len() as u32)
         };
 
         let args = ResourceCreateBlobArgs {
@@ -830,8 +831,13 @@ impl VirglRenderer {
         };
 
         let ret = unsafe { virgl_renderer_resource_create_blob(&args) };
+        check(ret)?;
 
-        check(ret)
+        if !iovecs.is_empty() {
+            self.backing_iovs.insert(resource_id, iovecs);
+        }
+
+        Ok(())
     }
 
     pub fn attach_backing(&mut self, resource_id: u32, iovecs: Vec<Iovec>) -> VirglResult<()> {
@@ -848,6 +854,17 @@ impl VirglRenderer {
 
         self.backing_iovs.insert(resource_id, iovecs);
         Ok(())
+    }
+
+    pub fn detach_backing(&mut self, resource_id: u32) {
+        let mut iov = std::ptr::null_mut();
+        let mut num_iovs = 0;
+
+        unsafe {
+            virgl_renderer_resource_detach_iov(resource_id as c_int, &mut iov, &mut num_iovs);
+        }
+
+        self.backing_iovs.remove(&resource_id);
     }
 
     pub fn transfer_write(&self, ctx_id: u32, resource_id: u32, t: Transfer3D) -> VirglResult<()> {
