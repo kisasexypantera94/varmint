@@ -7,6 +7,8 @@ pub struct Backend {
     iface: Interface,
 }
 
+unsafe impl Send for Backend {}
+
 impl Backend {
     pub fn new() -> Result<Backend> {
         let iface = vmnet::Interface::new(

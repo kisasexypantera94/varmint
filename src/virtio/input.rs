@@ -1,10 +1,8 @@
 use crate::virtio::{
-    chain::ChainData,
     common,
-    device::{ChainAction, ChainToken, Device, Effect, ExternalEventHandler},
+    device::{Device, DeviceContext, ExternalEventHandler},
     input::keys::*,
 };
-use applevisor::memory::Memory;
 use num_enum::TryFromPrimitive;
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
@@ -23,7 +21,7 @@ enum QueueType {
 }
 
 /// https://docs.oasis-open.org/virtio/virtio/v1.3/csd01/virtio-v1.3-csd01.html#x1-2450006
-#[derive(IntoBytes, FromBytes, Immutable)]
+#[derive(IntoBytes, FromBytes, Immutable, Copy, Clone)]
 #[repr(C, packed)]
 struct Event {
     r#type: u16,
@@ -71,9 +69,11 @@ enum InputConfigSelect {
     AbsInfo = 0x12,
 }
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 enum InputKind {
     Keyboard,
     Tablet,
+    Mouse,
 }
 
 pub struct Input {
@@ -103,6 +103,14 @@ impl Input {
         }
     }
 
+    pub fn mouse() -> Input {
+        Input {
+            kind: InputKind::Mouse,
+            select: 0,
+            subsel: 0,
+        }
+    }
+
     fn config(&self) -> InputConfig {
         let mut cfg = InputConfig {
             select: self.select,
@@ -117,6 +125,7 @@ impl Input {
                 let name = match self.kind {
                     InputKind::Keyboard => "varmint keyboard",
                     InputKind::Tablet => "varmint tablet",
+                    InputKind::Mouse => "varmint mouse",
                 };
                 cfg.size = name.len() as u8;
                 cfg.u[..name.len()].copy_from_slice(name.as_bytes());
@@ -126,7 +135,11 @@ impl Input {
                 let devids = InputDevids {
                     bustype: BUS_VIRTUAL,
                     vendor: 0x1234,
-                    product: 1,
+                    product: match self.kind {
+                        InputKind::Keyboard => 1,
+                        InputKind::Tablet => 2,
+                        InputKind::Mouse => 3,
+                    },
                     version: 1,
                 };
 
@@ -175,7 +188,7 @@ impl Input {
                     _ => {}
                 },
 
-                InputKind::Tablet { .. } => match self.subsel as u16 {
+                InputKind::Tablet => match self.subsel as u16 {
                     EV_SYN => {
                         set_bit(&mut cfg.u, SYN_REPORT as usize);
                         cfg.size = 1;
@@ -197,14 +210,37 @@ impl Input {
                         set_bit(&mut cfg.u, REL_WHEEL as usize);
                         set_bit(&mut cfg.u, REL_HWHEEL as usize);
 
-                        cfg.size = 2;
+                        cfg.size = (REL_WHEEL / 8 + 1) as u8;
+                    }
+                    _ => {}
+                },
+
+                InputKind::Mouse => match self.subsel as u16 {
+                    EV_SYN => {
+                        set_bit(&mut cfg.u, SYN_REPORT as usize);
+                        cfg.size = 1;
+                    }
+                    EV_KEY => {
+                        set_bit(&mut cfg.u, BTN_LEFT as usize);
+                        set_bit(&mut cfg.u, BTN_RIGHT as usize);
+                        set_bit(&mut cfg.u, BTN_MIDDLE as usize);
+
+                        cfg.size = (BTN_MIDDLE / 8 + 1) as u8;
+                    }
+                    EV_REL => {
+                        set_bit(&mut cfg.u, REL_X as usize);
+                        set_bit(&mut cfg.u, REL_Y as usize);
+                        set_bit(&mut cfg.u, REL_WHEEL as usize);
+                        set_bit(&mut cfg.u, REL_HWHEEL as usize);
+
+                        cfg.size = (REL_WHEEL / 8 + 1) as u8;
                     }
                     _ => {}
                 },
             },
 
             Ok(InputConfigSelect::PropBits) => {
-                if matches!(self.kind, InputKind::Tablet { .. }) {
+                if matches!(self.kind, InputKind::Tablet | InputKind::Mouse) {
                     set_bit(&mut cfg.u, INPUT_PROP_POINTER as usize);
                     cfg.size = 1;
                 }
@@ -252,20 +288,14 @@ impl Device for Input {
         2
     }
 
-    fn delivery_queues(&self) -> &[u16] {
-        &[QueueType::Event as u16]
-    }
-
-    fn process_chain(
-        &mut self,
-        queue_idx: usize,
-        _chain: &ChainData,
-        _token: ChainToken,
-        _mem: &mut Memory,
-    ) -> ChainAction {
+    fn queue_notified(&mut self, queue_idx: usize, ctx: &mut DeviceContext<'_>) {
         match QueueType::try_from(queue_idx).unwrap() {
-            QueueType::Event => ChainAction::Complete(0),
-            QueueType::Status => ChainAction::Complete(0),
+            QueueType::Event => {}
+            QueueType::Status => {
+                while let Some(chain) = ctx.pop_chain(queue_idx) {
+                    ctx.complete(chain.token, 0);
+                }
+            }
         }
     }
 
@@ -280,23 +310,23 @@ pub enum ExternalInput {
     PointerButton { button: u16, pressed: bool },
     AbsPosition { x: u32, y: u32, width: u32, height: u32 },
     Scroll { horizontal: bool, value: i32 },
+    RelMotion { dx: i32, dy: i32 },
 }
 
 impl ExternalEventHandler for Input {
     type Event<'a> = ExternalInput;
 
-    fn on_event(&mut self, input: ExternalInput, mut emit: impl FnMut(Effect)) {
-        let q = QueueType::Event as usize;
+    fn on_event(&mut self, input: ExternalInput, ctx: &mut DeviceContext<'_>) {
         let mut ev = |t: u16, c: u16, v: u32| {
-            emit(Effect::Deliver {
-                queue_idx: q,
-                parts: &[Event {
+            ctx.deliver(
+                QueueType::Event as usize,
+                &[Event {
                     r#type: t,
                     code: c,
                     value: v,
                 }
                 .as_bytes()],
-            });
+            )
         };
 
         match input {
@@ -309,16 +339,25 @@ impl ExternalEventHandler for Input {
                 ev(EV_SYN, SYN_REPORT, 0);
             }
             ExternalInput::AbsPosition { x, y, width, height } => {
-                let x = (x as u64 * TABLET_ABS_MAX_X as u64) / (width as u64 - 1);
-                let y = (y as u64 * TABLET_ABS_MAX_Y as u64) / (height as u64 - 1);
-                ev(EV_ABS, ABS_X, x as u32);
-                ev(EV_ABS, ABS_Y, y as u32);
-                ev(EV_SYN, SYN_REPORT, 0);
+                if matches!(self.kind, InputKind::Tablet) && width > 1 && height > 1 {
+                    let x = (x as u64 * TABLET_ABS_MAX_X as u64) / (width as u64 - 1);
+                    let y = (y as u64 * TABLET_ABS_MAX_Y as u64) / (height as u64 - 1);
+                    ev(EV_ABS, ABS_X, x as u32);
+                    ev(EV_ABS, ABS_Y, y as u32);
+                    ev(EV_SYN, SYN_REPORT, 0);
+                }
             }
             ExternalInput::Scroll { horizontal, value } => {
                 let code = if horizontal { REL_HWHEEL } else { REL_WHEEL };
                 ev(EV_REL, code, value as u32);
                 ev(EV_SYN, SYN_REPORT, 0);
+            }
+            ExternalInput::RelMotion { dx, dy } => {
+                if matches!(self.kind, InputKind::Mouse) {
+                    ev(EV_REL, REL_X, dx as u32);
+                    ev(EV_REL, REL_Y, dy as u32);
+                    ev(EV_SYN, SYN_REPORT, 0);
+                }
             }
         }
     }

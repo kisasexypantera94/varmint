@@ -250,6 +250,7 @@ struct AngleCopySession {
     egl_bind_tex_image: EglBindTexImage,
     egl_release_tex_image: EglReleaseTexImage,
     egl_destroy_surface: EglDestroySurface,
+    egl_destroy_context: EglDestroyContext,
     egl_create_image_khr: EglCreateImageKHR,
     egl_destroy_image_khr: EglDestroyImageKHR,
     egl_get_error: EglGetError,
@@ -274,6 +275,7 @@ struct AngleCopySession {
     gl_vertex_attrib_pointer: GlVertexAttribPointer,
     gl_draw_arrays: GlDrawArrays,
     gl_egl_image_target_texture_2d_oes: GlEGLImageTargetTexture2DOES,
+    gl_delete_program: GlDeleteProgram,
 
     program: u32,
     sampler_location: i32,
@@ -317,6 +319,7 @@ impl AngleCopySession {
         let egl_bind_tex_image: EglBindTexImage = unsafe { symbol(egl_lib, "eglBindTexImage")? };
         let egl_release_tex_image: EglReleaseTexImage = unsafe { symbol(egl_lib, "eglReleaseTexImage")? };
         let egl_destroy_surface: EglDestroySurface = unsafe { symbol(egl_lib, "eglDestroySurface")? };
+        let egl_destroy_context: EglDestroyContext = unsafe { symbol(egl_lib, "eglDestroyContext")? };
         let egl_query_string: EglQueryString = unsafe { symbol(egl_lib, "eglQueryString")? };
         let egl_get_error: EglGetError = unsafe { symbol(egl_lib, "eglGetError")? };
 
@@ -490,6 +493,7 @@ impl AngleCopySession {
             egl_bind_tex_image,
             egl_release_tex_image,
             egl_destroy_surface,
+            egl_destroy_context,
             egl_create_image_khr,
             egl_destroy_image_khr,
             egl_get_error,
@@ -514,6 +518,7 @@ impl AngleCopySession {
             gl_vertex_attrib_pointer,
             gl_draw_arrays,
             gl_egl_image_target_texture_2d_oes,
+            gl_delete_program,
 
             program,
             sampler_location,
@@ -716,10 +721,21 @@ impl AngleCopySession {
         &mut self,
         source_texture: *mut c_void,
         target_surface: IOSurfaceRef,
-        width: u32,
-        height: u32,
+        source_size: (u32, u32),
+        source_rect: (u32, u32, u32, u32),
     ) -> bool {
-        if source_texture.is_null() || target_surface.is_null() || width == 0 || height == 0 {
+        let (source_width, source_height) = source_size;
+        let (source_x, source_y, width, height) = source_rect;
+
+        if source_texture.is_null()
+            || target_surface.is_null()
+            || source_width == 0
+            || source_height == 0
+            || width == 0
+            || height == 0
+            || source_x.checked_add(width).is_none_or(|end| end > source_width)
+            || source_y.checked_add(height).is_none_or(|end| end > source_height)
+        {
             return false;
         }
 
@@ -732,7 +748,8 @@ impl AngleCopySession {
             return false;
         }
 
-        let Some(source_tex) = (unsafe { self.ensure_source_cache(source_texture, width, height) }) else {
+        let Some(source_tex) = (unsafe { self.ensure_source_cache(source_texture, source_width, source_height) })
+        else {
             return false;
         };
 
@@ -754,9 +771,14 @@ impl AngleCopySession {
             return false;
         }
 
+        let u0 = source_x as f32 / source_width as f32;
+        let v0 = source_y as f32 / source_height as f32;
+        let u1 = (source_x + width) as f32 / source_width as f32;
+        let v1 = (source_y + height) as f32 / source_height as f32;
+
         // V-only flip. U is normal.
         let vertices: [f32; 16] = [
-            -1.0, -1.0, 0.0, 0.0, 1.0, -1.0, 1.0, 0.0, -1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+            -1.0, -1.0, u0, v0, 1.0, -1.0, u1, v0, -1.0, 1.0, u0, v1, 1.0, 1.0, u1, v1,
         ];
 
         unsafe {
@@ -794,6 +816,42 @@ impl AngleCopySession {
         }
 
         true
+    }
+}
+
+impl Drop for AngleCopySession {
+    fn drop(&mut self) {
+        let old_display = unsafe { (self.egl_get_current_display)() };
+        let old_draw = unsafe { (self.egl_get_current_surface)(EGL_DRAW) };
+        let old_read = unsafe { (self.egl_get_current_surface)(EGL_READ) };
+        let old_context = unsafe { (self.egl_get_current_context)() };
+
+        let made_current = unsafe {
+            (self.egl_make_current)(self.display, self.dummy_surface, self.dummy_surface, self.context) != EGL_FALSE
+        };
+
+        if made_current {
+            unsafe {
+                self.destroy_source_cache();
+                self.destroy_target_cache();
+                (self.gl_delete_program)(self.program);
+                (self.egl_make_current)(self.display, ptr::null_mut(), ptr::null_mut(), ptr::null_mut());
+            }
+        } else {
+            eprintln!("angle_egl_copy: failed to make copy context current during teardown");
+        }
+
+        unsafe {
+            (self.egl_destroy_surface)(self.display, self.dummy_surface);
+            (self.egl_destroy_context)(self.display, self.context);
+        }
+
+        if !old_display.is_null() && old_context != self.context {
+            let restore_ok = unsafe { (self.egl_make_current)(old_display, old_draw, old_read, old_context) };
+            if restore_ok == EGL_FALSE {
+                eprintln!("angle_egl_copy: failed to restore previous EGL context during teardown");
+            }
+        }
     }
 }
 
@@ -940,8 +998,8 @@ impl AngleCopy {
         &mut self,
         source_texture: *mut c_void,
         target_surface: IOSurfaceRef,
-        width: u32,
-        height: u32,
+        source_size: (u32, u32),
+        source_rect: (u32, u32, u32, u32),
     ) -> bool {
         let Some(sess) = self.session.as_mut() else {
             return false;
@@ -952,7 +1010,8 @@ impl AngleCopy {
         let old_read = unsafe { (sess.egl_get_current_surface)(EGL_READ) };
         let old_context = unsafe { (sess.egl_get_current_context)() };
 
-        let ok = unsafe { sess.copy_metal_texture_to_iosurface(source_texture, target_surface, width, height) };
+        let ok =
+            unsafe { sess.copy_metal_texture_to_iosurface(source_texture, target_surface, source_size, source_rect) };
 
         let restore_ok = unsafe {
             if old_display.is_null() {

@@ -1,4 +1,4 @@
-use crate::helpers;
+use super::{read_rt, write_rt};
 use applevisor::{
     error::Result,
     vcpu::{Reg, Vcpu},
@@ -13,8 +13,7 @@ pub struct SysReg {
     op2: u64,
 }
 
-// https://developer.arm.com/documentation/ddi0601/2026-03/AArch64-Registers/ID-AA64ISAR2-EL1--AArch64-Instruction-Set-Attribute-Register-2?lang=en
-pub const ID_AA64ISAR2_EL1: SysReg = SysReg {
+const ID_AA64ISAR2_EL1: SysReg = SysReg {
     op0: 0b11,
     op1: 0b000,
     crn: 0b0000,
@@ -22,7 +21,7 @@ pub const ID_AA64ISAR2_EL1: SysReg = SysReg {
     op2: 0b010,
 };
 
-pub const MDSCR_EL1: SysReg = SysReg {
+const MDSCR_EL1: SysReg = SysReg {
     op0: 2,
     op1: 0,
     crn: 0,
@@ -30,7 +29,7 @@ pub const MDSCR_EL1: SysReg = SysReg {
     op2: 2,
 };
 
-pub const OSDLR_EL1: SysReg = SysReg {
+const OSDLR_EL1: SysReg = SysReg {
     op0: 2,
     op1: 0,
     crn: 1,
@@ -38,7 +37,7 @@ pub const OSDLR_EL1: SysReg = SysReg {
     op2: 4,
 };
 
-pub const OSLAR_EL1: SysReg = SysReg {
+const OSLAR_EL1: SysReg = SysReg {
     op0: 2,
     op1: 0,
     crn: 1,
@@ -46,7 +45,7 @@ pub const OSLAR_EL1: SysReg = SysReg {
     op2: 4,
 };
 
-pub fn decode_sysreg(esr: u64) -> (SysReg, u64, bool) {
+pub fn decode(esr: u64) -> (SysReg, u64, bool) {
     let iss = esr & 0x01ff_ffff;
 
     let op0 = (iss >> 20) & 0b11;
@@ -55,8 +54,6 @@ pub fn decode_sysreg(esr: u64) -> (SysReg, u64, bool) {
     let crn = (iss >> 10) & 0b1111;
     let rt = (iss >> 5) & 0b11111;
     let crm = (iss >> 1) & 0b1111;
-
-    // For EC=0x18: 1 = MRS/read, 0 = MSR/write.
     let is_read = (iss & 1) == 1;
 
     (
@@ -73,7 +70,7 @@ pub fn decode_sysreg(esr: u64) -> (SysReg, u64, bool) {
 }
 
 pub fn handle_trap(vcpu: &Vcpu, esr: u64, pc: u64) -> Result<bool> {
-    let (sysreg, rt, is_read) = decode_sysreg(esr);
+    let (sysreg, rt, is_read) = decode(esr);
 
     eprintln!(
         "sysreg trap: {:?}, rt={}, {}",
@@ -83,43 +80,22 @@ pub fn handle_trap(vcpu: &Vcpu, esr: u64, pc: u64) -> Result<bool> {
     );
 
     match (sysreg, is_read) {
-        (ID_AA64ISAR2_EL1, true) => {
-            // Conservative value: expose no optional ISAR2 features.
-            helpers::set_rt(vcpu, rt, 0)?;
+        (ID_AA64ISAR2_EL1, true) | (MDSCR_EL1, true) | (OSDLR_EL1, true) | (OSLAR_EL1, true) => {
+            write_rt(vcpu, rt, 0)?;
         }
-
-        (MDSCR_EL1, true) => {
-            // Debug control register. For bring-up, report debug disabled.
-            helpers::set_rt(vcpu, rt, 0)?;
-        }
-
         (MDSCR_EL1, false) => {
-            // Linux may try to configure debug state. Ignore for now.
-            let value = helpers::get_rt(vcpu, rt)?;
+            let value = read_rt(vcpu, rt)?;
             eprintln!("ignored MDSCR_EL1 write: 0x{value:x}");
         }
-
-        (OSDLR_EL1, true) => {
-            helpers::set_rt(vcpu, rt, 0)?;
-        }
-
         (OSDLR_EL1, false) => {
-            let value = helpers::get_rt(vcpu, rt)?;
+            let value = read_rt(vcpu, rt)?;
             eprintln!("ignored OSDLR_EL1 write: 0x{value:x}");
         }
-
-        (OSLAR_EL1, true) => {
-            helpers::set_rt(vcpu, rt, 0)?;
-        }
-
         (OSLAR_EL1, false) => {
-            let value = helpers::get_rt(vcpu, rt)?;
+            let value = read_rt(vcpu, rt)?;
             eprintln!("ignored OSLAR_EL1 write: 0x{value:x}");
         }
-
-        _ => {
-            return Ok(false);
-        }
+        _ => return Ok(false),
     }
 
     vcpu.set_reg(Reg::PC, pc + 4)?;

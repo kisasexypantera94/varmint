@@ -1,3 +1,4 @@
+use crate::irq::IrqLine;
 use std::collections::VecDeque;
 
 const UART_DR: u64 = 0x00;
@@ -13,19 +14,21 @@ const UART_INT_RX: u32 = 1 << 4;
 pub struct Uart {
     imsc: u32,
     q: VecDeque<u8>,
+    irq: IrqLine,
 }
 
 impl Uart {
-    pub fn new() -> Uart {
-        Uart {
+    pub fn new(irq: IrqLine) -> Self {
+        Self {
             imsc: 0,
             q: VecDeque::new(),
+            irq,
         }
     }
 
-    pub fn enqueue(&mut self, value: u8) -> bool {
+    pub fn enqueue(&mut self, value: u8) {
         self.q.push_back(value);
-        self.q.len() == 1
+        self.sync_irq();
     }
 
     fn ris(&self) -> u32 {
@@ -36,40 +39,30 @@ impl Uart {
         self.ris() & self.imsc
     }
 
-    pub fn is_asserted(&self) -> bool {
-        self.mis() != 0
+    fn sync_irq(&mut self) {
+        self.irq.set(self.mis() != 0);
     }
 
     pub fn read(&mut self, offset: u64) -> u32 {
-        match offset {
+        let value = match offset {
             UART_FR => (self.q.is_empty() as u32 * UART_FR_RXFE) | UART_FR_TXFE,
-
             UART_DR => self.q.pop_front().unwrap_or(0) as u32,
-
             UART_RIS => self.ris(),
-
             UART_MIS => self.mis(),
+            _ => 0,
+        };
 
-            _ => {
-                // println!("Unexpected PL011 register read: offset={}", offset);
-                // For bring-up, unknown PL011 registers read as 0.
-                0
-            }
-        }
+        self.sync_irq();
+        value
     }
 
     pub fn write<F: Fn(u32)>(&mut self, offset: u64, value: u32, on_data: F) {
         match offset {
-            UART_DR => {
-                on_data(value);
-            }
-
+            UART_DR => on_data(value),
             UART_IMSC => self.imsc = value,
-
-            _ => {
-                // Ignore config writes for now:
-                // baud divisor, line control, control register, interrupt clear, etc.
-            }
+            _ => {}
         }
+
+        self.sync_irq();
     }
 }

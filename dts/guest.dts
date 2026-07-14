@@ -20,6 +20,11 @@
 		// linux,initrd-end   = <0x0 0x480cdecf>;// busybox
 	};
 
+	psci {
+		compatible = "arm,psci-0.2";
+		method = "hvc";
+	};
+
 	cpus {
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -28,6 +33,84 @@
 			device_type = "cpu";
 			compatible = "arm,armv8";
 			reg = <0x0>;
+			enable-method = "psci";
+		};
+
+		cpu1: cpu@1 {
+			device_type = "cpu";
+			compatible = "arm,armv8";
+			reg = <0x1>;
+			enable-method = "psci";
+		};
+
+		cpu2: cpu@2 {
+			device_type = "cpu";
+			compatible = "arm,armv8";
+			reg = <0x2>;
+			enable-method = "psci";
+		};
+
+		cpu3: cpu@3 {
+			device_type = "cpu";
+			compatible = "arm,armv8";
+			reg = <0x3>;
+			enable-method = "psci";
+		};
+
+		cpu4: cpu@4 {
+			device_type = "cpu";
+			compatible = "arm,armv8";
+			reg = <0x4>;
+			enable-method = "psci";
+		};
+
+		cpu5: cpu@5 {
+			device_type = "cpu";
+			compatible = "arm,armv8";
+			reg = <0x5>;
+			enable-method = "psci";
+		};
+
+		cpu6: cpu@6 {
+			device_type = "cpu";
+			compatible = "arm,armv8";
+			reg = <0x6>;
+			enable-method = "psci";
+		};
+
+		cpu7: cpu@7 {
+			device_type = "cpu";
+			compatible = "arm,armv8";
+			reg = <0x7>;
+			enable-method = "psci";
+		};
+
+		cpu8: cpu@8 {
+			device_type = "cpu";
+			compatible = "arm,armv8";
+			reg = <0x8>;
+			enable-method = "psci";
+		};
+
+		cpu9: cpu@9 {
+			device_type = "cpu";
+			compatible = "arm,armv8";
+			reg = <0x9>;
+			enable-method = "psci";
+		};
+
+		cpu10: cpu@a {
+			device_type = "cpu";
+			compatible = "arm,armv8";
+			reg = <0xa>;
+			enable-method = "psci";
+		};
+
+		cpu11: cpu@b {
+			device_type = "cpu";
+			compatible = "arm,armv8";
+			reg = <0xb>;
+			enable-method = "psci";
 		};
 	};
 
@@ -36,7 +119,8 @@
 		interrupt-controller;
 		#interrupt-cells = <3>;
 
-		reg = <0x0 0x08000000 0x0 0x10000>, <0x0 0x080A0000 0x0 0x20000>;
+		reg = <0x0 0x08000000 0x0 0x10000>,
+		<0x0 0x080A0000 0x0 0x180000>;
 	};
 
 	timer {
@@ -49,7 +133,7 @@
 
 	memory@40000000 {
 		device_type = "memory";
-		reg = <0x0 0x40000000 0x2 0x00000000>;
+		reg = <0x0 0x40000000 0x4 0x00000000>;
 	};
 
 	clk24m: clk24m {
@@ -108,5 +192,11 @@
 		compatible = "virtio,mmio";
 		reg = <0x0 0x0a006000 0x0 0x1000>;
 		interrupts = <0 38 4>;
+	};
+
+	virtio_input_mouse@a007000 {
+		compatible = "virtio,mmio";
+		reg = <0x0 0x0a007000 0x0 0x1000>;
+		interrupts = <0 39 4>;
 	};
 };

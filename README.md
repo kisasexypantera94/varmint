@@ -5,6 +5,8 @@
 # varmint
 A small Virtual Machine Manager for Apple Silicon, built on top of Hypervisor.framework.
 
+It focuses on making Linux guests usable for real desktop workloads, including accelerated Vulkan and OpenGL.
+
 It boots a Debian arm64 guest and a small set of devices:
 - virtio-blk
 - virtio-net
@@ -20,15 +22,15 @@ Supported paths:
 - Vulkan: `guest Vulkan => Mesa Venus => virglrenderer => MoltenVK => Metal`
 - OpenGL: `guest OpenGL => Mesa VirGL => virglrenderer => ANGLE => Metal`
 
-x86-64 binaries can run under FEX. Steam starts, Helltaker launches through Proton, and Wine/DXVK experiments are starting to work.
+x86-64 binaries can run under FEX. For example, Subnautica is playable under FEX + Proton and reaches around 60 FPS on high settings.
 
 ## Demo
-Final Fantasy XIV Dawntrail benchmark:
+Subnautica:
 <p align="left">
-  <img src="./assets/dawntrail_bench_demo.png">
+  <img src="./assets/subnautica_demo.png">
 </p>
 
-##  Setup
+## Setup
 ### Dependencies
 ```sh
 chmod +x ./scripts/build_graphics_stack.sh ; ./scripts/build_graphics_stack.sh

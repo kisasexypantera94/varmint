@@ -42,6 +42,12 @@ SDK="${SDK:-macosx}"
 ARCH="${ARCH:-arm64}"
 BUILD_CONFIGURATION="${BUILD_CONFIGURATION:-Release}"
 
+ONLY_MVK="${ONLY_MVK:-0}"
+MVK_BUILD_CONFIGURATION="${MVK_BUILD_CONFIGURATION:-Release}"
+MVK_XCODE_SCHEME="${MVK_XCODE_SCHEME:-MoltenVK Package (macOS only)}"
+MVK_BUILD_WITH_MAKE="${MVK_BUILD_WITH_MAKE:-0}"
+MVK_MAKE_ARGS="${MVK_MAKE_ARGS:-}"
+
 CLEAN="${CLEAN:-1}"
 SKIP_ANGLE="${SKIP_ANGLE:-0}"
 SKIP_EPOXY="${SKIP_EPOXY:-0}"
@@ -273,9 +279,33 @@ build_moltenvk_source() {
   fi
 
   env -i PATH="$PATH" HOME="$HOME" LANG="${LANG:-en_US.UTF-8}" ./fetchDependencies --macos -v
-  env -i PATH="$PATH" HOME="$HOME" LANG="${LANG:-en_US.UTF-8}" make macos
+
+  if [ "$MVK_BUILD_WITH_MAKE" = "1" ]; then
+    # shellcheck disable=SC2086
+    env -i PATH="$PATH" HOME="$HOME" LANG="${LANG:-en_US.UTF-8}" \
+      make macos $MVK_MAKE_ARGS
+  else
+    rm -rf "Package/$MVK_BUILD_CONFIGURATION"
+
+    env -i PATH="$PATH" HOME="$HOME" LANG="${LANG:-en_US.UTF-8}" \
+      xcodebuild build \
+        -project MoltenVKPackaging.xcodeproj \
+        -scheme "$MVK_XCODE_SCHEME" \
+        -configuration "$MVK_BUILD_CONFIGURATION" \
+        -sdk "$SDK" \
+        -arch "$ARCH" \
+        CODE_SIGNING_ALLOWED=NO
+  fi
+
+  MVK_PACKAGE="$MVK_SRC/Package/$MVK_BUILD_CONFIGURATION/MoltenVK"
+  MVK_DYLIB="$MVK_PACKAGE/dynamic/dylib/macOS/libMoltenVK.dylib"
 
   need_file "$MVK_DYLIB"
+
+  log "MoltenVK built"
+  echo "MVK_BUILD_CONFIGURATION=$MVK_BUILD_CONFIGURATION"
+  echo "MVK_PACKAGE=$MVK_PACKAGE"
+  echo "MVK_DYLIB=$MVK_DYLIB"
 }
 
 install_moltenvk_brew_keg() {
@@ -513,6 +543,13 @@ main() {
 
   mkdir -p "$SRC_ROOT" "$WORKDIR" "$VARMINT_DEPS"
 
+  if [ "$ONLY_MVK" = "1" ]; then
+    SKIP_ANGLE=1
+    SKIP_EPOXY=1
+    SKIP_MVK=0
+    SKIP_VIRGL=1
+  fi
+
   log "inputs"
   echo "VARMINT_DEPS=$VARMINT_DEPS"
   echo "WEBKIT_SRC=$WEBKIT_SRC"
@@ -522,6 +559,9 @@ main() {
   echo "MVK_PREFIX=$MVK_PREFIX"
   echo "VIRGL_SRC=$VIRGL_SRC"
   echo "VIRGL_PREFIX=$VIRGL_PREFIX"
+  echo "ONLY_MVK=$ONLY_MVK"
+  echo "MVK_BUILD_CONFIGURATION=$MVK_BUILD_CONFIGURATION"
+  echo "MVK_XCODE_SCHEME=$MVK_XCODE_SCHEME"
   echo "SDK=$SDK ARCH=$ARCH BUILD_CONFIGURATION=$BUILD_CONFIGURATION"
 
   [ "$SKIP_ANGLE" = "1" ] || build_angle
