@@ -10,6 +10,8 @@ use crate::{
 };
 use num_enum::TryFromPrimitive;
 
+pub const QUEUE_NOTIFY_OFFSET: u64 = 0x050;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, TryFromPrimitive)]
 #[repr(u64)]
 enum Reg {
@@ -25,7 +27,7 @@ enum Reg {
     QueueNumMax = 0x034,
     QueueNum = 0x038,
     QueueReady = 0x044,
-    QueueNotify = 0x050,
+    QueueNotify = QUEUE_NOTIFY_OFFSET,
     InterruptStatus = 0x060,
     InterruptAck = 0x064,
     Status = 0x070,

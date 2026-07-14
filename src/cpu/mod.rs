@@ -1,11 +1,7 @@
 mod psci;
 mod sysreg;
 
-use crate::{
-    devices::{VmDevices, handle_routed_mmio},
-    machine::{NUM_VCPUS, classify},
-    memory::GuestMemory,
-};
+use crate::{devices::Devices, machine::NUM_VCPUS, memory::GuestMemory};
 use applevisor::prelude::*;
 use std::{
     sync::{
@@ -68,7 +64,7 @@ impl CpuRuntime {
         })
     }
 
-    pub fn run(self, vm: &VirtualMachineInstance<GicEnabled>, mem: &GuestMemory, devices: VmDevices<'_>) -> Result<()> {
+    pub fn run(self, vm: &VirtualMachineInstance<GicEnabled>, mem: &GuestMemory, devices: &Devices) -> Result<()> {
         let Self {
             boot_vcpu,
             secondaries,
@@ -152,7 +148,7 @@ impl SecondaryWorker {
         self,
         vm: &VirtualMachineInstance<GicEnabled>,
         mem: &GuestMemory,
-        devices: VmDevices<'_>,
+        devices: &Devices,
         secondaries: &SecondaryCpus,
     ) -> Result<()> {
         let vcpu = vm.vcpu_create()?;
@@ -242,7 +238,7 @@ fn run_loop(
     vcpu: &Vcpu,
     vcpu_id: usize,
     mem: &GuestMemory,
-    devices: VmDevices<'_>,
+    devices: &Devices,
     secondaries: &SecondaryCpus,
 ) -> Result<()> {
     loop {
@@ -283,7 +279,8 @@ fn run_loop(
                         let rt = (esr >> 16) & 0b11111;
                         let size = 1usize << ((esr >> 22) & 0b11);
 
-                        let Some(route) = classify(phys_addr) else {
+                        let value = if is_write { read_rt(vcpu, rt)? as u32 as u64 } else { 0 };
+                        let Ok(read_value) = devices.handle_mmio(phys_addr, is_write, size, value, mem) else {
                             panic!(
                                 "unhandled data abort trap: ec={}, rt={}, {}, esr=0x{:x}, pc=0x{:x}, addr=0x{:x}",
                                 ec,
@@ -295,8 +292,7 @@ fn run_loop(
                             );
                         };
 
-                        let value = if is_write { read_rt(vcpu, rt)? as u32 as u64 } else { 0 };
-                        if let Some(read_value) = handle_routed_mmio(route, is_write, size, value, mem, &devices) {
+                        if let Some(read_value) = read_value {
                             write_rt(vcpu, rt, read_value)?;
                         }
 

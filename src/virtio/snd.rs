@@ -1,5 +1,5 @@
 use crate::{
-    audio::coreaudio::PeriodSink,
+    audio::PeriodSink,
     memory::GuestMemory,
     virtio::{
         chain::ChainData,

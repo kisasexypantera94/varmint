@@ -18,6 +18,7 @@ pub use console::Console;
 pub use device::Device;
 pub use gpu::Gpu;
 pub use input::Input;
+pub use mmio::QUEUE_NOTIFY_OFFSET;
 pub use net::Net;
 pub use snd::Snd;
 pub type MmioTransport<D> = mmio::Transport<D>;

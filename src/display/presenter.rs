@@ -1,4 +1,4 @@
-use crate::iosurface::ScopedIOSurface;
+use super::iosurface::ScopedIOSurface;
 use objc2::{rc::Retained, runtime::ProtocolObject};
 use objc2_foundation::NSSize;
 use objc2_metal::{

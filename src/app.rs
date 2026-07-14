@@ -1,7 +1,7 @@
 use crate::{
-    host_events::{HostEvent, HostInputEvent},
-    present,
-    virtio::{self, input::keys::*},
+    devices::{RuntimeEvent, RuntimeInputEvent},
+    display::{DisplayBuffer, Presenter},
+    virtio::input::keys::*,
 };
 use std::sync::{Mutex, mpsc::Sender};
 use winit::{
@@ -120,10 +120,10 @@ fn winit_to_linux_key(key: winit::keyboard::KeyCode) -> Option<u16> {
 }
 
 struct AppState<'a> {
-    display: &'a Mutex<virtio::gpu::DisplayBuffer>,
-    host_tx: Sender<HostEvent>,
+    display: &'a Mutex<DisplayBuffer>,
+    host_tx: Sender<RuntimeEvent>,
 
-    presenter: Option<present::Presenter>,
+    presenter: Option<Presenter>,
 
     surface_w: u32,
     surface_h: u32,
@@ -148,7 +148,7 @@ struct AppState<'a> {
 }
 
 impl<'a> AppState<'a> {
-    fn new(display: &'a Mutex<virtio::gpu::DisplayBuffer>, host_tx: Sender<HostEvent>) -> Self {
+    fn new(display: &'a Mutex<DisplayBuffer>, host_tx: Sender<RuntimeEvent>) -> Self {
         Self {
             display,
             host_tx,
@@ -339,9 +339,9 @@ impl<'a> ApplicationHandler for AppState<'a> {
         let logical_size = PhysicalSize::new(width, height).to_logical::<u32>(window.scale_factor());
         self.surface_w = width;
         self.surface_h = height;
-        self.presenter = Some(present::Presenter::new(window, width, height));
+        self.presenter = Some(Presenter::new(window, width, height));
 
-        let _ = self.host_tx.send(HostEvent::DisplayResized {
+        let _ = self.host_tx.send(RuntimeEvent::DisplayResized {
             width: logical_size.width,
             height: logical_size.height,
         });
@@ -369,7 +369,7 @@ impl<'a> ApplicationHandler for AppState<'a> {
                 }
 
                 let logical_size = PhysicalSize::new(width, height).to_logical::<u32>(scale_factor);
-                let _ = self.host_tx.send(HostEvent::DisplayResized {
+                let _ = self.host_tx.send(RuntimeEvent::DisplayResized {
                     width: logical_size.width,
                     height: logical_size.height,
                 });
@@ -398,7 +398,7 @@ impl<'a> ApplicationHandler for AppState<'a> {
                         self.set_mouse_capture(false);
                     }
                     if let Some(linux_code) = winit_to_linux_key(code) {
-                        let _ = self.host_tx.send(HostEvent::Input(HostInputEvent::Key {
+                        let _ = self.host_tx.send(RuntimeEvent::Input(RuntimeInputEvent::Key {
                             code: linux_code,
                             pressed,
                         }));
@@ -412,7 +412,7 @@ impl<'a> ApplicationHandler for AppState<'a> {
                     let pos = Some((x, y));
                     if pos != self.last_mouse_pos {
                         self.last_mouse_pos = pos;
-                        let _ = self.host_tx.send(HostEvent::Input(HostInputEvent::PointerMove {
+                        let _ = self.host_tx.send(RuntimeEvent::Input(RuntimeInputEvent::PointerMove {
                             x: x as u32,
                             y: y as u32,
                             width: self.surface_w,
@@ -430,7 +430,7 @@ impl<'a> ApplicationHandler for AppState<'a> {
                     _ => return,
                 };
 
-                let _ = self.host_tx.send(HostEvent::Input(HostInputEvent::PointerButton {
+                let _ = self.host_tx.send(RuntimeEvent::Input(RuntimeInputEvent::PointerButton {
                     button: btn,
                     pressed: state == ElementState::Pressed,
                     relative: self.mouse_captured,
@@ -444,14 +444,14 @@ impl<'a> ApplicationHandler for AppState<'a> {
                     MouseScrollDelta::PixelDelta(p) => (p.x as f32 / 32.0, p.y as f32 / 32.0),
                 };
                 if dy != 0.0 {
-                    let _ = self.host_tx.send(HostEvent::Input(HostInputEvent::Scroll {
+                    let _ = self.host_tx.send(RuntimeEvent::Input(RuntimeInputEvent::Scroll {
                         horizontal: false,
                         value: dy.round() as i32,
                         relative: self.mouse_captured,
                     }));
                 }
                 if dx != 0.0 {
-                    let _ = self.host_tx.send(HostEvent::Input(HostInputEvent::Scroll {
+                    let _ = self.host_tx.send(RuntimeEvent::Input(RuntimeInputEvent::Scroll {
                         horizontal: true,
                         value: dx.round() as i32,
                         relative: self.mouse_captured,
@@ -474,7 +474,7 @@ impl<'a> ApplicationHandler for AppState<'a> {
             if dx != 0 || dy != 0 {
                 let _ = self
                     .host_tx
-                    .send(HostEvent::Input(HostInputEvent::RelativeMouseMotion { dx, dy }));
+                    .send(RuntimeEvent::Input(RuntimeInputEvent::RelativeMouseMotion { dx, dy }));
             }
         }
     }
@@ -488,11 +488,9 @@ impl<'a> ApplicationHandler for AppState<'a> {
     }
 }
 
-pub fn run(display: &Mutex<virtio::gpu::DisplayBuffer>, host_tx: Sender<HostEvent>) {
+pub fn run(display: &Mutex<DisplayBuffer>, host_tx: Sender<RuntimeEvent>) {
     let event_loop = EventLoop::new().unwrap();
-    event_loop.set_control_flow(ControlFlow::WaitUntil(
-        std::time::Instant::now() + std::time::Duration::from_millis(8),
-    ));
+    event_loop.set_control_flow(ControlFlow::Poll);
 
     let mut app = AppState::new(display, host_tx);
     event_loop.run_app(&mut app).unwrap();

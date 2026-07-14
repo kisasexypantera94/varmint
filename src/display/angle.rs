@@ -1,4 +1,4 @@
-use crate::iosurface::IOSurfaceRef;
+use super::iosurface::IOSurfaceRef;
 use std::{
     ffi::{CStr, CString, c_char, c_void},
     ptr,

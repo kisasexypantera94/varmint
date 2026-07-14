@@ -1,7 +1,6 @@
 //! https://docs.oasis-open.org/virtio/virtio/v1.3/csd01/virtio-v1.3-csd01.html#x1-4040006
 use crate::{
-    angle_egl,
-    iosurface::ScopedIOSurface,
+    display::{AngleCopy, DisplayBuffer, ScopedIOSurface},
     memory::GuestMemory,
     virtio::{
         chain::ChainData,
@@ -419,41 +418,6 @@ struct BlobMapping {
     size: usize,
 }
 
-pub struct DisplayBuffer {
-    pub width: usize,
-    pub height: usize,
-    pub pixels: Vec<u32>,
-    pub dirty_rect: Option<(usize, usize, usize, usize)>,
-    pub iosurface_id: Option<u32>,
-    pub seq: u64,
-}
-
-impl DisplayBuffer {
-    pub fn new() -> Self {
-        Self {
-            width: 0,
-            height: 0,
-            pixels: Vec::new(),
-            seq: 0,
-            dirty_rect: None,
-            iosurface_id: None,
-        }
-    }
-
-    pub fn resize(&mut self, width: usize, height: usize) {
-        if self.width == width && self.height == height {
-            return;
-        }
-
-        self.width = width;
-        self.height = height;
-        self.pixels.resize(width * height, 0);
-        self.dirty_rect = Some((0, 0, width, height));
-        self.iosurface_id = None;
-        self.seq = self.seq.wrapping_add(1);
-    }
-}
-
 #[repr(C)]
 #[derive(Default, zerocopy::IntoBytes, zerocopy::Immutable)]
 struct Config {
@@ -483,7 +447,7 @@ pub struct Gpu<'a> {
 
     pending_fences: Vec<PendingFence>,
     submit_buf: Vec<u8>,
-    angle_copy: angle_egl::AngleCopy,
+    angle_copy: AngleCopy,
     renderer: &'a mut VirglRenderer,
 }
 
@@ -503,7 +467,7 @@ impl<'a> Gpu<'a> {
             events_read: 0,
             pending_fences: Vec::new(),
             submit_buf: Vec::new(),
-            angle_copy: angle_egl::AngleCopy::new(),
+            angle_copy: AngleCopy::new(),
             renderer,
         }
     }
