@@ -1,9 +1,10 @@
 use crate::{
-    audio, kick,
+    audio,
+    devices::{VmDevices, send_gpu_event},
     memory::GuestMemory,
-    net, send_gpu_event, virtio, VmDevices,
+    net, virtio,
 };
-use std::sync::{mpsc::Receiver, Mutex};
+use std::sync::{Mutex, mpsc::Receiver};
 
 pub(crate) enum HostInputEvent {
     Key {
@@ -46,7 +47,6 @@ pub(crate) struct HostEventPump<'a> {
     devices: VmDevices<'a>,
     iface: &'a Mutex<net::vmnet::Backend>,
     rx: Receiver<HostEvent>,
-    kicker: kick::Kicker,
     net_buf: Vec<u8>,
 }
 
@@ -56,7 +56,6 @@ impl<'a> HostEventPump<'a> {
         devices: VmDevices<'a>,
         iface: &'a Mutex<net::vmnet::Backend>,
         rx: Receiver<HostEvent>,
-        kicker: kick::Kicker,
     ) -> Self {
         let net_buf = vec![0; iface.lock().unwrap().max_packet_size() as usize];
 
@@ -65,36 +64,29 @@ impl<'a> HostEventPump<'a> {
             devices,
             iface,
             rx,
-            kicker,
             net_buf,
         }
     }
 
     pub(crate) fn run(&mut self) {
         while let Ok(event) = self.rx.recv() {
-            let mut irq_raised = false;
             let mut pointer_move = None;
 
-            irq_raised |= self.handle_event(event, &mut pointer_move);
+            self.handle_event(event, &mut pointer_move);
 
             while let Ok(event) = self.rx.try_recv() {
-                irq_raised |= self.handle_event(event, &mut pointer_move);
+                self.handle_event(event, &mut pointer_move);
             }
 
-            irq_raised |= self.flush_pointer_move(pointer_move);
-
-            if irq_raised {
-                self.kicker.kick();
-            }
+            self.flush_pointer_move(pointer_move);
         }
     }
 
-    fn handle_event(&mut self, event: HostEvent, pointer_move: &mut Option<(u32, u32, u32, u32)>) -> bool {
+    fn handle_event(&mut self, event: HostEvent, pointer_move: &mut Option<(u32, u32, u32, u32)>) {
         match event {
             HostEvent::NetReady => self.handle_net_ready(),
             HostEvent::NetTx(frame) => {
                 self.iface.lock().unwrap().write(&frame).unwrap();
-                false
             }
             HostEvent::Input(event) => self.handle_input(event, pointer_move),
             HostEvent::DisplayResized { width, height } => {
@@ -102,65 +94,62 @@ impl<'a> HostEventPump<'a> {
                     self.devices.gpu_tx,
                     virtio::gpu::ExternalEvent::DisplayResized { width, height },
                 );
-                false
             }
             HostEvent::Audio(event) => match event {
-                audio::coreaudio::BackendEvent::PeriodElapsed(seq) => self
-                    .devices
-                    .snd
+                audio::coreaudio::BackendEvent::PeriodElapsed(seq) => {
+                    self.devices
+                        .snd
+                        .lock()
+                        .unwrap()
+                        .handle_external_event(virtio::snd::ExternalEvent::PeriodElapsed(seq), self.mem);
+                }
+            },
+            HostEvent::Clipboard(payload) => {
+                self.devices
+                    .console
                     .lock()
                     .unwrap()
-                    .handle_external_event(virtio::snd::ExternalEvent::PeriodElapsed(seq), self.mem),
-            },
-            HostEvent::Clipboard(payload) => self
-                .devices
-                .console
-                .lock()
-                .unwrap()
-                .handle_external_event(virtio::console::ExternalEvent::HostClipboard(&payload), self.mem),
+                    .handle_external_event(virtio::console::ExternalEvent::HostClipboard(&payload), self.mem);
+            }
         }
     }
 
-    fn handle_net_ready(&mut self) -> bool {
-        let mut irq_raised = false;
-
+    fn handle_net_ready(&mut self) {
         loop {
             let n_read = self.iface.lock().unwrap().read(&mut self.net_buf).unwrap();
             if n_read == 0 {
                 break;
             }
 
-            irq_raised |= self
-                .devices
+            self.devices
                 .net
                 .lock()
                 .unwrap()
                 .handle_external_event(&self.net_buf[..n_read], self.mem);
         }
-
-        irq_raised
     }
 
-    fn handle_input(&mut self, event: HostInputEvent, pointer_move: &mut Option<(u32, u32, u32, u32)>) -> bool {
+    fn handle_input(&mut self, event: HostInputEvent, pointer_move: &mut Option<(u32, u32, u32, u32)>) {
         use virtio::input::ExternalInput;
 
         let event = match event {
             HostInputEvent::PointerMove { x, y, width, height } => {
                 *pointer_move = Some((x, y, width, height));
-                return false;
+                return;
             }
             event => event,
         };
 
-        let mut irq_raised = self.flush_pointer_move(pointer_move.take());
+        self.flush_pointer_move(pointer_move.take());
 
-        irq_raised |= match event {
-            HostInputEvent::Key { code, pressed } => self
-                .devices
-                .keyboard
-                .lock()
-                .unwrap()
-                .handle_external_event(ExternalInput::Key { code, pressed }, self.mem),
+        match event {
+            HostInputEvent::Key { code, pressed } => {
+                self.devices
+                    .keyboard
+                    .lock()
+                    .unwrap()
+                    .handle_external_event(ExternalInput::Key { code, pressed }, self.mem);
+            }
             HostInputEvent::PointerMove { .. } => unreachable!(),
             HostInputEvent::PointerButton {
                 button,
@@ -172,13 +161,13 @@ impl<'a> HostEventPump<'a> {
                         .mouse
                         .lock()
                         .unwrap()
-                        .handle_external_event(ExternalInput::PointerButton { button, pressed }, self.mem)
+                        .handle_external_event(ExternalInput::PointerButton { button, pressed }, self.mem);
                 } else {
                     self.devices
                         .tablet
                         .lock()
                         .unwrap()
-                        .handle_external_event(ExternalInput::PointerButton { button, pressed }, self.mem)
+                        .handle_external_event(ExternalInput::PointerButton { button, pressed }, self.mem);
                 }
             }
             HostInputEvent::Scroll {
@@ -191,34 +180,33 @@ impl<'a> HostEventPump<'a> {
                         .mouse
                         .lock()
                         .unwrap()
-                        .handle_external_event(ExternalInput::Scroll { horizontal, value }, self.mem)
+                        .handle_external_event(ExternalInput::Scroll { horizontal, value }, self.mem);
                 } else {
                     self.devices
                         .tablet
                         .lock()
                         .unwrap()
-                        .handle_external_event(ExternalInput::Scroll { horizontal, value }, self.mem)
+                        .handle_external_event(ExternalInput::Scroll { horizontal, value }, self.mem);
                 }
             }
-            HostInputEvent::RelativeMouseMotion { dx, dy } => self
-                .devices
-                .mouse
-                .lock()
-                .unwrap()
-                .handle_external_event(ExternalInput::RelMotion { dx, dy }, self.mem),
-        };
-
-        irq_raised
+            HostInputEvent::RelativeMouseMotion { dx, dy } => {
+                self.devices
+                    .mouse
+                    .lock()
+                    .unwrap()
+                    .handle_external_event(ExternalInput::RelMotion { dx, dy }, self.mem);
+            }
+        }
     }
 
-    fn flush_pointer_move(&mut self, pointer_move: Option<(u32, u32, u32, u32)>) -> bool {
+    fn flush_pointer_move(&mut self, pointer_move: Option<(u32, u32, u32, u32)>) {
         let Some((x, y, width, height)) = pointer_move else {
-            return false;
+            return;
         };
 
         self.devices.tablet.lock().unwrap().handle_external_event(
             virtio::input::ExternalInput::AbsPosition { x, y, width, height },
             self.mem,
-        )
+        );
     }
 }

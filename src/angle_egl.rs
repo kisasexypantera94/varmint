@@ -748,7 +748,8 @@ impl AngleCopySession {
             return false;
         }
 
-        let Some(source_tex) = (unsafe { self.ensure_source_cache(source_texture, source_width, source_height) }) else {
+        let Some(source_tex) = (unsafe { self.ensure_source_cache(source_texture, source_width, source_height) })
+        else {
             return false;
         };
 
@@ -1009,7 +1010,8 @@ impl AngleCopy {
         let old_read = unsafe { (sess.egl_get_current_surface)(EGL_READ) };
         let old_context = unsafe { (sess.egl_get_current_context)() };
 
-        let ok = unsafe { sess.copy_metal_texture_to_iosurface(source_texture, target_surface, source_size, source_rect) };
+        let ok =
+            unsafe { sess.copy_metal_texture_to_iosurface(source_texture, target_surface, source_size, source_rect) };
 
         let restore_ok = unsafe {
             if old_display.is_null() {

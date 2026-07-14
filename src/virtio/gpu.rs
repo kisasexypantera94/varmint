@@ -1421,12 +1421,13 @@ impl<'a> Gpu<'a> {
     fn readback_blob_scanout(&mut self, resource_id: u32, rect: Rect, mem: &GuestMemory) -> bool {
         let Some(Scanout {
             resource_id: scanout_resource_id,
-            source: ScanoutSource::Blob {
-                width,
-                height,
-                stride,
-                offset,
-            },
+            source:
+                ScanoutSource::Blob {
+                    width,
+                    height,
+                    stride,
+                    offset,
+                },
             ..
         }) = self.scanout.as_ref()
         else {

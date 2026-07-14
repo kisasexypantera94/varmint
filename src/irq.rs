@@ -15,14 +15,12 @@ impl IrqLine {
         }
     }
 
-    pub fn set(&mut self, level: bool) -> bool {
+    pub fn set(&mut self, level: bool) {
         if level == self.level {
-            return false;
+            return;
         }
 
-        let rising = level;
         self.vm.gic_set_spi(self.intid, level).unwrap();
         self.level = level;
-        rising
     }
 }

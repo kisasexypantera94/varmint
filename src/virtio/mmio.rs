@@ -153,18 +153,18 @@ impl<D: device::Device> Transport<D> {
         &mut self.queues_pending[self.queue_sel as usize]
     }
 
-    pub fn write(&mut self, offset: u64, size: usize, value: u64, mem: &GuestMemory) -> bool {
+    pub fn write(&mut self, offset: u64, size: usize, value: u64, mem: &GuestMemory) {
         assert!(matches!(size, 1 | 2 | 4 | 8));
 
         if offset >= CONFIG_BASE {
             let bytes = value.to_le_bytes();
             let cfg_offset = offset - CONFIG_BASE;
             self.device.write_config(cfg_offset, &bytes[..size]);
-            return false;
+            return;
         }
 
         let Ok(reg) = Reg::try_from(offset) else {
-            return false;
+            return;
         };
 
         assert_eq!(size, 4, "virtio-mmio register access must be 32-bit");
@@ -216,11 +216,11 @@ impl<D: device::Device> Transport<D> {
             _ => {}
         }
 
-        self.sync_irq()
+        self.sync_irq();
     }
 
-    fn sync_irq(&mut self) -> bool {
-        self.irq.set(self.interrupt_status != 0)
+    fn sync_irq(&mut self) {
+        self.irq.set(self.interrupt_status != 0);
     }
 
     fn reset(&mut self) {
@@ -248,9 +248,9 @@ pub fn queue_addr(lo: u32, hi: u32) -> u64 {
 }
 
 impl<D: ExternalEventHandler + Device> Transport<D> {
-    pub fn handle_external_event(&mut self, event: D::Event<'_>, mem: &GuestMemory) -> bool {
+    pub fn handle_external_event(&mut self, event: D::Event<'_>, mem: &GuestMemory) {
         let mut ctx = DeviceContext::new(&mut self.queues, &mut self.interrupt_status, mem);
         self.device.on_event(event, &mut ctx);
-        self.sync_irq()
+        self.sync_irq();
     }
 }

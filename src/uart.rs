@@ -26,9 +26,9 @@ impl Uart {
         }
     }
 
-    pub fn enqueue(&mut self, value: u8) -> bool {
+    pub fn enqueue(&mut self, value: u8) {
         self.q.push_back(value);
-        self.sync_irq()
+        self.sync_irq();
     }
 
     fn ris(&self) -> u32 {
@@ -39,8 +39,8 @@ impl Uart {
         self.ris() & self.imsc
     }
 
-    fn sync_irq(&mut self) -> bool {
-        self.irq.set(self.mis() != 0)
+    fn sync_irq(&mut self) {
+        self.irq.set(self.mis() != 0);
     }
 
     pub fn read(&mut self, offset: u64) -> u32 {
