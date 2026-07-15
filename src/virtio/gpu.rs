@@ -16,6 +16,8 @@ use num_enum::TryFromPrimitive;
 use std::{collections::HashMap, ffi::c_void, mem::offset_of};
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes};
 
+mod edid;
+
 const DEVICE_ID: u32 = 16;
 
 const MAX_SCANOUTS: usize = 16;
@@ -33,6 +35,7 @@ const MAP_CACHE_MASK: u32 = 0x0f;
 
 mod feature {
     pub const VIRGL: u64 = 1 << 0;
+    pub const EDID: u64 = 1 << 1;
     pub const RESOURCE_BLOB: u64 = 1 << 3;
     pub const CONTEXT_INIT: u64 = 1 << 4;
 }
@@ -248,6 +251,22 @@ struct GetCapset {
     hdr: CtrlHeader,
     capset_id: u32,
     capset_version: u32,
+}
+
+#[derive(IntoBytes, FromBytes, Immutable, Debug, Copy, Clone)]
+#[repr(C, packed)]
+struct GetEdid {
+    hdr: CtrlHeader,
+    scanout: u32,
+    padding: u32,
+}
+
+#[derive(IntoBytes, FromBytes, Immutable, Debug, Copy, Clone)]
+#[repr(C, packed)]
+struct RespEdidHeader {
+    hdr: CtrlHeader,
+    size: u32,
+    padding: u32,
 }
 
 #[derive(IntoBytes, FromBytes, Immutable, Debug, Copy, Clone)]
@@ -538,6 +557,7 @@ pub struct Gpu<'a> {
     scanout: Option<Scanout>,
     display_width: u32,
     display_height: u32,
+    edid_compatibility_mode: Option<(u32, u32)>,
     events_read: u32,
     pending_fences: Vec<PendingFence>,
     submit_buf: Vec<u8>,
@@ -555,6 +575,7 @@ impl<'a> Gpu<'a> {
             scanout: None,
             display_width: 0,
             display_height: 0,
+            edid_compatibility_mode: None,
             events_read: 0,
             pending_fences: Vec::new(),
             submit_buf: Vec::new(),
@@ -570,7 +591,7 @@ impl<'a> Device for Gpu<'a> {
     }
 
     fn features(&self) -> u64 {
-        common::feature::VERSION_1 | feature::VIRGL | feature::RESOURCE_BLOB | feature::CONTEXT_INIT
+        common::feature::VERSION_1 | feature::VIRGL | feature::EDID | feature::RESOURCE_BLOB | feature::CONTEXT_INIT
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
@@ -643,6 +664,7 @@ impl<'a> Gpu<'a> {
 
         match CtrlType::try_from(hdr.r#type) {
             Ok(CtrlType::GetDisplayInfo) => self.cmd_get_display_info(chain, &hdr, mem),
+            Ok(CtrlType::GetEdid) => self.cmd_get_edid(chain, &hdr, mem),
             Ok(CtrlType::GetCapsetInfo) => self.cmd_get_capset_info(chain, &hdr, mem),
             Ok(CtrlType::GetCapset) => self.cmd_get_capset(chain, &hdr, mem),
             Ok(CtrlType::CtxCreate) => self.cmd_ctx_create(chain, &hdr, mem),
@@ -699,6 +721,31 @@ impl<'a> Gpu<'a> {
         };
 
         ChainAction::Complete(chain.write_parts(&[resp_hdr.as_bytes(), resp.as_bytes()], mem))
+    }
+
+    fn cmd_get_edid(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
+        let Some(req) = chain.read_obj::<GetEdid>(0, mem) else {
+            return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
+        };
+
+        if req.scanout != 0 {
+            return Gpu::err(chain, CtrlType::RespErrInvalidScanoutId, hdr, mem);
+        }
+
+        let width = self.display_width.max(32);
+        let height = self.display_height.max(32);
+        let Some(edid) = edid::build(width, height, self.edid_compatibility_mode) else {
+            eprintln!("virtio-gpu: cannot build EDID for {}x{}", width, height);
+            return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
+        };
+
+        let resp = RespEdidHeader {
+            hdr: Gpu::resp_header(CtrlType::RespOkEdid, hdr),
+            size: edid.len() as u32,
+            padding: 0,
+        };
+
+        ChainAction::Complete(chain.write_parts(&[resp.as_bytes(), &edid], mem))
     }
 
     fn cmd_get_capset_info(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
@@ -1844,6 +1891,7 @@ impl<'a> ExternalEventHandler for Gpu<'a> {
                     return;
                 }
 
+                self.edid_compatibility_mode.get_or_insert((width, height));
                 self.display_width = width;
                 self.display_height = height;
                 self.events_read |= EVENT_DISPLAY;

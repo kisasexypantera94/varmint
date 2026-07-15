@@ -34,10 +34,7 @@ impl<'a> ScanoutPublisher<'a> {
 
     fn configure(&mut self, width: u32, height: u32) {
         self.iosurface = None;
-        self.display
-            .lock()
-            .unwrap()
-            .resize(width as usize, height as usize);
+        self.display.lock().unwrap().resize(width as usize, height as usize);
     }
 
     fn reset(&mut self) {
