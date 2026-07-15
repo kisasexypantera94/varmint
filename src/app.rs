@@ -139,7 +139,7 @@ struct AppState<'a> {
     dirty_rect: Option<(usize, usize, usize, usize)>,
     iosurface_id: Option<u32>,
     last_seq: u64,
-    next_keepalive: Option<Instant>,
+    next_keepalive: Instant,
 
     last_mouse_pos: Option<(f64, f64)>,
     mouse_captured: bool,
@@ -167,7 +167,7 @@ impl<'a> AppState<'a> {
             dirty_rect: None,
             iosurface_id: None,
             last_seq: 0,
-            next_keepalive: None,
+            next_keepalive: Instant::now(),
             last_mouse_pos: None,
             mouse_captured: false,
             rel_mouse_frac_dx: 0.0,
@@ -182,7 +182,7 @@ impl<'a> AppState<'a> {
 
     fn blit(&mut self, cached: bool) -> bool {
         if cached {
-            self.next_keepalive = Some(Instant::now() + PRESENT_KEEPALIVE);
+            self.next_keepalive = Instant::now() + PRESENT_KEEPALIVE;
         }
 
         if let Some(p) = self.presenter.as_mut() {
@@ -210,7 +210,7 @@ impl<'a> AppState<'a> {
                     if !cached {
                         self.dirty_rect = None;
                     }
-                    self.next_keepalive = Some(Instant::now() + PRESENT_KEEPALIVE);
+                    self.next_keepalive = Instant::now() + PRESENT_KEEPALIVE;
                 }
                 return presented;
             }
@@ -498,10 +498,7 @@ impl<'a> ApplicationHandler for AppState<'a> {
         let display_changed = self.poll_display();
         if display_changed || self.dirty_rect.is_some() {
             self.blit(false);
-        } else if self
-            .next_keepalive
-            .is_some_and(|next_keepalive| Instant::now() >= next_keepalive)
-        {
+        } else if Instant::now() >= self.next_keepalive {
             self.blit(true);
         }
 
