@@ -1,10 +1,10 @@
 mod angle;
 mod iosurface;
 mod presenter;
+mod scanout;
 
-pub use angle::AngleCopy;
-pub use iosurface::ScopedIOSurface;
 pub use presenter::Presenter;
+pub use scanout::ScanoutPublisher;
 
 pub struct DisplayBuffer {
     pub width: usize,

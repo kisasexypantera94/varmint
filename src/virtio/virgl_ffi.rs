@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     ffi::{CStr, c_char, c_int, c_void},
     os::raw::c_uint,
+    ptr::NonNull,
     sync::OnceLock,
 };
 
@@ -46,10 +47,20 @@ pub struct ResourceCreateBlob {
 }
 
 #[derive(Debug, Copy, Clone)]
-pub struct NativeSourceInfo {
-    pub handle: u64,
-    pub width: u32,
-    pub height: u32,
+pub struct NativeTexture {
+    handle: NonNull<c_void>,
+    width: u32,
+    height: u32,
+}
+
+impl NativeTexture {
+    pub fn as_ptr(self) -> *mut c_void {
+        self.handle.as_ptr()
+    }
+
+    pub fn size(self) -> (u32, u32) {
+        (self.width, self.height)
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -893,26 +904,20 @@ impl VirglRenderer {
         check(ret)
     }
 
-    pub fn native_source_info(&self, resource_id: u32) -> Option<NativeSourceInfo> {
+    pub fn native_texture(&self, resource_id: u32) -> Option<NativeTexture> {
         let mut info: VirglRendererResourceInfoExt = unsafe { std::mem::zeroed() };
         info.version = VIRGL_RENDERER_RESOURCE_INFO_EXT_VERSION;
 
         let ret = unsafe { virgl_renderer_resource_get_info_ext(resource_id as c_int, &mut info) };
-        if ret != 0 {
+        if ret != 0 || info.native_type != VIRGL_NATIVE_HANDLE_METAL_TEXTURE {
             return None;
         }
 
-        let native_handle = unsafe { info.handle.native_handle };
-
-        if info.native_type == VIRGL_NATIVE_HANDLE_METAL_TEXTURE && !native_handle.is_null() {
-            Some(NativeSourceInfo {
-                handle: native_handle as u64,
-                width: info.base.width,
-                height: info.base.height,
-            })
-        } else {
-            None
-        }
+        Some(NativeTexture {
+            handle: NonNull::new(unsafe { info.handle.native_handle })?,
+            width: info.base.width,
+            height: info.base.height,
+        })
     }
 
     pub fn transfer_read(&self, ctx_id: u32, resource_id: u32, t: Transfer3D) -> VirglResult<()> {

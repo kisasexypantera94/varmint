@@ -480,8 +480,10 @@ impl<'a> ApplicationHandler for AppState<'a> {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        self.poll_display();
-        self.blit();
+        let display_changed = self.poll_display();
+        if display_changed || self.dirty_rect.is_some() {
+            self.blit();
+        }
 
         self.stat_loops += 1;
         self.print_stats();
