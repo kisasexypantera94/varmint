@@ -437,7 +437,6 @@ pub struct PresentFrame<'a> {
 pub enum Presentation<'a> {
     Configure { width: u32, height: u32 },
     Frame(PresentFrame<'a>),
-    Reset,
 }
 
 enum ScanoutSource {
@@ -1338,7 +1337,6 @@ impl<'a> Gpu<'a> {
 
         if resource_id == 0 {
             self.scanout = None;
-            self.reset_presentation();
         } else {
             if !self.resources.contains_key(&resource_id) {
                 return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
@@ -1435,7 +1433,6 @@ impl<'a> Gpu<'a> {
 
         if resource_id == 0 {
             self.scanout = None;
-            self.reset_presentation();
             return Gpu::ok(chain, hdr, mem);
         }
 
@@ -1559,10 +1556,6 @@ impl<'a> Gpu<'a> {
         };
 
         (self.on_present)(Presentation::Configure { width, height });
-    }
-
-    fn reset_presentation(&mut self) {
-        (self.on_present)(Presentation::Reset);
     }
 
     fn present_scanout(&mut self, resource_id: u32, damage: Rect, native_texture: Option<NativeTexture>) -> bool {
@@ -1844,7 +1837,6 @@ impl<'a> Gpu<'a> {
 
         if self.scanout.as_ref().is_some_and(|s| s.resource_id == resource_id) {
             self.scanout = None;
-            self.reset_presentation();
         }
 
         match resource.kind {

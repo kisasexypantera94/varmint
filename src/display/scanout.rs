@@ -25,20 +25,11 @@ impl<'a> ScanoutPublisher<'a> {
                 true
             }
             Presentation::Frame(frame) => self.present_frame(frame),
-            Presentation::Reset => {
-                self.reset();
-                true
-            }
         }
     }
 
     fn configure(&mut self, width: u32, height: u32) {
-        self.iosurface = None;
         self.display.lock().unwrap().resize(width as usize, height as usize);
-    }
-
-    fn reset(&mut self) {
-        self.iosurface = None;
     }
 
     fn present_frame(&mut self, frame: PresentFrame<'_>) -> bool {
