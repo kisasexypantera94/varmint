@@ -1,4 +1,5 @@
 use super::iosurface::IOSurfaceRef;
+use crate::virtio::virgl_ffi::NativeTexture;
 use std::{
     ffi::{CStr, CString, c_char, c_void},
     ptr,
@@ -994,11 +995,10 @@ impl AngleCopy {
         Self { session }
     }
 
-    pub fn copy_metal_texture_to_iosurface(
+    pub fn copy_native_texture_to_iosurface(
         &mut self,
-        source_texture: *mut c_void,
+        source_texture: NativeTexture,
         target_surface: IOSurfaceRef,
-        source_size: (u32, u32),
         source_rect: (u32, u32, u32, u32),
     ) -> bool {
         let Some(sess) = self.session.as_mut() else {
@@ -1010,8 +1010,14 @@ impl AngleCopy {
         let old_read = unsafe { (sess.egl_get_current_surface)(EGL_READ) };
         let old_context = unsafe { (sess.egl_get_current_context)() };
 
-        let ok =
-            unsafe { sess.copy_metal_texture_to_iosurface(source_texture, target_surface, source_size, source_rect) };
+        let ok = unsafe {
+            sess.copy_metal_texture_to_iosurface(
+                source_texture.as_ptr(),
+                target_surface,
+                source_texture.size(),
+                source_rect,
+            )
+        };
 
         let restore_ok = unsafe {
             if old_display.is_null() {

@@ -1,5 +1,5 @@
 use crate::{
-    display::DisplayBuffer,
+    display::{DisplayBuffer, ScanoutPublisher},
     irq::IrqLine,
     memory::GuestMemory,
     virtio::{
@@ -77,7 +77,8 @@ impl Worker {
     pub fn run(self, mem: &GuestMemory, display: &Mutex<DisplayBuffer>) {
         let Self { rx, irq, tx } = self;
         let mut renderer = build_virglrenderer(tx).expect("virglrenderer init failed");
-        let gpu_dev = virtio::Gpu::new(display, &mut renderer);
+        let mut scanout = ScanoutPublisher::new(display);
+        let gpu_dev = virtio::Gpu::new(&mut renderer, move |frame| scanout.present(frame));
         let mut gpu = virtio::MmioTransport::new(gpu_dev, irq);
 
         while let Ok(req) = rx.recv() {

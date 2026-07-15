@@ -78,6 +78,7 @@ impl Presenter {
 
         layer.setDevice(Some(device.as_ref()));
         layer.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
+
         layer.setFramebufferOnly(false);
 
         // Guest scanout data is effectively XRGB in many paths; do not let
@@ -244,20 +245,26 @@ impl Presenter {
         dirty_y: u32,
         dirty_w: u32,
         dirty_h: u32,
+        cached: bool,
     ) -> bool {
         if let Some(iosurface_id) = iosurface_id {
-            self.resize_surface(pw, ph);
-
-            if self.ensure_iosurface_texture_for_id(iosurface_id, pw, ph) {
-                if let Some(backing) = self.iosurface_texture.as_ref() {
-                    return self.blit_texture_to_drawable(backing.texture.as_ref(), pw, ph);
+            if !cached {
+                self.resize_surface(pw, ph);
+                if !self.ensure_iosurface_texture_for_id(iosurface_id, pw, ph) {
+                    return false;
                 }
             }
 
-            return false;
+            let Some(backing) = self.iosurface_texture.as_ref() else {
+                return false;
+            };
+            if backing.surface_id != iosurface_id {
+                return false;
+            }
+            return self.blit_texture_to_drawable(backing.texture.as_ref(), pw, ph);
         }
 
-        self.present_rect(pixels, pw, ph, dirty_x, dirty_y, dirty_w, dirty_h)
+        self.present_rect(pixels, pw, ph, dirty_x, dirty_y, dirty_w, dirty_h, cached)
     }
 
     pub fn present_rect(
@@ -269,9 +276,17 @@ impl Presenter {
         dirty_y: u32,
         dirty_w: u32,
         dirty_h: u32,
+        cached: bool,
     ) -> bool {
         if pw == 0 || ph == 0 {
             return false;
+        }
+
+        if cached {
+            let Some(texture) = self.texture.as_ref() else {
+                return false;
+            };
+            return self.blit_texture_to_drawable(texture.as_ref(), pw, ph);
         }
 
         self.resize_surface(pw, ph);

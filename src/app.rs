@@ -3,7 +3,12 @@ use crate::{
     display::{DisplayBuffer, Presenter},
     virtio::input::keys::*,
 };
-use std::sync::{Mutex, mpsc::Sender};
+use std::{
+    sync::{Mutex, mpsc::Sender},
+    time::{Duration, Instant},
+};
+
+const PRESENT_KEEPALIVE: Duration = Duration::from_millis(250);
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalSize, PhysicalPosition, PhysicalSize},
@@ -134,6 +139,7 @@ struct AppState<'a> {
     dirty_rect: Option<(usize, usize, usize, usize)>,
     iosurface_id: Option<u32>,
     last_seq: u64,
+    next_keepalive: Instant,
 
     last_mouse_pos: Option<(f64, f64)>,
     mouse_captured: bool,
@@ -161,6 +167,7 @@ impl<'a> AppState<'a> {
             dirty_rect: None,
             iosurface_id: None,
             last_seq: 0,
+            next_keepalive: Instant::now(),
             last_mouse_pos: None,
             mouse_captured: false,
             rel_mouse_frac_dx: 0.0,
@@ -173,7 +180,11 @@ impl<'a> AppState<'a> {
         }
     }
 
-    fn blit(&mut self) -> bool {
+    fn blit(&mut self, cached: bool) -> bool {
+        if cached {
+            self.next_keepalive = Instant::now() + PRESENT_KEEPALIVE;
+        }
+
         if let Some(p) = self.presenter.as_mut() {
             if self.present_w > 0 && self.present_h > 0 {
                 let t0 = std::time::Instant::now();
@@ -190,12 +201,16 @@ impl<'a> AppState<'a> {
                     y as u32,
                     w as u32,
                     h as u32,
+                    cached,
                 );
 
                 self.stat_update_ns += t0.elapsed().as_nanos();
                 if presented {
                     self.stat_presented += 1;
-                    self.dirty_rect = None;
+                    if !cached {
+                        self.dirty_rect = None;
+                    }
+                    self.next_keepalive = Instant::now() + PRESENT_KEEPALIVE;
                 }
                 return presented;
             }
@@ -374,11 +389,11 @@ impl<'a> ApplicationHandler for AppState<'a> {
                     height: logical_size.height,
                 });
 
-                self.blit();
+                self.blit(false);
             }
 
             WindowEvent::RedrawRequested => {
-                self.blit();
+                self.blit(false);
             }
 
             WindowEvent::Focused(focused) => {
@@ -480,8 +495,12 @@ impl<'a> ApplicationHandler for AppState<'a> {
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        self.poll_display();
-        self.blit();
+        let display_changed = self.poll_display();
+        if display_changed || self.dirty_rect.is_some() {
+            self.blit(false);
+        } else if Instant::now() >= self.next_keepalive {
+            self.blit(true);
+        }
 
         self.stat_loops += 1;
         self.print_stats();

@@ -1,21 +1,22 @@
 //! https://docs.oasis-open.org/virtio/virtio/v1.3/csd01/virtio-v1.3-csd01.html#x1-4040006
 use crate::{
-    display::{AngleCopy, DisplayBuffer, ScopedIOSurface},
     memory::GuestMemory,
     virtio::{
         chain::ChainData,
         common,
         device::{ChainAction, ChainToken, Device, DeviceContext, ExternalEventHandler, ShmRegion},
         virgl_ffi::{
-            self, Iovec, ResourceCreate3D, ResourceCreateBlob as VirglResourceCreateBlob, Transfer3D, VirglFence,
-            VirglRenderer,
+            Iovec, NativeTexture, ResourceCreate3D, ResourceCreateBlob as VirglResourceCreateBlob, Transfer3D,
+            VirglFence, VirglRenderer,
         },
     },
 };
 use applevisor_sys::{hv_vm_map, hv_vm_unmap};
 use num_enum::TryFromPrimitive;
-use std::{collections::HashMap, ffi::c_void, mem::offset_of, sync::Mutex};
+use std::{collections::HashMap, ffi::c_void, mem::offset_of};
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes};
+
+mod edid;
 
 const DEVICE_ID: u32 = 16;
 
@@ -34,6 +35,7 @@ const MAP_CACHE_MASK: u32 = 0x0f;
 
 mod feature {
     pub const VIRGL: u64 = 1 << 0;
+    pub const EDID: u64 = 1 << 1;
     pub const RESOURCE_BLOB: u64 = 1 << 3;
     pub const CONTEXT_INIT: u64 = 1 << 4;
 }
@@ -253,6 +255,22 @@ struct GetCapset {
 
 #[derive(IntoBytes, FromBytes, Immutable, Debug, Copy, Clone)]
 #[repr(C, packed)]
+struct GetEdid {
+    hdr: CtrlHeader,
+    scanout: u32,
+    padding: u32,
+}
+
+#[derive(IntoBytes, FromBytes, Immutable, Debug, Copy, Clone)]
+#[repr(C, packed)]
+struct RespEdidHeader {
+    hdr: CtrlHeader,
+    size: u32,
+    padding: u32,
+}
+
+#[derive(IntoBytes, FromBytes, Immutable, Debug, Copy, Clone)]
+#[repr(C, packed)]
 struct CtxCreate {
     hdr: CtrlHeader,
     nlen: u32,
@@ -387,7 +405,39 @@ struct Resource {
 struct Scanout {
     resource_id: u32,
     source: ScanoutSource,
-    iosurface: Option<ScopedIOSurface>,
+}
+
+#[derive(Clone, Copy)]
+pub struct PresentRect {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Clone, Copy)]
+pub enum PresentSource<'a> {
+    Pixels {
+        data: &'a [u8],
+        width: u32,
+        height: u32,
+        stride: u32,
+    },
+    NativeTexture(NativeTexture),
+}
+
+#[derive(Clone, Copy)]
+pub struct PresentFrame<'a> {
+    pub source: PresentSource<'a>,
+    pub source_rect: PresentRect,
+    pub damage: PresentRect,
+}
+
+#[derive(Clone, Copy)]
+pub enum Presentation<'a> {
+    Configure { width: u32, height: u32 },
+    Frame(PresentFrame<'a>),
+    Reset,
 }
 
 enum ScanoutSource {
@@ -416,6 +466,73 @@ struct BlobResource {
 struct BlobMapping {
     guest_addr: u64,
     size: usize,
+    mapped: bool,
+}
+
+impl BlobMapping {
+    fn map(host_addr: u64, guest_addr: u64, size: usize) -> Result<BlobMapping, i32> {
+        let page_size = APPLE_HV_PAGE_SIZE as u64;
+
+        let host_base = align_down_u64(host_addr, page_size);
+        let guest_base = align_down_u64(guest_addr, page_size);
+
+        let host_delta = host_addr - host_base;
+        let guest_delta = guest_addr - guest_base;
+
+        if host_delta != guest_delta {
+            eprintln!(
+                "blob mapping alignment mismatch: host_addr={:#x} guest_addr={:#x} host_delta={:#x} guest_delta={:#x}",
+                host_addr, guest_addr, host_delta, guest_delta,
+            );
+            return Err(-1);
+        }
+
+        let map_size = align_up(size.checked_add(host_delta as usize).ok_or(-1)?, APPLE_HV_PAGE_SIZE).ok_or(-1)?;
+
+        let ret = unsafe {
+            hv_vm_map(
+                host_base as *const c_void,
+                guest_base,
+                map_size,
+                HV_MEMORY_READ | HV_MEMORY_WRITE,
+            )
+        };
+
+        if ret != HV_SUCCESS {
+            return Err(ret);
+        }
+
+        Ok(BlobMapping {
+            guest_addr: guest_base,
+            size: map_size,
+            mapped: true,
+        })
+    }
+
+    fn unmap(&mut self) -> Result<(), i32> {
+        if !self.mapped {
+            return Ok(());
+        }
+
+        let ret = unsafe { hv_vm_unmap(self.guest_addr, self.size) };
+        if ret != HV_SUCCESS {
+            return Err(ret);
+        }
+
+        self.mapped = false;
+        Ok(())
+    }
+}
+
+impl Drop for BlobMapping {
+    fn drop(&mut self) {
+        if let Err(err) = self.unmap() {
+            eprintln!(
+                "BlobMapping cleanup FAILED: hv_vm_unmap guest_addr={:#x} size={} err={:#x}",
+                self.guest_addr, self.size, err,
+            );
+        }
+    }
 }
 
 #[repr(C)]
@@ -438,37 +555,32 @@ struct PendingFence {
 pub struct Gpu<'a> {
     resources: HashMap<u32, Resource>,
     scanout: Option<Scanout>,
-    display: &'a Mutex<DisplayBuffer>,
-
-    scanout_width: u32,
-    scanout_height: u32,
-
+    display_width: u32,
+    display_height: u32,
+    edid_compatibility_mode: Option<(u32, u32)>,
     events_read: u32,
-
     pending_fences: Vec<PendingFence>,
     submit_buf: Vec<u8>,
-    angle_copy: AngleCopy,
     renderer: &'a mut VirglRenderer,
+    on_present: Box<dyn for<'frame> FnMut(Presentation<'frame>) -> bool + 'a>,
 }
 
 impl<'a> Gpu<'a> {
-    pub fn new(display: &'a Mutex<DisplayBuffer>, renderer: &'a mut VirglRenderer) -> Gpu<'a> {
-        let (width, height) = {
-            let display = display.lock().unwrap();
-            (display.width, display.height)
-        };
-
+    pub fn new(
+        renderer: &'a mut VirglRenderer,
+        on_present: impl for<'frame> FnMut(Presentation<'frame>) -> bool + 'a,
+    ) -> Gpu<'a> {
         Gpu {
             resources: HashMap::new(),
             scanout: None,
-            display,
-            scanout_width: width as u32,
-            scanout_height: height as u32,
+            display_width: 0,
+            display_height: 0,
+            edid_compatibility_mode: None,
             events_read: 0,
             pending_fences: Vec::new(),
             submit_buf: Vec::new(),
-            angle_copy: AngleCopy::new(),
             renderer,
+            on_present: Box::new(on_present),
         }
     }
 }
@@ -479,7 +591,7 @@ impl<'a> Device for Gpu<'a> {
     }
 
     fn features(&self) -> u64 {
-        common::feature::VERSION_1 | feature::VIRGL | feature::RESOURCE_BLOB | feature::CONTEXT_INIT
+        common::feature::VERSION_1 | feature::VIRGL | feature::EDID | feature::RESOURCE_BLOB | feature::CONTEXT_INIT
     }
 
     fn read_config(&self, offset: u64, data: &mut [u8]) {
@@ -552,6 +664,7 @@ impl<'a> Gpu<'a> {
 
         match CtrlType::try_from(hdr.r#type) {
             Ok(CtrlType::GetDisplayInfo) => self.cmd_get_display_info(chain, &hdr, mem),
+            Ok(CtrlType::GetEdid) => self.cmd_get_edid(chain, &hdr, mem),
             Ok(CtrlType::GetCapsetInfo) => self.cmd_get_capset_info(chain, &hdr, mem),
             Ok(CtrlType::GetCapset) => self.cmd_get_capset(chain, &hdr, mem),
             Ok(CtrlType::CtxCreate) => self.cmd_ctx_create(chain, &hdr, mem),
@@ -600,14 +713,39 @@ impl<'a> Gpu<'a> {
             r: Rect {
                 x: 0,
                 y: 0,
-                width: self.scanout_width,
-                height: self.scanout_height,
+                width: self.display_width,
+                height: self.display_height,
             },
             enabled: 1,
             flags: 0,
         };
 
         ChainAction::Complete(chain.write_parts(&[resp_hdr.as_bytes(), resp.as_bytes()], mem))
+    }
+
+    fn cmd_get_edid(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
+        let Some(req) = chain.read_obj::<GetEdid>(0, mem) else {
+            return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
+        };
+
+        if req.scanout != 0 {
+            return Gpu::err(chain, CtrlType::RespErrInvalidScanoutId, hdr, mem);
+        }
+
+        let width = self.display_width.max(32);
+        let height = self.display_height.max(32);
+        let Some(edid) = edid::build(width, height, self.edid_compatibility_mode) else {
+            eprintln!("virtio-gpu: cannot build EDID for {}x{}", width, height);
+            return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
+        };
+
+        let resp = RespEdidHeader {
+            hdr: Gpu::resp_header(CtrlType::RespOkEdid, hdr),
+            size: edid.len() as u32,
+            padding: 0,
+        };
+
+        ChainAction::Complete(chain.write_parts(&[resp.as_bytes(), &edid], mem))
     }
 
     fn cmd_get_capset_info(&mut self, chain: &ChainData, hdr: &CtrlHeader, mem: &GuestMemory) -> ChainAction {
@@ -950,41 +1088,35 @@ impl<'a> Gpu<'a> {
             return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
         };
 
-        let mut iosurface_id = None;
-
-        match &resource.kind {
-            ResourceKind::Local2d => {}
+        let native_texture = match &resource.kind {
+            ResourceKind::Local2d => None,
             ResourceKind::RendererBlob(_) if !resource.backing.is_empty() => {
                 if !self.readback_blob_scanout(resource_id, flush_rect, mem) {
                     return Gpu::err(chain, CtrlType::RespErrUnspec, hdr, mem);
                 }
+
+                None
             }
             ResourceKind::Renderer3d | ResourceKind::RendererBlob(_) => {
-                let Some(source) = self.renderer.native_source_info(resource_id) else {
+                let Some(texture) = self.renderer.native_texture(resource_id) else {
                     eprintln!(
-                        "virtio-gpu: ResourceFlush failed: 3D scanout resource={} has no native source",
+                        "virtio-gpu: ResourceFlush failed: 3D scanout resource={} has no native texture",
                         resource_id
                     );
                     return Gpu::err(chain, CtrlType::RespErrUnspec, hdr, mem);
                 };
 
-                iosurface_id = self.copy_metal_texture_to_iosurface(resource_id, source);
-
-                if iosurface_id.is_none() {
-                    eprintln!(
-                        "virtio-gpu: ResourceFlush failed: native scanout copy failed resource={}",
-                        resource_id
-                    );
-                    return Gpu::err(chain, CtrlType::RespErrUnspec, hdr, mem);
-                }
+                Some(texture)
             }
-        }
-
-        let Some(resource) = self.resources.get(&resource_id) else {
-            return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
         };
 
-        self.publish_display_rect(resource_id, resource, flush_rect, iosurface_id);
+        if !self.present_scanout(resource_id, flush_rect, native_texture) {
+            eprintln!(
+                "virtio-gpu: ResourceFlush failed: native scanout copy failed resource={}",
+                resource_id
+            );
+            return Gpu::err(chain, CtrlType::RespErrUnspec, hdr, mem);
+        }
 
         Gpu::ok(chain, hdr, mem)
     }
@@ -1206,6 +1338,7 @@ impl<'a> Gpu<'a> {
 
         if resource_id == 0 {
             self.scanout = None;
+            self.reset_presentation();
         } else {
             if !self.resources.contains_key(&resource_id) {
                 return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
@@ -1214,13 +1347,8 @@ impl<'a> Gpu<'a> {
             self.scanout = Some(Scanout {
                 resource_id,
                 source: ScanoutSource::Resource { rect: val.r },
-                iosurface: None,
             });
-
-            self.display
-                .lock()
-                .unwrap()
-                .resize(val.r.width as usize, val.r.height as usize);
+            self.configure_presentation();
         }
 
         Gpu::ok(chain, hdr, mem)
@@ -1307,6 +1435,7 @@ impl<'a> Gpu<'a> {
 
         if resource_id == 0 {
             self.scanout = None;
+            self.reset_presentation();
             return Gpu::ok(chain, hdr, mem);
         }
 
@@ -1330,56 +1459,10 @@ impl<'a> Gpu<'a> {
                 },
                 offset: val.offsets[0] as u64,
             },
-            iosurface: None,
         });
-
-        self.display.lock().unwrap().resize(width as usize, height as usize);
+        self.configure_presentation();
 
         Gpu::ok(chain, hdr, mem)
-    }
-
-    fn copy_metal_texture_to_iosurface(
-        &mut self,
-        resource_id: u32,
-        native_source: virgl_ffi::NativeSourceInfo,
-    ) -> Option<u32> {
-        let (source_rect, surface_ptr, surface_id) = {
-            let scanout = self.scanout.as_mut()?;
-            if scanout.resource_id != resource_id {
-                return None;
-            }
-
-            let source_rect = match &scanout.source {
-                ScanoutSource::Resource { rect } => (rect.x, rect.y, rect.width, rect.height),
-                ScanoutSource::Blob { width, height, .. } => (0, 0, *width, *height),
-            };
-
-            let recreate = scanout
-                .iosurface
-                .as_ref()
-                .is_none_or(|surface| surface.width() != source_rect.2 || surface.height() != source_rect.3);
-
-            if recreate {
-                scanout.iosurface = ScopedIOSurface::new_bgra(source_rect.2, source_rect.3);
-            }
-
-            let surface = scanout.iosurface.as_ref()?;
-            (source_rect, surface.as_ptr(), surface.id())
-        };
-
-        let ok = self.angle_copy.copy_metal_texture_to_iosurface(
-            native_source.handle as *mut c_void,
-            surface_ptr,
-            (native_source.width, native_source.height),
-            source_rect,
-        );
-
-        if ok {
-            Some(surface_id)
-        } else {
-            eprintln!("virtio-gpu: ANGLE producer copy failed; falling back to readback");
-            None
-        }
     }
 
     fn readback_blob_scanout(&mut self, resource_id: u32, rect: Rect, mem: &GuestMemory) -> bool {
@@ -1465,96 +1548,92 @@ impl<'a> Gpu<'a> {
         true
     }
 
-    fn publish_display_rect(&self, resource_id: u32, resource: &Resource, rect: Rect, iosurface_id: Option<u32>) {
+    fn configure_presentation(&mut self) {
         let Some(scanout) = self.scanout.as_ref() else {
             return;
         };
 
+        let (width, height) = match &scanout.source {
+            ScanoutSource::Resource { rect } => (rect.width, rect.height),
+            ScanoutSource::Blob { width, height, .. } => (*width, *height),
+        };
+
+        (self.on_present)(Presentation::Configure { width, height });
+    }
+
+    fn reset_presentation(&mut self) {
+        (self.on_present)(Presentation::Reset);
+    }
+
+    fn present_scanout(&mut self, resource_id: u32, damage: Rect, native_texture: Option<NativeTexture>) -> bool {
+        let Some(scanout) = self.scanout.as_ref() else {
+            return true;
+        };
+
         if scanout.resource_id != resource_id {
-            return;
+            return true;
         }
 
-        let (source_x, source_y, source_width, source_height, src_stride) = match &scanout.source {
+        let (source_rect, blob_size) = match &scanout.source {
             ScanoutSource::Resource { rect } => (
-                rect.x as usize,
-                rect.y as usize,
-                rect.width as usize,
-                rect.height as usize,
-                resource.width as usize * BYTES_PER_PIXEL,
+                PresentRect {
+                    x: rect.x,
+                    y: rect.y,
+                    width: rect.width,
+                    height: rect.height,
+                },
+                None,
             ),
             ScanoutSource::Blob { width, height, .. } => (
-                0,
-                0,
-                *width as usize,
-                *height as usize,
-                *width as usize * BYTES_PER_PIXEL,
+                PresentRect {
+                    x: 0,
+                    y: 0,
+                    width: *width,
+                    height: *height,
+                },
+                Some((*width, *height)),
             ),
         };
 
-        let flush_x0 = rect.x as usize;
-        let flush_y0 = rect.y as usize;
-        let flush_x1 = flush_x0.saturating_add(rect.width as usize);
-        let flush_y1 = flush_y0.saturating_add(rect.height as usize);
-        let source_x1 = source_x.saturating_add(source_width);
-        let source_y1 = source_y.saturating_add(source_height);
-
-        let src_x0 = flush_x0.max(source_x);
-        let src_y0 = flush_y0.max(source_y);
-        let src_x1 = flush_x1.min(source_x1);
-        let src_y1 = flush_y1.min(source_y1);
-
-        if src_x0 >= src_x1 || src_y0 >= src_y1 {
-            return;
-        }
-
-        let mut display = self.display.lock().unwrap();
-
-        let x0 = (src_x0 - source_x).min(display.width);
-        let y0 = (src_y0 - source_y).min(display.height);
-        let x1 = (src_x1 - source_x).min(display.width);
-        let y1 = (src_y1 - source_y).min(display.height);
-
-        if x0 >= x1 || y0 >= y1 {
-            return;
-        }
-
-        if iosurface_id.is_none() {
-            let copy_src_x0 = source_x + x0;
-            let copy_src_y0 = source_y + y0;
-            let copy_src_x1 = source_x + x1;
-            let copy_src_y1 = source_y + y1;
-
-            if resource.framebuffer.len() < copy_src_y1 * src_stride {
-                return;
-            }
-
-            let dst_w = display.width;
-            let dst = display.pixels.as_mut_slice();
-
-            for (src_y, dst_y) in (copy_src_y0..copy_src_y1).zip(y0..y1) {
-                let s = src_y * src_stride;
-                let src = &resource.framebuffer[s + copy_src_x0 * BYTES_PER_PIXEL..s + copy_src_x1 * BYTES_PER_PIXEL];
-                let drow = &mut dst[dst_y * dst_w + x0..dst_y * dst_w + x1];
-                drow.as_mut_bytes().copy_from_slice(src);
-            }
-        }
-
-        display.iosurface_id = iosurface_id;
-
-        display.dirty_rect = match display.dirty_rect {
-            Some((old_x, old_y, old_w, old_h)) => {
-                let old_x1 = old_x.saturating_add(old_w);
-                let old_y1 = old_y.saturating_add(old_h);
-                let nx0 = old_x.min(x0);
-                let ny0 = old_y.min(y0);
-                let nx1 = old_x1.max(x1);
-                let ny1 = old_y1.max(y1);
-                Some((nx0, ny0, nx1 - nx0, ny1 - ny0))
-            }
-            None => Some((x0, y0, x1 - x0, y1 - y0)),
+        let damage = PresentRect {
+            x: damage.x,
+            y: damage.y,
+            width: damage.width,
+            height: damage.height,
         };
 
-        display.seq = display.seq.wrapping_add(1);
+        if let Some(texture) = native_texture {
+            return (self.on_present)(Presentation::Frame(PresentFrame {
+                source: PresentSource::NativeTexture(texture),
+                source_rect,
+                damage,
+            }));
+        }
+
+        let resources = &self.resources;
+        let on_present = &mut self.on_present;
+        let Some(resource) = resources.get(&resource_id) else {
+            return false;
+        };
+
+        let (width, height, stride) = blob_size
+            .map(|(width, height)| (width, height, width.saturating_mul(BYTES_PER_PIXEL as u32)))
+            .unwrap_or((
+                resource.width,
+                resource.height,
+                resource.width.saturating_mul(BYTES_PER_PIXEL as u32),
+            ));
+
+        on_present(Presentation::Frame(PresentFrame {
+            source: PresentSource::Pixels {
+                data: &resource.framebuffer,
+                width,
+                height,
+                stride,
+            },
+            source_rect,
+            damage,
+        }))
     }
 
     fn resp_header(r#type: CtrlType, req: &CtrlHeader) -> CtrlHeader {
@@ -1609,12 +1688,12 @@ impl<'a> Gpu<'a> {
         let resource_id = req.resource_id;
         let offset = req.offset;
 
-        let Some(resource) = self.resources.get(&resource_id) else {
+        let Some(resource) = self.resources.get_mut(&resource_id) else {
             eprintln!("ResourceMapBlob FAILED: unknown resource_id={}", resource_id,);
             return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
         };
 
-        let ResourceKind::RendererBlob(blob) = &resource.kind else {
+        let ResourceKind::RendererBlob(blob) = &mut resource.kind else {
             eprintln!("ResourceMapBlob FAILED: resource_id={} is not a blob", resource_id);
             return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
         };
@@ -1686,7 +1765,7 @@ impl<'a> Gpu<'a> {
 
         let guest_addr = HOST_VISIBLE_SHM_BASE + offset;
 
-        let (mapped_gpa, mapped_size) = match map_blob_to_guest(map_ptr, guest_addr, size as usize) {
+        let mapping = match BlobMapping::map(map_ptr, guest_addr, size as usize) {
             Ok(mapping) => mapping,
             Err(err) => {
                 eprintln!(
@@ -1705,22 +1784,7 @@ impl<'a> Gpu<'a> {
             }
         };
 
-        let Some(resource) = self.resources.get_mut(&resource_id) else {
-            let _ = unmap_blob_from_guest(mapped_gpa, mapped_size);
-            let _ = self.renderer.unmap(resource_id);
-            return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
-        };
-
-        let ResourceKind::RendererBlob(blob) = &mut resource.kind else {
-            let _ = unmap_blob_from_guest(mapped_gpa, mapped_size);
-            let _ = self.renderer.unmap(resource_id);
-            return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
-        };
-
-        blob.mapping = Some(BlobMapping {
-            guest_addr: mapped_gpa,
-            size: mapped_size,
-        });
+        blob.mapping = Some(mapping);
 
         let resp = RespMapInfo {
             hdr: Gpu::resp_header(CtrlType::RespOkMapInfo, hdr),
@@ -1748,20 +1812,19 @@ impl<'a> Gpu<'a> {
             return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
         };
 
-        let Some(mapping) = blob.mapping.as_ref() else {
+        let Some(mut mapping) = blob.mapping.take() else {
             eprintln!("ResourceUnmapBlob FAILED: resource_id={} is not mapped", resource_id);
             return Gpu::err(chain, CtrlType::RespErrUnspec, hdr, mem);
         };
 
-        if let Err(err) = unmap_blob_from_guest(mapping.guest_addr, mapping.size) {
+        if let Err(err) = mapping.unmap() {
             eprintln!(
                 "ResourceUnmapBlob FAILED: hv_vm_unmap resource_id={} guest_addr={:#x} size={} err={:#x}",
                 resource_id, mapping.guest_addr, mapping.size, err,
             );
+            blob.mapping = Some(mapping);
             return Gpu::err(chain, CtrlType::RespErrUnspec, hdr, mem);
         }
-
-        blob.mapping = None;
 
         if let Err(err) = self.renderer.unmap(resource_id) {
             eprintln!(
@@ -1779,21 +1842,17 @@ impl<'a> Gpu<'a> {
             return;
         };
 
-        if self.scanout.as_ref().map(|scanout| scanout.resource_id) == Some(resource_id) {
+        if self.scanout.as_ref().is_some_and(|s| s.resource_id == resource_id) {
             self.scanout = None;
+            self.reset_presentation();
         }
 
         match resource.kind {
             ResourceKind::Local2d => {}
             ResourceKind::Renderer3d => self.renderer.resource_unref(resource_id),
-            ResourceKind::RendererBlob(blob) => {
-                if let Some(mapping) = blob.mapping {
-                    if let Err(err) = unmap_blob_from_guest(mapping.guest_addr, mapping.size) {
-                        eprintln!(
-                            "destroy_resource: hv_vm_unmap resource_id={} guest_addr={:#x} size={} err={:#x}",
-                            resource_id, mapping.guest_addr, mapping.size, err,
-                        );
-                    }
+            ResourceKind::RendererBlob(mut blob) => {
+                if let Some(mapping) = blob.mapping.take() {
+                    drop(mapping);
 
                     if let Err(err) = self.renderer.unmap(resource_id) {
                         eprintln!(
@@ -1832,8 +1891,9 @@ impl<'a> ExternalEventHandler for Gpu<'a> {
                     return;
                 }
 
-                self.scanout_width = width;
-                self.scanout_height = height;
+                self.edid_compatibility_mode.get_or_insert((width, height));
+                self.display_width = width;
+                self.display_height = height;
                 self.events_read |= EVENT_DISPLAY;
                 ctx.config_changed();
             }
@@ -1896,45 +1956,4 @@ fn align_up(value: usize, align: usize) -> Option<usize> {
 
 fn align_down_u64(value: u64, align: u64) -> u64 {
     value & !(align - 1)
-}
-
-fn map_blob_to_guest(host_addr: u64, guest_addr: u64, size: usize) -> Result<(u64, usize), i32> {
-    let page_size = APPLE_HV_PAGE_SIZE as u64;
-
-    let host_base = align_down_u64(host_addr, page_size);
-    let guest_base = align_down_u64(guest_addr, page_size);
-
-    let host_delta = host_addr - host_base;
-    let guest_delta = guest_addr - guest_base;
-
-    if host_delta != guest_delta {
-        eprintln!(
-            "blob mapping alignment mismatch: host_addr={:#x} guest_addr={:#x} host_delta={:#x} guest_delta={:#x}",
-            host_addr, guest_addr, host_delta, guest_delta,
-        );
-        return Err(-1);
-    }
-
-    let map_size = align_up(size.checked_add(host_delta as usize).ok_or(-1)?, APPLE_HV_PAGE_SIZE).ok_or(-1)?;
-
-    let ret = unsafe {
-        hv_vm_map(
-            host_base as *const c_void,
-            guest_base,
-            map_size,
-            HV_MEMORY_READ | HV_MEMORY_WRITE,
-        )
-    };
-
-    if ret == HV_SUCCESS {
-        Ok((guest_base, map_size))
-    } else {
-        Err(ret)
-    }
-}
-
-fn unmap_blob_from_guest(guest_base: u64, size: usize) -> Result<(), i32> {
-    let ret = unsafe { hv_vm_unmap(guest_base, size) };
-
-    if ret == HV_SUCCESS { Ok(()) } else { Err(ret) }
 }
