@@ -1,5 +1,5 @@
 use crate::{
-    display::{DisplayBuffer, ScanoutPublisher},
+    display::{DisplayBuffer, DisplayEvent, ScanoutPublisher},
     irq::IrqLine,
     memory::GuestMemory,
     virtio::{
@@ -14,6 +14,7 @@ use std::{
     },
     thread,
 };
+use winit::event_loop::EventLoopProxy;
 
 enum Request {
     Mmio {
@@ -74,10 +75,10 @@ impl Handle {
 }
 
 impl Worker {
-    pub fn run(self, mem: &GuestMemory, display: &Mutex<DisplayBuffer>) {
+    pub fn run(self, mem: &GuestMemory, display: &Mutex<DisplayBuffer>, display_proxy: &EventLoopProxy<DisplayEvent>) {
         let Self { rx, irq, tx } = self;
         let mut renderer = build_virglrenderer(tx).expect("virglrenderer init failed");
-        let mut scanout = ScanoutPublisher::new(display);
+        let mut scanout = ScanoutPublisher::new(display, display_proxy.clone());
         let gpu_dev = virtio::Gpu::new(&mut renderer, move |frame| scanout.present(frame));
         let mut gpu = virtio::MmioTransport::new(gpu_dev, irq);
 

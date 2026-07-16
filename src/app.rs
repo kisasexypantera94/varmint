@@ -1,6 +1,6 @@
 use crate::{
     devices::{RuntimeEvent, RuntimeInputEvent},
-    display::{DisplayBuffer, Presenter},
+    display::{DisplayBuffer, DisplayEvent, Presenter},
     virtio::input::keys::*,
 };
 use std::{
@@ -220,59 +220,28 @@ impl<'a> AppState<'a> {
     }
 
     fn poll_display(&mut self) -> bool {
-        let mut display = self.display.lock().unwrap();
-
-        if display.seq == self.last_seq {
+        let Some(update) = self.display.lock().unwrap().take_update(self.last_seq, &mut self.front) else {
             return false;
-        }
+        };
 
-        self.stat_produced += display.seq.wrapping_sub(self.last_seq);
-        self.last_seq = display.seq;
+        self.stat_produced += update.sequence.wrapping_sub(self.last_seq);
+        self.last_seq = update.sequence;
+        self.present_w = update.width;
+        self.present_h = update.height;
+        self.iosurface_id = update.iosurface_id;
 
-        self.present_w = display.width;
-        self.present_h = display.height;
-        self.iosurface_id = display.iosurface_id;
-        let native_copy_frame = self.iosurface_id.is_some();
-
-        let full_dirty = (0, 0, display.width, display.height);
-        let mut dirty = display.dirty_rect.take().unwrap_or(full_dirty);
-
-        let resized = self.front.len() != display.pixels.len();
-        if resized {
-            self.front.resize(display.pixels.len(), 0);
-            dirty = full_dirty;
-        }
-
-        let (x, y, w, h) = dirty;
-        let x = x.min(display.width);
-        let y = y.min(display.height);
-        let w = w.min(display.width.saturating_sub(x));
-        let h = h.min(display.height.saturating_sub(y));
-
+        let (x, y, w, h) = update.dirty_rect;
         if w != 0 && h != 0 {
-            if !native_copy_frame {
-                for row in 0..h {
-                    let src_off = (y + row) * display.width + x;
-                    let dst_off = (y + row) * self.present_w + x;
-                    self.front[dst_off..dst_off + w].copy_from_slice(&display.pixels[src_off..src_off + w]);
-                }
-            }
-
-            let new_dirty = (x, y, w, h);
-            self.dirty_rect = match self.dirty_rect {
+            self.dirty_rect = Some(match self.dirty_rect {
                 Some((old_x, old_y, old_w, old_h)) => {
-                    let old_x1 = old_x.saturating_add(old_w);
-                    let old_y1 = old_y.saturating_add(old_h);
-                    let new_x1 = x.saturating_add(w);
-                    let new_y1 = y.saturating_add(h);
-                    let nx0 = old_x.min(x);
-                    let ny0 = old_y.min(y);
-                    let nx1 = old_x1.max(new_x1);
-                    let ny1 = old_y1.max(new_y1);
-                    Some((nx0, ny0, nx1 - nx0, ny1 - ny0))
+                    let x0 = old_x.min(x);
+                    let y0 = old_y.min(y);
+                    let x1 = old_x.saturating_add(old_w).max(x.saturating_add(w));
+                    let y1 = old_y.saturating_add(old_h).max(y.saturating_add(h));
+                    (x0, y0, x1 - x0, y1 - y0)
                 }
-                None => Some(new_dirty),
-            };
+                None => (x, y, w, h),
+            });
         }
 
         true
@@ -342,7 +311,7 @@ impl<'a> AppState<'a> {
     }
 }
 
-impl<'a> ApplicationHandler for AppState<'a> {
+impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let attrs = Window::default_attributes()
             .with_title("Varmint")
@@ -360,6 +329,10 @@ impl<'a> ApplicationHandler for AppState<'a> {
             width: logical_size.width,
             height: logical_size.height,
         });
+
+        if self.poll_display() || self.dirty_rect.is_some() {
+            self.blit(false);
+        }
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {
@@ -478,6 +451,16 @@ impl<'a> ApplicationHandler for AppState<'a> {
         }
     }
 
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: DisplayEvent) {
+        match event {
+            DisplayEvent::Changed => {
+                if self.poll_display() || self.dirty_rect.is_some() {
+                    self.blit(false);
+                }
+            }
+        }
+    }
+
     fn device_event(&mut self, _event_loop: &ActiveEventLoop, _device_id: winit::event::DeviceId, event: DeviceEvent) {
         if !self.mouse_captured {
             return;
@@ -494,23 +477,22 @@ impl<'a> ApplicationHandler for AppState<'a> {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        let display_changed = self.poll_display();
-        if display_changed || self.dirty_rect.is_some() {
-            self.blit(false);
-        } else if Instant::now() >= self.next_keepalive {
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if Instant::now() >= self.next_keepalive {
             self.blit(true);
         }
 
+        event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_keepalive));
         self.stat_loops += 1;
         self.print_stats();
     }
 }
 
-pub fn run(display: &Mutex<DisplayBuffer>, host_tx: Sender<RuntimeEvent>) {
-    let event_loop = EventLoop::new().unwrap();
-    event_loop.set_control_flow(ControlFlow::Poll);
+pub fn event_loop() -> EventLoop<DisplayEvent> {
+    EventLoop::<DisplayEvent>::with_user_event().build().unwrap()
+}
 
+pub fn run(event_loop: EventLoop<DisplayEvent>, display: &Mutex<DisplayBuffer>, host_tx: Sender<RuntimeEvent>) {
     let mut app = AppState::new(display, host_tx);
     event_loop.run_app(&mut app).unwrap();
 }

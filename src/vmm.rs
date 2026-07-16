@@ -1,7 +1,7 @@
 use crate::{
     app,
     devices::{Runtime, RuntimeEvent},
-    display::DisplayBuffer,
+    display::{DisplayBuffer, DisplayEvent},
     machine::*,
     memory,
 };
@@ -15,6 +15,7 @@ use std::{
     },
     thread,
 };
+use winit::event_loop::EventLoopProxy;
 
 fn read_file(path: &str) -> std::io::Result<Vec<u8>> {
     let mut f = File::open(path)?;
@@ -28,6 +29,7 @@ fn vmm_thread(
     display: &Mutex<DisplayBuffer>,
     runtime_event_tx: Sender<RuntimeEvent>,
     runtime_event_rx: Receiver<RuntimeEvent>,
+    display_proxy: EventLoopProxy<DisplayEvent>,
 ) -> Result<()> {
     let image = read_file("/Users/dvgr/varmint-kernels/debian-4k/vmlinuz-6.12.90+deb13.1-arm64").unwrap();
     let initrd = read_file("/Users/dvgr/varmint-kernels/debian-4k/initrd.img-6.12.90+deb13.1-arm64").unwrap();
@@ -39,7 +41,7 @@ fn vmm_thread(
     mem.write(INITRD_START, &initrd)?;
     mem.write(DTB_START, &dtb)?;
 
-    Runtime::new(vm, runtime_event_tx)?.run(&mem, display, runtime_event_rx)?;
+    Runtime::new(vm, runtime_event_tx)?.run(&mem, display, runtime_event_rx, &display_proxy)?;
 
     Ok(())
 }
@@ -56,14 +58,19 @@ pub fn run() -> Result<()> {
     vm_cfg.set_ipa_granule(IpaGranule::HV_IPA_GRANULE_4KB)?;
 
     let vm = VirtualMachine::with_gic(vm_cfg, gic_config)?;
+
     let display = Mutex::new(DisplayBuffer::new());
+
     let (runtime_event_tx, runtime_event_rx) = std::sync::mpsc::channel();
+
+    let event_loop = app::event_loop();
+    let display_proxy = event_loop.create_proxy();
 
     thread::scope(|scope| {
         let vmm_runtime_event_tx = runtime_event_tx.clone();
-        scope.spawn(|| vmm_thread(&vm, &display, vmm_runtime_event_tx, runtime_event_rx));
+        scope.spawn(|| vmm_thread(&vm, &display, vmm_runtime_event_tx, runtime_event_rx, display_proxy));
 
-        app::run(&display, runtime_event_tx);
+        app::run(event_loop, &display, runtime_event_tx);
     });
 
     Ok(())

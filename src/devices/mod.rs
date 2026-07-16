@@ -2,7 +2,13 @@ mod events;
 mod gpu;
 
 use crate::{
-    audio, clipboard, cpu::CpuRuntime, display::DisplayBuffer, irq, machine::*, memory::GuestMemory, net, uart, virtio,
+    audio, clipboard,
+    cpu::CpuRuntime,
+    display::{DisplayBuffer, DisplayEvent},
+    irq,
+    machine::*,
+    memory::GuestMemory,
+    net, uart, virtio,
 };
 use applevisor::prelude::*;
 pub use events::{RuntimeEvent, RuntimeInputEvent};
@@ -14,6 +20,7 @@ use std::{
     },
     thread,
 };
+use winit::event_loop::EventLoopProxy;
 
 pub struct Devices {
     uart: Mutex<uart::Uart>,
@@ -199,10 +206,11 @@ impl<'a> Runtime<'a> {
         mem: &GuestMemory,
         display: &Mutex<DisplayBuffer>,
         runtime_event_rx: Receiver<RuntimeEvent>,
+        display_proxy: &EventLoopProxy<DisplayEvent>,
     ) -> Result<()> {
         thread::scope(|scope| -> Result<()> {
             scope.spawn(|| events::run_stdin(&self.devices.uart));
-            scope.spawn(|| self.gpu_worker.run(mem, display));
+            scope.spawn(|| self.gpu_worker.run(mem, display, display_proxy));
 
             let clipboard_tx = self.runtime_event_tx.clone();
             scope.spawn(move || {
