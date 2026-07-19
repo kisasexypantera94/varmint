@@ -1954,6 +1954,7 @@ dependencies = [
  "applevisor-sys",
  "coreaudio-rs",
  "crossterm",
+ "libc",
  "num_enum 0.7.6",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",

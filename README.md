@@ -1,5 +1,5 @@
 <p align="left">
-  <img src="./assets/logo.png" width="150">
+  <img src="./assets/icon.png" width="150">
 </p>
 
 # varmint
@@ -31,9 +31,11 @@ Subnautica:
 </p>
 
 ## Setup
-### Dependencies
+Requires macOS 26 or later, Xcode and Rust.
+
 ```sh
-chmod +x ./scripts/build_graphics_stack.sh ; ./scripts/build_graphics_stack.sh
+brew install cmake meson ninja pkg-config dtc python
+make app KERNEL=/path/to/Image INITRD=/path/to/initrd
 ```
 
 ## Resources

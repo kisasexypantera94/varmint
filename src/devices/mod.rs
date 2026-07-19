@@ -119,13 +119,17 @@ const MMIO_REGIONS: &[MmioRegion] = &[
 ];
 
 impl<'a> Runtime<'a> {
-    pub fn new(vm: &'a VirtualMachineInstance<GicEnabled>, runtime_event_tx: Sender<RuntimeEvent>) -> Result<Self> {
+    pub fn new(
+        vm: &'a VirtualMachineInstance<GicEnabled>,
+        runtime_event_tx: Sender<RuntimeEvent>,
+        disk: virtio::Blk,
+    ) -> Result<Self> {
         let (spi_int_start, _) = GicConfig::get_spi_interrupt_range()?;
 
         let uart = Mutex::new(uart::Uart::new(irq::IrqLine::new(vm, spi_int_start + UART_SPI_OFFSET)));
 
         let blk = Mutex::new(virtio::MmioTransport::new(
-            virtio::Blk::new("dev0.img", 40 * 1024 * 1024 * 1024),
+            disk,
             irq::IrqLine::new(vm, spi_int_start + VIRTBLK_SPI_OFFSET),
         ));
 
