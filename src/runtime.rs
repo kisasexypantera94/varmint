@@ -1,62 +1,144 @@
+use serde::Deserialize;
 use std::{
     env,
     ffi::OsStr,
+    fs,
     path::{Path, PathBuf},
 };
 
-const KERNEL_ENV: &str = "VARMINT_KERNEL";
-const INITRD_ENV: &str = "VARMINT_INITRD";
-const DTB_ENV: &str = "VARMINT_DTB";
-const DISK_ENV: &str = "VARMINT_DISK";
+const DEFAULT_MEMORY_MIB: u64 = 16 * 1024;
+const DEFAULT_VCPUS: usize = 12;
+const DEFAULT_KERNEL_ARGS: &str = "console=ttyAMA0 earlycon=pl011,mmio32,0x09000000 root=/dev/vda3 rw";
+const MIB: u64 = 1024 * 1024;
+const GIB: u64 = 1024 * MIB;
 
 #[derive(Debug, Clone)]
-pub struct RuntimePaths {
-    pub kernel: PathBuf,
-    pub initrd: PathBuf,
-    pub dtb: PathBuf,
+pub struct RuntimeConfig {
+    pub memory_size: usize,
+    pub vcpus: usize,
     pub disk: PathBuf,
+    pub disk_size: u64,
+    pub kernel: PathBuf,
+    pub initrd: Option<PathBuf>,
+    pub kernel_args: String,
 }
 
-impl RuntimePaths {
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConfigFile {
+    format_version: u32,
+    #[serde(default = "default_memory_mib")]
+    memory_mib: u64,
+    #[serde(default = "default_vcpus")]
+    vcpus: usize,
+    disk: PathBuf,
+    disk_size_gib: u64,
+    kernel: Option<PathBuf>,
+    initrd: Option<PathBuf>,
+    kernel_args: Option<Vec<String>>,
+}
+
+impl RuntimeConfig {
     pub fn resolve() -> Self {
+        let mut arguments = env::args_os().skip(1);
+        let path = arguments
+            .next()
+            .unwrap_or_else(|| panic!("usage: varmint <vm.varmint>"));
+        if let Some(argument) = arguments.next() {
+            panic!("unexpected argument: {}", argument.to_string_lossy());
+        }
+
+        Self::from_file(Path::new(&path))
+    }
+
+    fn from_file(path: &Path) -> Self {
+        let path = absolute_path(path);
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read VM config {}: {error}", path.display()));
+        let config: ConfigFile = toml::from_str(&source)
+            .unwrap_or_else(|error| panic!("failed to parse VM config {}: {error}", path.display()));
+
+        if config.format_version != 1 {
+            panic!(
+                "unsupported VM config format_version {}; expected 1",
+                config.format_version
+            );
+        }
+        if config.vcpus == 0 {
+            panic!("vcpus must be greater than zero");
+        }
+        if config.memory_mib < 256 {
+            panic!("memory_mib must be at least 256");
+        }
+        if config.disk_size_gib == 0 {
+            panic!("disk_size_gib must be greater than zero");
+        }
+        if config.kernel.is_none() && config.initrd.is_some() {
+            panic!("initrd requires a custom kernel");
+        }
+
+        let base = path.parent().unwrap_or_else(|| Path::new("."));
         let resources = bundle_resources();
+        let disk = resolve_path(base, config.disk);
+        let memory_size = bytes_from_units(config.memory_mib, MIB, "memory_mib");
+        let disk_size = config
+            .disk_size_gib
+            .checked_mul(GIB)
+            .unwrap_or_else(|| panic!("disk_size_gib is too large"));
+
+        let (kernel, initrd) = match config.kernel {
+            Some(kernel) => (
+                resolve_path(base, kernel),
+                config.initrd.map(|initrd| resolve_path(base, initrd)),
+            ),
+            None => (
+                resource_path(resources.as_deref(), "Image", "artifacts/kernel/Image"),
+                Some(resource_path(resources.as_deref(), "initrd", "artifacts/kernel/initrd")),
+            ),
+        };
+
+        let kernel_args = config
+            .kernel_args
+            .map(|args| args.join(" "))
+            .unwrap_or_else(|| DEFAULT_KERNEL_ARGS.to_owned());
 
         Self {
-            kernel: env_path(KERNEL_ENV)
-                .unwrap_or_else(|| resource_path(resources.as_deref(), "Image", "artifacts/kernel/Image")),
-            initrd: env_path(INITRD_ENV)
-                .unwrap_or_else(|| resource_path(resources.as_deref(), "initrd", "artifacts/kernel/initrd")),
-            dtb: env_path(DTB_ENV)
-                .unwrap_or_else(|| resource_path(resources.as_deref(), "varmint.dtb", "artifacts/guest.dtb")),
-            disk: env_path(DISK_ENV)
-                .or_else(|| argument_path("--disk"))
-                .unwrap_or_else(|| default_disk_path(resources.is_some())),
+            memory_size,
+            vcpus: config.vcpus,
+            disk,
+            disk_size,
+            kernel,
+            initrd,
+            kernel_args,
         }
     }
 }
 
-fn env_path(name: &str) -> Option<PathBuf> {
-    env::var_os(name)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
+fn default_memory_mib() -> u64 {
+    DEFAULT_MEMORY_MIB
 }
 
-fn argument_path(flag: &str) -> Option<PathBuf> {
-    let mut args = env::args_os().skip(1);
-    while let Some(argument) = args.next() {
-        if argument.as_os_str() == OsStr::new(flag) {
-            let value = args.next().unwrap_or_else(|| panic!("{flag} requires a path"));
-            return Some(PathBuf::from(value));
-        }
-    }
-    None
+fn default_vcpus() -> usize {
+    DEFAULT_VCPUS
 }
 
-fn default_disk_path(in_bundle: bool) -> PathBuf {
-    if in_bundle {
-        panic!("no VM disk selected; launch with --disk /path/to/disk.raw or set VARMINT_DISK");
+fn bytes_from_units(value: u64, unit: u64, name: &str) -> usize {
+    let bytes = value.checked_mul(unit).unwrap_or_else(|| panic!("{name} is too large"));
+    usize::try_from(bytes).unwrap_or_else(|_| panic!("{name} is too large for this host"))
+}
+
+fn absolute_path(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        return path.to_owned();
     }
-    PathBuf::from("dev0.img")
+
+    env::current_dir()
+        .unwrap_or_else(|error| panic!("failed to resolve current directory: {error}"))
+        .join(path)
+}
+
+fn resolve_path(base: &Path, path: PathBuf) -> PathBuf {
+    if path.is_absolute() { path } else { base.join(path) }
 }
 
 fn bundle_resources() -> Option<PathBuf> {

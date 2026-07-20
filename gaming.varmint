@@ -1,0 +1,7 @@
+format_version = 1
+
+memory_mib = 16384
+vcpus = 12
+
+disk = "dev0.img"
+disk_size_gib = 40

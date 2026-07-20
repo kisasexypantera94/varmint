@@ -9,10 +9,8 @@ APP_BUNDLE="$ROOT/dist/Varmint.app"
 MANIFEST="$ROOT/runtime/manifest.toml"
 ENTITLEMENTS="$ROOT/runtime/entitlements.plist"
 
-KERNEL="$ROOT/artifacts/kernel/Image"
-INITRD="$ROOT/artifacts/kernel/initrd"
-DTS="$ROOT/dts/guest.dts"
-DTB="$BUILD_ROOT/runtime/varmint.dtb"
+KERNEL=""
+INITRD=""
 ICON_SOURCE="$ROOT/assets/icon.icon"
 ICON="$BUILD_ROOT/runtime/Assets.car"
 BINARY="$BUILD_ROOT/release/varmint"
@@ -548,6 +546,8 @@ build_varmint() {
 
   local cargo_target_dir="${CARGO_TARGET_DIR:-$BUILD_ROOT/cargo}"
   local output_dir="$BUILD_ROOT/release"
+  local minimum_macos
+  minimum_macos="$(manifest_value runtime.minimum_macos)"
   mkdir -p "$output_dir"
   local cargo_args=(build --release)
   if [ -f "$ROOT/Cargo.lock" ]; then
@@ -557,6 +557,7 @@ build_varmint() {
   log "build varmint"
   (
     cd "$ROOT"
+    MACOSX_DEPLOYMENT_TARGET="$minimum_macos" \
     PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}" \
     RUSTFLAGS="-L native=$PREFIX/lib ${RUSTFLAGS:-}" \
     CARGO_TARGET_DIR="$cargo_target_dir" \
@@ -568,53 +569,6 @@ build_varmint() {
   codesign --force --sign - --timestamp=none --entitlements "$ENTITLEMENTS" "$BINARY"
   codesign --verify --strict --verbose=2 "$BINARY"
   log "varmint binary ready: $BINARY"
-}
-
-build_dtb() {
-  need_cmd dtc
-  need_cmd python3
-  need_file "$DTS"
-  need_file "$INITRD"
-  mkdir -p "$(dirname "$DTB")" "$BUILD_ROOT/tmp"
-
-  local initrd_start dtb_start generated
-  initrd_start="$(manifest_value guest.initrd_start)"
-  dtb_start="$(manifest_value guest.dtb_start)"
-  generated="$BUILD_ROOT/tmp/guest.generated.dts"
-  python3 - "$DTS" "$generated" "$INITRD" "$initrd_start" "$dtb_start" <<'PY'
-import os
-import re
-import sys
-
-source, output, initrd, start, dtb_start = sys.argv[1:]
-start = int(start, 0)
-dtb_start = int(dtb_start, 0)
-end = start + os.path.getsize(initrd)
-if end >= dtb_start:
-    raise SystemExit(f"initrd end 0x{end:x} overlaps DTB at 0x{dtb_start:x}")
-hi, lo = end >> 32, end & 0xffffffff
-text = open(source, encoding="utf-8").read()
-start_hi, start_lo = start >> 32, start & 0xffffffff
-text, start_count = re.subn(
-    r"linux,initrd-start\s*=\s*<[^;]+>;[^\n]*",
-    f"linux,initrd-start = <0x{start_hi:x} 0x{start_lo:08x}>; // generated from runtime manifest",
-    text,
-    count=1,
-)
-text, end_count = re.subn(
-    r"linux,initrd-end\s*=\s*<[^;]+>;[^\n]*",
-    f"linux,initrd-end = <0x{hi:x} 0x{lo:08x}>; // generated from initrd size",
-    text,
-    count=1,
-)
-if start_count != 1 or end_count != 1:
-    raise SystemExit("could not find exactly one initrd start/end property")
-open(output, "w", encoding="utf-8").write(text)
-print(f"initrd: 0x{start:x}..0x{end:x}")
-PY
-
-  dtc -I dts -O dtb -o "$DTB" "$generated"
-  log "DTB ready: $DTB"
 }
 
 build_icon() {
@@ -663,7 +617,6 @@ assemble_app() {
   need_file "$BINARY"
   need_file "$KERNEL"
   need_file "$INITRD"
-  need_file "$DTB"
   need_file "$ICON"
   need_file "$MANIFEST"
 
@@ -673,7 +626,6 @@ assemble_app() {
   install -m 755 "$BINARY" "$contents/MacOS/varmint"
   install -m 644 "$KERNEL" "$contents/Resources/kernel/Image"
   install -m 644 "$INITRD" "$contents/Resources/kernel/initrd"
-  install -m 644 "$DTB" "$contents/Resources/kernel/varmint.dtb"
   install -m 644 "$ICON" "$contents/Resources/Assets.car"
   install -m 644 "$MANIFEST" "$contents/Resources/runtime-manifest.toml"
 
@@ -1016,7 +968,6 @@ verify_app() {
   need_file "$executable"
   need_file "$resources/kernel/Image"
   need_file "$resources/kernel/initrd"
-  need_file "$resources/kernel/varmint.dtb"
   need_file "$resources/Assets.car"
   need_file "$manifest"
   need_file "$frameworks/EGL.framework/Versions/A/EGL"
@@ -1045,7 +996,6 @@ verify_app() {
 
   [ -s "$resources/kernel/Image" ] || die "bundled kernel is empty"
   [ -s "$resources/kernel/initrd" ] || die "bundled initrd is empty"
-  [ -s "$resources/kernel/varmint.dtb" ] || die "bundled DTB is empty"
   python3 - "$APP_BUNDLE" <<'PY'
 from pathlib import Path
 import sys
@@ -1100,10 +1050,11 @@ main() {
     return
   fi
 
+  [ -n "$KERNEL" ] || die "--kernel is required"
+  [ -n "$INITRD" ] || die "--initrd is required"
   need_file "$KERNEL"
   need_file "$INITRD"
   build_varmint
-  build_dtb
   build_icon
   assemble_app
   fix_rpaths

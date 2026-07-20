@@ -51,18 +51,43 @@ pub struct Blk {
 }
 
 impl Blk {
-    pub fn new(path: &Path) -> io::Result<Blk> {
+    pub fn new(path: &Path, minimum_size: u64) -> io::Result<Blk> {
         let file = OpenOptions::new().read(true).write(true).open(path)?;
         lock_disk(&file, path)?;
 
-        let size = file.metadata()?.len();
-        if size == 0 || size % 512 != 0 {
+        let mut size = file.metadata()?.len();
+        if size != 0 && size % 512 != 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
-                    "disk {} has invalid size {size}; expected a non-empty multiple of 512 bytes",
+                    "disk {} has invalid size {size}; expected a multiple of 512 bytes",
                     path.display()
                 ),
+            ));
+        }
+
+        if minimum_size == 0 || minimum_size % 512 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("configured disk size {minimum_size} is not a non-zero multiple of 512 bytes"),
+            ));
+        }
+
+        if size < minimum_size {
+            file.set_len(minimum_size)?;
+            eprintln!(
+                "grew VM disk {} from {} to {} bytes",
+                path.display(),
+                size,
+                minimum_size
+            );
+            size = minimum_size;
+        }
+
+        if size == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("disk {} is empty", path.display()),
             ));
         }
 

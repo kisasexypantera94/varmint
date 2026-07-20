@@ -34,7 +34,7 @@ Subnautica:
 Requires macOS 26 or later, Xcode and Rust.
 
 ```sh
-brew install cmake meson ninja pkg-config dtc python
+brew install cmake meson ninja pkg-config python
 make app KERNEL=/path/to/Image INITRD=/path/to/initrd
 ```
 

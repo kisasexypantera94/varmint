@@ -11,10 +11,6 @@ dylibs = [
   "libMoltenVK.dylib",
 ]
 
-[guest]
-initrd_start = 0x48000000
-dtb_start = 0x4f000000
-
 [dependencies.angle]
 repository = "https://github.com/utmapp/WebKit.git"
 commit = "ed78ab6e1a37f4f11583a0bd038f22ec91f3ff10"

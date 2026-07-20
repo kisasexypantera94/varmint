@@ -123,6 +123,7 @@ impl<'a> Runtime<'a> {
         vm: &'a VirtualMachineInstance<GicEnabled>,
         runtime_event_tx: Sender<RuntimeEvent>,
         disk: virtio::Blk,
+        vcpus: usize,
     ) -> Result<Self> {
         let (spi_int_start, _) = GicConfig::get_spi_interrupt_range()?;
 
@@ -196,7 +197,7 @@ impl<'a> Runtime<'a> {
                 snd,
                 console,
             },
-            cpus: CpuRuntime::new(vm, IMAGE_START, DTB_START)?,
+            cpus: CpuRuntime::new(vm, IMAGE_START, DTB_START, vcpus)?,
             gpu_worker,
             clipboard_rx,
             iface,
