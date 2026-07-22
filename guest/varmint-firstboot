@@ -1,0 +1,244 @@
+#!/bin/sh
+set -eu
+
+STATE_DIR=/var/lib/varmint
+MARKER=$STATE_DIR/firstboot.done
+GAMING_MARKER=$STATE_DIR/gaming-setup.done
+USER_FILE=$STATE_DIR/firstboot.user
+STEAM_URL=https://repo.steampowered.com/steam/archive/stable/steam-launcher_latest_all.deb
+
+cleanup() {
+    stty echo 2>/dev/null || true
+}
+trap cleanup EXIT HUP INT TERM
+
+load_user() {
+    [ -s "$USER_FILE" ] || {
+        printf 'Varmint user state is missing.\n' >&2
+        exit 1
+    }
+    username=$(cat "$USER_FILE")
+    getent passwd "$username" >/dev/null || {
+        printf 'Saved Varmint user %s no longer exists.\n' "$username" >&2
+        exit 1
+    }
+    home_dir=$(getent passwd "$username" | cut -d: -f6)
+}
+
+run_as_user() {
+    sudo -H -u "$username" env -i \
+        HOME="$home_dir" \
+        USER="$username" \
+        LOGNAME="$username" \
+        PATH=/usr/local/bin:/usr/bin:/bin \
+        XDG_CONFIG_HOME="$home_dir/.config" \
+        XDG_DATA_HOME="$home_dir/.local/share" \
+        XDG_CACHE_HOME="$home_dir/.cache" \
+        "$@"
+}
+
+create_user() {
+    install -d -m 0755 "$STATE_DIR"
+
+    if [ -s "$USER_FILE" ]; then
+        username=$(cat "$USER_FILE")
+        getent passwd "$username" >/dev/null || {
+            printf 'Saved Varmint user %s no longer exists.\n' "$username" >&2
+            exit 1
+        }
+        return
+    fi
+
+    existing_user=$(awk -F: '$3 >= 1000 && $3 < 65534 { print $1; exit }' /etc/passwd)
+    if [ -n "$existing_user" ]; then
+        username=$existing_user
+        printf '%s\n' "$username" > "$USER_FILE"
+        chmod 0600 "$USER_FILE"
+        return
+    fi
+
+    while :; do
+        printf 'Username: '
+        IFS= read -r username
+        case "$username" in
+            root|'')
+                printf 'Choose a non-root username.\n'
+                ;;
+            *[!a-z0-9_-]*|[0-9-]*)
+                printf 'Use lowercase letters, digits, underscore or dash; start with a letter or underscore.\n'
+                ;;
+            *)
+                if getent passwd "$username" >/dev/null; then
+                    printf 'That user already exists.\n'
+                else
+                    break
+                fi
+                ;;
+        esac
+    done
+
+    while :; do
+        printf 'Password: '
+        stty -echo
+        IFS= read -r password
+        stty echo
+        printf '\nRepeat password: '
+        stty -echo
+        IFS= read -r confirmation
+        stty echo
+        printf '\n'
+
+        if [ -z "$password" ]; then
+            printf 'Password cannot be empty.\n'
+        elif [ "$password" != "$confirmation" ]; then
+            printf 'Passwords do not match.\n'
+        else
+            break
+        fi
+    done
+
+    useradd --create-home --shell /bin/bash "$username"
+    printf '%s:%s\n' "$username" "$password" | chpasswd
+    unset password confirmation
+
+    for group in sudo audio video render input; do
+        if getent group "$group" >/dev/null; then
+            usermod -aG "$group" "$username"
+        fi
+    done
+
+    printf '%s\n' "$username" > "$USER_FILE"
+    chmod 0600 "$USER_FILE"
+}
+
+setup_fex_rootfs() {
+    if [ -d "$home_dir/.fex-emu" ]; then
+        config=$home_dir/.fex-emu/Config.json
+    else
+        config=$home_dir/.config/fex-emu/Config.json
+    fi
+
+    if [ ! -s "$config" ]; then
+        printf '\nDownloading and extracting the FEX Ubuntu 24.04 rootfs...\n'
+        run_as_user \
+            FEXRootFSFetcher \
+                --assume-yes \
+                --extract \
+                --distro-name ubuntu \
+                --distro-version 24.04 \
+                --force-ui tty
+    fi
+
+    rootfs=$home_dir/.local/share/fex-emu/RootFS/Ubuntu_24_04
+    [ -d "$rootfs" ] || {
+        printf 'FEX rootfs setup did not create %s.\n' "$rootfs" >&2
+        exit 1
+    }
+
+    run_as_user python3 - "$config" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+path.parent.mkdir(parents=True, exist_ok=True)
+if path.exists():
+    with path.open(encoding="utf-8") as f:
+        data = json.load(f)
+else:
+    data = {}
+config = data.setdefault("Config", {})
+config.update({
+    "RootFS": "Ubuntu_24_04",
+    "TSOEnabled": "0",
+    "VectorTSOEnabled": "0",
+    "MemcpySetTSOEnabled": "0",
+    "HalfBarrierTSOEnabled": "1",
+})
+data.setdefault("ThunksDB", {})["Vulkan"] = 1
+
+temporary = path.with_name(path.name + f".partial.{os.getpid()}")
+with temporary.open("w", encoding="utf-8") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+os.replace(temporary, path)
+PY
+}
+
+install_steam() {
+    if dpkg-query -W -f='${Status}\n' steam-launcher 2>/dev/null | grep -Fx 'install ok installed' >/dev/null; then
+        return
+    fi
+
+    printf '\nInstalling the Steam launcher...\n'
+    cache_dir=/var/cache/varmint
+    steam_deb=$cache_dir/steam-launcher_latest_all.deb
+    install -d -m 0755 "$cache_dir"
+
+    if [ ! -s "$steam_deb" ]; then
+        partial=$steam_deb.partial.$$
+        rm -f "$partial"
+        curl --fail --location --retry 3 --retry-delay 2 --output "$partial" "$STEAM_URL"
+        mv "$partial" "$steam_deb"
+    fi
+
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y "$steam_deb"
+    dpkg-query -W -f='${Status}\n' steam-launcher 2>/dev/null | grep -Fx 'install ok installed' >/dev/null || {
+        printf 'Steam launcher package was not installed successfully.\n' >&2
+        exit 1
+    }
+}
+
+verify_gaming_setup() {
+    arch=$(run_as_user FEXBash -c 'uname -m')
+    [ "$arch" = x86_64 ] || {
+        printf 'FEX verification failed: expected x86_64, got %s.\n' "$arch" >&2
+        exit 1
+    }
+
+    run_as_user FEXBash -c 'command -v steam >/dev/null'
+}
+
+firstboot() {
+    printf '%s\n\n' 'Varmint first boot'
+    create_user
+
+    command -v ssh-keygen >/dev/null 2>&1 && ssh-keygen -A
+    passwd -l root >/dev/null 2>&1 || true
+
+    if systemctl list-unit-files lightdm.service >/dev/null 2>&1; then
+        systemctl unmask lightdm.service >/dev/null 2>&1 || true
+        systemctl enable lightdm.service >/dev/null
+        systemctl set-default graphical.target >/dev/null
+    fi
+
+    touch "$MARKER"
+    printf 'User %s is ready. Starting the desktop.\n' "$username"
+    if systemctl is-enabled lightdm.service >/dev/null 2>&1; then
+        systemctl start lightdm.service || printf 'LightDM failed to start; log in on tty1 and inspect systemctl status lightdm.\n'
+    fi
+    sleep 2
+}
+
+gaming_setup() {
+    install -d -m 0755 "$STATE_DIR"
+    load_user
+
+    printf 'Preparing the Varmint gaming environment for %s.\n' "$username"
+    setup_fex_rootfs
+    install_steam
+    verify_gaming_setup
+    touch "$GAMING_MARKER"
+    printf 'Varmint gaming environment is ready for %s.\n' "$username"
+}
+
+case "${1:-firstboot}" in
+    firstboot) firstboot ;;
+    gaming) gaming_setup ;;
+    *)
+        printf 'Unknown mode: %s\n' "$1" >&2
+        exit 2
+        ;;
+esac

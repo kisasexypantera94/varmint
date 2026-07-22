@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+
+runtime_dir=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+export XDG_RUNTIME_DIR=$runtime_dir
+export PULSE_SERVER=${PULSE_SERVER:-unix:$runtime_dir/pulse/native}
+export PIPEWIRE_RUNTIME_DIR=${PIPEWIRE_RUNTIME_DIR:-$runtime_dir}
+export FEX_THUNKGUESTLIBS=/usr/share/fex-emu/GuestThunks
+export FEX_THUNKHOSTLIBS=/usr/lib/aarch64-linux-gnu/fex-emu/HostThunks
+export VK_ICD_FILENAMES=${VK_ICD_FILENAMES:-/usr/share/vulkan/icd.d/virtio_icd.json}
+export LD_LIBRARY_PATH=$FEX_THUNKGUESTLIBS
+export LIBGL_ALWAYS_SOFTWARE=1
+export GALLIUM_DRIVER=llvmpipe
+
+unset WINEPREFIX WINEARCH WINESERVER WINELOADER WINEDLLPATH WINEDLLOVERRIDES WINEDEBUG
+unset DXVK_HUD DXVK_LOG_LEVEL DXVK_LOG_PATH PROTON_LOG PROTON_LOG_DIR PROTON_USE_WINED3D
+unset PRESSURE_VESSEL_FILESYSTEMS_RW PRESSURE_VESSEL_FILESYSTEMS_RO LD_PRELOAD
+
+exec FEXBash -c 'exec steam -no-cef-sandbox'

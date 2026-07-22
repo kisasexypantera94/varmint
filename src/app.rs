@@ -382,9 +382,6 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
                         }
                         return;
                     }
-                    if pressed && code == KeyCode::F11 {
-                        self.set_mouse_capture(false);
-                    }
                     if let Some(linux_code) = winit_to_linux_key(code) {
                         let _ = self.host_tx.send(RuntimeEvent::Input(RuntimeInputEvent::Key {
                             code: linux_code,

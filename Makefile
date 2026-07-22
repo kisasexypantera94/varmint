@@ -1,24 +1,25 @@
 APP_BUNDLE := $(CURDIR)/dist/Varmint.app
 APP_BIN := $(APP_BUNDLE)/Contents/MacOS/varmint
+GUEST_DIR := $(CURDIR)/build/guest
 
-KERNEL ?=
-INITRD ?=
+KERNEL ?= $(GUEST_DIR)/Image
+INITRD ?= $(GUEST_DIR)/initrd
+BASE_IMAGE ?= $(GUEST_DIR)/varmint-debian.raw.zst
 CONFIG ?= $(CURDIR)/gaming.varmint
 
-.PHONY: app bundle dependencies run run-sudo clean
+.PHONY: app bundle dependencies guest-image run run-sudo clean
 
-app:
-	@test -n "$(KERNEL)" || { echo "error: KERNEL is required" >&2; exit 1; }
-	@test -n "$(INITRD)" || { echo "error: INITRD is required" >&2; exit 1; }
-	./scripts/build-app.sh --kernel "$(KERNEL)" --initrd "$(INITRD)"
+app: guest-image
+	./scripts/build-app.sh --kernel "$(KERNEL)" --initrd "$(INITRD)" --base-image "$(BASE_IMAGE)"
 
-bundle:
-	@test -n "$(KERNEL)" || { echo "error: KERNEL is required" >&2; exit 1; }
-	@test -n "$(INITRD)" || { echo "error: INITRD is required" >&2; exit 1; }
-	./scripts/build-app.sh --skip-dependencies --kernel "$(KERNEL)" --initrd "$(INITRD)"
+bundle: guest-image
+	./scripts/build-app.sh --skip-dependencies --kernel "$(KERNEL)" --initrd "$(INITRD)" --base-image "$(BASE_IMAGE)"
 
 dependencies:
 	./scripts/build-app.sh --dependencies-only
+
+guest-image:
+	./guest/build-image.sh
 
 run: bundle
 	VARMINT_FENCE_POLL_US=1000 \

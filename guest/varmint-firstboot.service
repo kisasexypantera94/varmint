@@ -1,0 +1,20 @@
+[Unit]
+Description=Create the first Varmint user
+After=systemd-user-sessions.service
+Before=getty@tty1.service
+ConditionPathExists=!/var/lib/varmint/firstboot.done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/varmint-firstboot firstboot
+StandardInput=tty-force
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

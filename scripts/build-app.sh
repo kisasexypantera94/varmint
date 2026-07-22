@@ -11,6 +11,7 @@ ENTITLEMENTS="$ROOT/runtime/entitlements.plist"
 
 KERNEL=""
 INITRD=""
+BASE_IMAGE=""
 ICON_SOURCE="$ROOT/assets/icon.icon"
 ICON="$BUILD_ROOT/runtime/Assets.car"
 BINARY="$BUILD_ROOT/release/varmint"
@@ -133,6 +134,7 @@ usage: ./scripts/build-app.sh [options]
 options:
   --kernel PATH           kernel to bundle
   --initrd PATH           initrd to bundle
+  --base-image PATH       compressed base disk image to bundle
   --skip-dependencies     reuse the existing build prefix
   --force-dependencies    rebuild pinned dependencies even if the stamp matches
   --dependencies-only     prepare dependencies and stop
@@ -152,6 +154,11 @@ parse_args() {
       --initrd)
         [ "$#" -ge 2 ] || die "--initrd requires a path"
         INITRD="$2"
+        shift 2
+        ;;
+      --base-image)
+        [ "$#" -ge 2 ] || die "--base-image requires a path"
+        BASE_IMAGE="$2"
         shift 2
         ;;
       --skip-dependencies)
@@ -289,7 +296,7 @@ build_angle() {
       MACOSX_DEPLOYMENT_TARGET="$minimum_macos" \
       XROS_DEPLOYMENT_TARGET=1.0 \
       'OTHER_CFLAGS=$(inherited) -Wno-unnecessary-virtual-specifier -Wno-nontrivial-memcall' \
-      'OTHER_CPLUSPLUSFLAGS=$(inherited) -Wno-unnecessary-virtual-specifier -Wno-nontrivial-memcall'
+      'OTHER_CPLUSPLUSFLAGS=$(inherited) -U_LIBCPP_ENABLE_ASSERTIONS -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_EXTENSIVE -Wno-unnecessary-virtual-specifier -Wno-nontrivial-memcall'
   )
 
   mkdir -p "$PREFIX/lib" "$PREFIX/include"
@@ -617,15 +624,17 @@ assemble_app() {
   need_file "$BINARY"
   need_file "$KERNEL"
   need_file "$INITRD"
+  need_file "$BASE_IMAGE"
   need_file "$ICON"
   need_file "$MANIFEST"
 
   local contents="$APP_BUNDLE/Contents"
   rm -rf "$APP_BUNDLE"
-  mkdir -p "$contents/MacOS" "$contents/Frameworks" "$contents/Resources/kernel"
+  mkdir -p "$contents/MacOS" "$contents/Frameworks" "$contents/Resources/kernel" "$contents/Resources/runtime"
   install -m 755 "$BINARY" "$contents/MacOS/varmint"
   install -m 644 "$KERNEL" "$contents/Resources/kernel/Image"
   install -m 644 "$INITRD" "$contents/Resources/kernel/initrd"
+  install -m 644 "$BASE_IMAGE" "$contents/Resources/runtime/base.raw.zst"
   install -m 644 "$ICON" "$contents/Resources/Assets.car"
   install -m 644 "$MANIFEST" "$contents/Resources/runtime-manifest.toml"
 
@@ -968,6 +977,7 @@ verify_app() {
   need_file "$executable"
   need_file "$resources/kernel/Image"
   need_file "$resources/kernel/initrd"
+  need_file "$resources/runtime/base.raw.zst"
   need_file "$resources/Assets.car"
   need_file "$manifest"
   need_file "$frameworks/EGL.framework/Versions/A/EGL"
@@ -996,6 +1006,7 @@ verify_app() {
 
   [ -s "$resources/kernel/Image" ] || die "bundled kernel is empty"
   [ -s "$resources/kernel/initrd" ] || die "bundled initrd is empty"
+  [ -s "$resources/runtime/base.raw.zst" ] || die "bundled base image is empty"
   python3 - "$APP_BUNDLE" <<'PY'
 from pathlib import Path
 import sys
@@ -1052,8 +1063,10 @@ main() {
 
   [ -n "$KERNEL" ] || die "--kernel is required"
   [ -n "$INITRD" ] || die "--initrd is required"
+  [ -n "$BASE_IMAGE" ] || die "--base-image is required"
   need_file "$KERNEL"
   need_file "$INITRD"
+  need_file "$BASE_IMAGE"
   build_varmint
   build_icon
   assemble_app

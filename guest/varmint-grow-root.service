@@ -1,0 +1,11 @@
+[Unit]
+Description=Grow Varmint root filesystem
+After=local-fs.target
+Before=varmint-firstboot.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/varmint-grow-root
+
+[Install]
+WantedBy=multi-user.target

@@ -31,11 +31,11 @@ Subnautica:
 </p>
 
 ## Setup
-Requires macOS 26 or later, Xcode and Rust.
+Requires macOS 26 or later, Xcode, Rust and Docker.
 
 ```sh
 brew install cmake meson ninja pkg-config python
-make app KERNEL=/path/to/Image INITRD=/path/to/initrd
+make app
 ```
 
 ## Resources

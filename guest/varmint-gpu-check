@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+
+printf '%s\n' '=== OpenGL ==='
+glxinfo -B
+printf '\n%s\n' '=== Vulkan ==='
+vulkaninfo --summary

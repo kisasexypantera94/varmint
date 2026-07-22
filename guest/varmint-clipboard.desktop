@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Varmint Clipboard
+Comment=Synchronize the guest and host clipboards
+Exec=/usr/local/libexec/varmint-clipboard-agent
+NoDisplay=true
+StartupNotify=false
+Terminal=false

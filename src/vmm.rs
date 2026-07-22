@@ -1,16 +1,15 @@
 use crate::{
     app,
+    config::VmConfig,
     devices::{Runtime, RuntimeEvent},
     display::{DisplayBuffer, DisplayEvent},
     machine::*,
-    memory,
-    runtime::RuntimeConfig,
-    virtio,
+    memory, virtio,
 };
 use applevisor::prelude::*;
 use std::{
-    fs::File,
-    io::Read,
+    fs::{self, File, OpenOptions},
+    io::{self, BufReader, BufWriter, Read, Write},
     path::Path,
     sync::{
         Mutex,
@@ -27,13 +26,52 @@ fn read_file(path: &Path) -> std::io::Result<Vec<u8>> {
     Ok(buf)
 }
 
+fn prepare_disk(config: &VmConfig) -> io::Result<()> {
+    if config.disk.exists() {
+        return Ok(());
+    }
+
+    let parent = config.disk.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+    let name = config.disk.file_name().and_then(|name| name.to_str()).unwrap_or("disk");
+    let temporary = parent.join(format!(".{name}.partial.{}", std::process::id()));
+    let _ = fs::remove_file(&temporary);
+
+    let result = (|| {
+        let source = File::open(&config.base_image)?;
+        let output = OpenOptions::new().write(true).create_new(true).open(&temporary)?;
+        let mut output = BufWriter::new(output);
+        zstd::stream::copy_decode(BufReader::new(source), &mut output)?;
+        output.flush()?;
+        let output = output.into_inner().map_err(|error| error.into_error())?;
+        output.sync_all()?;
+
+        match fs::hard_link(&temporary, &config.disk) {
+            Ok(()) => Ok(true),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(false),
+            Err(error) => Err(error),
+        }
+    })();
+
+    let _ = fs::remove_file(&temporary);
+    if matches!(result, Ok(true)) {
+        eprintln!(
+            "created VM disk {} from {}",
+            config.disk.display(),
+            config.base_image.display()
+        );
+    }
+
+    result.map(|_| ())
+}
+
 fn vmm_thread(
     vm: &VirtualMachineInstance<GicEnabled>,
     display: &Mutex<DisplayBuffer>,
     runtime_event_tx: Sender<RuntimeEvent>,
     runtime_event_rx: Receiver<RuntimeEvent>,
     display_proxy: EventLoopProxy<DisplayEvent>,
-    config: &RuntimeConfig,
+    config: &VmConfig,
     disk: virtio::Blk,
     gicd_size: u64,
     gicr_size: u64,
@@ -99,7 +137,14 @@ fn validate_boot_layout(memory_size: usize, image_size: usize, initrd: Option<&[
 }
 
 pub fn run() -> Result<()> {
-    let config = RuntimeConfig::resolve();
+    let config = VmConfig::resolve();
+    prepare_disk(&config).unwrap_or_else(|error| {
+        panic!(
+            "failed to create VM disk {} from {}: {error}",
+            config.disk.display(),
+            config.base_image.display()
+        )
+    });
     let disk = virtio::Blk::new(&config.disk, config.disk_size)
         .unwrap_or_else(|error| panic!("failed to open VM disk {}: {error}", config.disk.display()));
 
