@@ -1,11 +1,6 @@
 use super::Devices;
-use crate::{audio, memory::GuestMemory, net, uart, virtio};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use std::{
-    io,
-    io::Read,
-    sync::{Mutex, mpsc::Receiver},
-};
+use crate::{audio, memory::GuestMemory, net, virtio};
+use std::{io, sync::mpsc::Receiver};
 
 pub enum RuntimeInputEvent {
     Key {
@@ -36,6 +31,7 @@ pub enum RuntimeInputEvent {
 
 pub enum RuntimeEvent {
     NetRx(Vec<u8>),
+    UartRx(u8),
     NetTx(Vec<u8>),
     Input(RuntimeInputEvent),
     DisplayResized { width: u32, height: u32 },
@@ -81,6 +77,7 @@ impl<'a> RuntimeEventPump<'a> {
             RuntimeEvent::NetRx(frame) => {
                 self.devices.net.lock().unwrap().handle_external_event(&frame, self.mem);
             }
+            RuntimeEvent::UartRx(byte) => self.devices.uart.lock().unwrap().enqueue(byte),
             RuntimeEvent::NetTx(frame) => match self.iface.write(&frame) {
                 Ok(()) => self.net_tx_error = None,
                 Err(error) => {
@@ -194,63 +191,5 @@ impl<'a> RuntimeEventPump<'a> {
             virtio::input::ExternalInput::AbsPosition { x, y, width, height },
             self.mem,
         );
-    }
-}
-
-struct RawModeGuard;
-
-impl RawModeGuard {
-    fn new() -> std::io::Result<Self> {
-        enable_raw_mode()?;
-        Ok(Self)
-    }
-}
-
-impl Drop for RawModeGuard {
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
-    }
-}
-
-pub fn run_stdin(uart: &Mutex<uart::Uart>) {
-    let _raw = RawModeGuard::new().unwrap();
-    let stdin = std::io::stdin();
-    let mut buf = [0u8; 1];
-
-    const PREFIX: u8 = 0x1d;
-    let mut got_prefix = false;
-
-    eprintln!("[VM] Press Ctrl-] x to exit");
-
-    loop {
-        match stdin.lock().read(&mut buf) {
-            Ok(0) => break,
-            Ok(_) => {
-                let b = buf[0];
-
-                if got_prefix {
-                    got_prefix = false;
-                    match b {
-                        b'x' => {
-                            eprintln!("Received break command");
-                            break;
-                        }
-                        _ => eprint!("unknown command: {b:#x}\r\n"),
-                    }
-                    continue;
-                }
-
-                if b == PREFIX {
-                    got_prefix = true;
-                    continue;
-                }
-
-                uart.lock().unwrap().enqueue(b);
-            }
-            Err(e) => {
-                eprintln!("stdin read error: {e}");
-                break;
-            }
-        }
     }
 }

@@ -1,10 +1,10 @@
 use crate::{
-    app,
+    app, audio, clipboard,
     config::VmConfig,
-    devices::{Runtime, RuntimeEvent},
+    devices::{HostBackends, Runtime, RuntimeEvent},
     display::{DisplayBuffer, DisplayEvent},
     machine::*,
-    memory, net, virtio,
+    memory, net, stdio, virtio,
 };
 use applevisor::prelude::*;
 use std::{
@@ -24,6 +24,22 @@ fn read_file(path: &Path) -> std::io::Result<Vec<u8>> {
     let mut buf = Vec::new();
     f.read_to_end(&mut buf)?;
     Ok(buf)
+}
+
+struct BootPayload {
+    kernel: Vec<u8>,
+    initrd: Option<Vec<u8>>,
+}
+
+impl BootPayload {
+    fn load(config: &VmConfig) -> Self {
+        let kernel = read_file(&config.kernel)
+            .unwrap_or_else(|error| panic!("failed to read kernel {}: {error}", config.kernel.display()));
+        let initrd = config.initrd.as_ref().map(|path| {
+            read_file(path).unwrap_or_else(|error| panic!("failed to read initrd {}: {error}", path.display()))
+        });
+        Self { kernel, initrd }
+    }
 }
 
 fn prepare_disk(config: &VmConfig) -> io::Result<()> {
@@ -72,17 +88,12 @@ fn vmm_thread(
     runtime_event_rx: Receiver<RuntimeEvent>,
     display_proxy: EventLoopProxy<DisplayEvent>,
     config: &VmConfig,
-    disk: virtio::Blk,
-    network: crate::net::Backend,
+    boot: BootPayload,
+    backends: HostBackends,
     gicd_size: u64,
     gicr_size: u64,
 ) -> Result<()> {
-    let image = read_file(&config.kernel)
-        .unwrap_or_else(|error| panic!("failed to read kernel {}: {error}", config.kernel.display()));
-    let initrd = config.initrd.as_ref().map(|path| {
-        read_file(path).unwrap_or_else(|error| panic!("failed to read initrd {}: {error}", path.display()))
-    });
-    let initrd_range = initrd.as_ref().map(|data| {
+    let initrd_range = boot.initrd.as_ref().map(|data| {
         let end = checked_end(INITRD_START, data.len(), "initrd");
         (INITRD_START, end)
     });
@@ -96,22 +107,17 @@ fn vmm_thread(
     )
     .unwrap_or_else(|error| panic!("failed to build guest FDT: {error}"));
 
-    validate_boot_layout(config.memory_size, image.len(), initrd.as_deref(), dtb.len());
+    validate_boot_layout(config.memory_size, boot.kernel.len(), boot.initrd.as_deref(), dtb.len());
 
     let mut mem = memory::GuestMemory::new(vm.memory_create(config.memory_size)?);
     mem.map(RAM_START, MemPerms::RWX)?;
-    mem.write(IMAGE_START, &image)?;
-    if let Some(initrd) = &initrd {
+    mem.write(IMAGE_START, &boot.kernel)?;
+    if let Some(initrd) = &boot.initrd {
         mem.write(INITRD_START, initrd)?;
     }
     mem.write(DTB_START, &dtb)?;
 
-    Runtime::new(vm, runtime_event_tx, disk, network, config.vcpus)?.run(
-        &mem,
-        display,
-        runtime_event_rx,
-        &display_proxy,
-    )?;
+    Runtime::new(vm, runtime_event_tx, backends, config.vcpus)?.run(&mem, display, runtime_event_rx, &display_proxy)?;
 
     Ok(())
 }
@@ -153,6 +159,7 @@ pub fn run(config_path: &Path) -> Result<()> {
     });
     let disk = virtio::Blk::new(&config.disk, config.disk_size)
         .unwrap_or_else(|error| panic!("failed to open VM disk {}: {error}", config.disk.display()));
+    let boot = BootPayload::load(&config);
 
     let gicd_size = GicConfig::get_distributor_size()? as u64;
     let gicr_region_size = GicConfig::get_redistributor_region_size()? as u64;
@@ -189,6 +196,30 @@ pub fn run(config_path: &Path) -> Result<()> {
     })
     .unwrap_or_else(|error| panic!("failed to start vmnet helper: {error}"));
 
+    let audio_tx = runtime_event_tx.clone();
+    let (_audio_backend, period_sink) = audio::Backend::new(move |event| {
+        let _ = audio_tx.send(RuntimeEvent::Audio(event));
+    })
+    .unwrap_or_else(|error| panic!("failed to start audio output: {error}"));
+
+    let clipboard_change_tx = runtime_event_tx.clone();
+    let clipboard = clipboard::start(move |payload| {
+        let _ = clipboard_change_tx.send(RuntimeEvent::Clipboard(payload));
+    });
+
+    let serial_rx_tx = runtime_event_tx.clone();
+    let serial = stdio::start(move |byte| {
+        let _ = serial_rx_tx.send(RuntimeEvent::UartRx(byte));
+    });
+
+    let backends = HostBackends {
+        disk,
+        net: network,
+        audio: period_sink,
+        clipboard,
+        serial,
+    };
+
     let event_loop = app::event_loop();
     let display_proxy = event_loop.create_proxy();
 
@@ -205,8 +236,8 @@ pub fn run(config_path: &Path) -> Result<()> {
                 runtime_event_rx,
                 display_proxy,
                 config,
-                disk,
-                network,
+                boot,
+                backends,
                 gicd_size,
                 gicr_size,
             )

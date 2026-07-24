@@ -11,6 +11,7 @@ mod irq;
 mod machine;
 mod memory;
 mod net;
+mod stdio;
 mod uart;
 mod virtio;
 mod vmm;

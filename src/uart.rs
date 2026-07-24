@@ -1,4 +1,4 @@
-use crate::irq::IrqLine;
+use crate::{irq::IrqLine, stdio};
 use std::collections::VecDeque;
 
 const UART_DR: u64 = 0x00;
@@ -15,14 +15,16 @@ pub struct Uart {
     imsc: u32,
     q: VecDeque<u8>,
     irq: IrqLine,
+    serial: stdio::Sink,
 }
 
 impl Uart {
-    pub fn new(irq: IrqLine) -> Self {
+    pub fn new(irq: IrqLine, serial: stdio::Sink) -> Self {
         Self {
             imsc: 0,
             q: VecDeque::new(),
             irq,
+            serial,
         }
     }
 
@@ -56,9 +58,9 @@ impl Uart {
         value
     }
 
-    pub fn write<F: Fn(u32)>(&mut self, offset: u64, value: u32, on_data: F) {
+    pub fn write(&mut self, offset: u64, value: u32) {
         match offset {
-            UART_DR => on_data(value),
+            UART_DR => self.serial.write(value as u8),
             UART_IMSC => self.imsc = value,
             _ => {}
         }

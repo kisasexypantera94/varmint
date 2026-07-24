@@ -28,7 +28,7 @@ pub fn locate() -> Option<PathBuf> {
 fn choose_config() -> Option<PathBuf> {
     let output = Command::new("/usr/bin/osascript")
         .arg("-e")
-        .arg("POSIX path of (choose file with prompt \"Choose a Varmint configuration\")")
+        .arg("POSIX path of (choose file with prompt \"Choose a Varmint configuration\" of type {\"varmint\"})")
         .output()
         .unwrap_or_else(|error| panic!("failed to open configuration picker: {error}"));
 
@@ -40,7 +40,7 @@ fn choose_config() -> Option<PathBuf> {
         .unwrap_or_else(|error| panic!("configuration path is not valid UTF-8: {error}"));
     let path = path.trim_end_matches(['\r', '\n']);
 
-    path.is_empty().then_some(PathBuf::from(path))
+    (!path.is_empty()).then_some(PathBuf::from(path))
 }
 
 #[derive(Debug, Clone)]
