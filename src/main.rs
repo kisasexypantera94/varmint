@@ -16,5 +16,13 @@ mod virtio;
 mod vmm;
 
 fn main() -> Result<()> {
-    vmm::run()
+    if unsafe { libc::geteuid() } == 0 {
+        panic!("do not run Varmint with sudo; the app requests vmnet privileges separately");
+    }
+
+    let Some(config) = config::locate() else {
+        return Ok(());
+    };
+
+    vmm::run(&config)
 }

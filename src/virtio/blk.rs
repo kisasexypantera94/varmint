@@ -84,13 +84,6 @@ impl Blk {
             size = minimum_size;
         }
 
-        if size == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("disk {} is empty", path.display()),
-            ));
-        }
-
         Ok(Blk {
             sectors: size / 512,
             file,

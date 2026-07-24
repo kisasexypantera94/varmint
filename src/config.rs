@@ -4,13 +4,44 @@ use std::{
     ffi::OsStr,
     fs,
     path::{Path, PathBuf},
+    process::Command,
 };
 
 const DEFAULT_MEMORY_MIB: u64 = 16 * 1024;
 const DEFAULT_VCPUS: usize = 12;
-const DEFAULT_KERNEL_ARGS: &str = "console=ttyAMA0 earlycon=pl011,mmio32,0x09000000 root=/dev/vda3 rw";
+const DEFAULT_KERNEL_ARGS: &str = "console=ttyAMA0 earlycon=pl011,mmio32,0x09000000 root=LABEL=varmint-root rw";
 const MIB: u64 = 1024 * 1024;
 const GIB: u64 = 1024 * MIB;
+
+pub fn locate() -> Option<PathBuf> {
+    let mut arguments = env::args_os().skip(1);
+    let config = match arguments.next() {
+        Some(path) => PathBuf::from(path),
+        None => return choose_config(),
+    };
+    if let Some(argument) = arguments.next() {
+        panic!("unexpected argument: {}", argument.to_string_lossy());
+    }
+    Some(config)
+}
+
+fn choose_config() -> Option<PathBuf> {
+    let output = Command::new("/usr/bin/osascript")
+        .arg("-e")
+        .arg("POSIX path of (choose file with prompt \"Choose a Varmint configuration\")")
+        .output()
+        .unwrap_or_else(|error| panic!("failed to open configuration picker: {error}"));
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let path = String::from_utf8(output.stdout)
+        .unwrap_or_else(|error| panic!("configuration path is not valid UTF-8: {error}"));
+    let path = path.trim_end_matches(['\r', '\n']);
+
+    path.is_empty().then_some(PathBuf::from(path))
+}
 
 #[derive(Debug, Clone)]
 pub struct VmConfig {
@@ -41,19 +72,7 @@ struct VmConfigFile {
 }
 
 impl VmConfig {
-    pub fn resolve() -> Self {
-        let mut arguments = env::args_os().skip(1);
-        let path = arguments
-            .next()
-            .unwrap_or_else(|| panic!("usage: varmint <vm.varmint>"));
-        if let Some(argument) = arguments.next() {
-            panic!("unexpected argument: {}", argument.to_string_lossy());
-        }
-
-        Self::load(Path::new(&path))
-    }
-
-    fn load(path: &Path) -> Self {
+    pub fn load(path: &Path) -> Self {
         let path = absolute_path(path);
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read VM config {}: {error}", path.display()));

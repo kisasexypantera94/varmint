@@ -4,4 +4,14 @@ memory_mib = 16384
 vcpus = 12
 
 disk = "dev0.img"
-disk_size_gib = 40
+disk_size_gib = 44
+
+kernel = "/Users/dvgr/varmint-kernels/debian-4k/vmlinuz-6.12.90+deb13.1-arm64"
+initrd = "/Users/dvgr/varmint-kernels/debian-4k/initrd.img-6.12.90+deb13.1-arm64"
+
+kernel_args = [
+  "console=ttyAMA0",
+  "earlycon=pl011,mmio32,0x09000000",
+  "root=/dev/vda3",
+  "rw",
+]

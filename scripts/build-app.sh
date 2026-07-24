@@ -8,6 +8,7 @@ PREFIX="$BUILD_ROOT/prefix"
 APP_BUNDLE="$ROOT/dist/Varmint.app"
 MANIFEST="$ROOT/runtime/manifest.toml"
 ENTITLEMENTS="$ROOT/runtime/entitlements.plist"
+VMNET_HELPER="${VMNET_HELPER:-}"
 
 KERNEL=""
 INITRD=""
@@ -618,6 +619,22 @@ build_icon() {
   log "app icon ready: $ICON"
 }
 
+find_vmnet_helper() {
+  if [ -n "$VMNET_HELPER" ]; then
+    need_file "$VMNET_HELPER"
+    printf '%s\n' "$VMNET_HELPER"
+    return
+  fi
+
+  need_cmd brew
+  local prefix
+  prefix="$(brew --prefix vmnet-helper 2>/dev/null)" \
+    || die "vmnet-helper is not installed; run: brew tap nirs/vmnet-helper && brew install vmnet-helper"
+  local helper="$prefix/libexec/vmnet-helper"
+  need_file "$helper"
+  printf '%s\n' "$helper"
+}
+
 assemble_app() {
   need_cmd python3
   need_cmd plutil
@@ -629,9 +646,12 @@ assemble_app() {
   need_file "$MANIFEST"
 
   local contents="$APP_BUNDLE/Contents"
+  local vmnet_helper
+  vmnet_helper="$(find_vmnet_helper)"
   rm -rf "$APP_BUNDLE"
-  mkdir -p "$contents/MacOS" "$contents/Frameworks" "$contents/Resources/kernel" "$contents/Resources/runtime"
+  mkdir -p "$contents/MacOS" "$contents/Helpers" "$contents/Frameworks" "$contents/Resources/kernel" "$contents/Resources/runtime"
   install -m 755 "$BINARY" "$contents/MacOS/varmint"
+  install -m 755 "$vmnet_helper" "$contents/Helpers/vmnet-helper"
   install -m 644 "$KERNEL" "$contents/Resources/kernel/Image"
   install -m 644 "$INITRD" "$contents/Resources/kernel/initrd"
   install -m 644 "$BASE_IMAGE" "$contents/Resources/runtime/base.raw.zst"
@@ -882,8 +902,10 @@ sign_app() {
   need_cmd codesign
   need_file "$ENTITLEMENTS"
   need_file "$APP_BUNDLE/Contents/MacOS/varmint"
+  need_file "$APP_BUNDLE/Contents/Helpers/vmnet-helper"
 
   log "sign app"
+  codesign --force --sign - --timestamp=none "$APP_BUNDLE/Contents/Helpers/vmnet-helper"
   find "$APP_BUNDLE/Contents/Frameworks" -maxdepth 1 -type f -name '*.dylib' -print0 \
     | while IFS= read -r -d '' dylib; do
         codesign --force --sign - --timestamp=none "$dylib"
@@ -896,9 +918,6 @@ sign_app() {
     need_file "$framework/Versions/A/Resources/Info.plist"
     codesign --force --sign - --timestamp=none "$framework"
   done
-  codesign --force --sign - --timestamp=none \
-    --entitlements "$ENTITLEMENTS" \
-    "$APP_BUNDLE/Contents/MacOS/varmint"
   codesign --force --sign - --timestamp=none \
     --entitlements "$ENTITLEMENTS" \
     "$APP_BUNDLE"
@@ -962,6 +981,7 @@ verify_bundle_macho() {
 
 verify_app() {
   local executable="$APP_BUNDLE/Contents/MacOS/varmint"
+  local helper="$APP_BUNDLE/Contents/Helpers/vmnet-helper"
   local frameworks="$APP_BUNDLE/Contents/Frameworks"
   local resources="$APP_BUNDLE/Contents/Resources"
   local manifest="$resources/runtime-manifest.toml"
@@ -975,6 +995,7 @@ verify_app() {
   need_cmd xcrun
   need_file "$APP_BUNDLE/Contents/Info.plist"
   need_file "$executable"
+  need_file "$helper"
   need_file "$resources/kernel/Image"
   need_file "$resources/kernel/initrd"
   need_file "$resources/runtime/base.raw.zst"
@@ -990,6 +1011,8 @@ verify_app() {
   if plutil -extract CFBundleIconFile raw -o - "$APP_BUNDLE/Contents/Info.plist" >/dev/null 2>&1; then
     die "Info.plist still contains legacy CFBundleIconFile"
   fi
+  [ "$(plutil -extract CFBundleExecutable raw -o - "$APP_BUNDLE/Contents/Info.plist")" = "varmint" ] \
+    || die "Info.plist does not reference varmint"
   [ "$(plutil -extract CFBundleIconName raw -o - "$APP_BUNDLE/Contents/Info.plist")" = "Varmint" ] \
     || die "Info.plist does not reference the Varmint asset icon"
   [ "$(plutil -extract LSMinimumSystemVersion raw -o - "$APP_BUNDLE/Contents/Info.plist")" = "$(manifest_value runtime.minimum_macos "$manifest")" ] \

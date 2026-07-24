@@ -2,6 +2,7 @@ use super::Devices;
 use crate::{audio, memory::GuestMemory, net, uart, virtio};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use std::{
+    io,
     io::Read,
     sync::{Mutex, mpsc::Receiver},
 };
@@ -34,7 +35,7 @@ pub enum RuntimeInputEvent {
 }
 
 pub enum RuntimeEvent {
-    NetReady,
+    NetRx(Vec<u8>),
     NetTx(Vec<u8>),
     Input(RuntimeInputEvent),
     DisplayResized { width: u32, height: u32 },
@@ -47,19 +48,17 @@ pub struct RuntimeEventPump<'a> {
     devices: &'a Devices,
     iface: net::Backend,
     rx: Receiver<RuntimeEvent>,
-    net_buf: Vec<u8>,
+    net_tx_error: Option<io::ErrorKind>,
 }
 
 impl<'a> RuntimeEventPump<'a> {
     pub fn new(mem: &'a GuestMemory, devices: &'a Devices, iface: net::Backend, rx: Receiver<RuntimeEvent>) -> Self {
-        let net_buf = vec![0; iface.max_packet_size() as usize];
-
         Self {
             mem,
             devices,
             iface,
             rx,
-            net_buf,
+            net_tx_error: None,
         }
     }
 
@@ -79,10 +78,18 @@ impl<'a> RuntimeEventPump<'a> {
 
     fn handle_event(&mut self, event: RuntimeEvent, pointer_move: &mut Option<(u32, u32, u32, u32)>) {
         match event {
-            RuntimeEvent::NetReady => self.handle_net_ready(),
-            RuntimeEvent::NetTx(frame) => {
-                self.iface.write(&frame).unwrap();
+            RuntimeEvent::NetRx(frame) => {
+                self.devices.net.lock().unwrap().handle_external_event(&frame, self.mem);
             }
+            RuntimeEvent::NetTx(frame) => match self.iface.write(&frame) {
+                Ok(()) => self.net_tx_error = None,
+                Err(error) => {
+                    if self.net_tx_error != Some(error.kind()) {
+                        eprintln!("vmnet tx error, dropping frames: {error}");
+                        self.net_tx_error = Some(error.kind());
+                    }
+                }
+            },
             RuntimeEvent::Input(event) => self.handle_input(event, pointer_move),
             RuntimeEvent::DisplayResized { width, height } => {
                 self.devices
@@ -105,21 +112,6 @@ impl<'a> RuntimeEventPump<'a> {
                     .unwrap()
                     .handle_external_event(virtio::console::ExternalEvent::HostClipboard(&payload), self.mem);
             }
-        }
-    }
-
-    fn handle_net_ready(&mut self) {
-        loop {
-            let n_read = self.iface.read(&mut self.net_buf).unwrap();
-            if n_read == 0 {
-                break;
-            }
-
-            self.devices
-                .net
-                .lock()
-                .unwrap()
-                .handle_external_event(&self.net_buf[..n_read], self.mem);
         }
     }
 

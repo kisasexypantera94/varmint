@@ -123,6 +123,7 @@ impl<'a> Runtime<'a> {
         vm: &'a VirtualMachineInstance<GicEnabled>,
         runtime_event_tx: Sender<RuntimeEvent>,
         disk: virtio::Blk,
+        iface: net::Backend,
         vcpus: usize,
     ) -> Result<Self> {
         let (spi_int_start, _) = GicConfig::get_spi_interrupt_range()?;
@@ -133,14 +134,6 @@ impl<'a> Runtime<'a> {
             disk,
             irq::IrqLine::new(vm, spi_int_start + VIRTBLK_SPI_OFFSET),
         ));
-
-        let net_ready_tx = runtime_event_tx.clone();
-        let mut iface = net::Backend::new().unwrap();
-        iface
-            .set_event_callback(move || {
-                let _ = net_ready_tx.send(RuntimeEvent::NetReady);
-            })
-            .unwrap();
 
         let net_tx = runtime_event_tx.clone();
         let net = Mutex::new(virtio::MmioTransport::new(

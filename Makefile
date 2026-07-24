@@ -7,9 +7,9 @@ INITRD ?= $(GUEST_DIR)/initrd
 BASE_IMAGE ?= $(GUEST_DIR)/varmint-debian.raw.zst
 CONFIG ?= $(CURDIR)/gaming.varmint
 
-.PHONY: app bundle dependencies guest-image run run-sudo clean
+.PHONY: app bundle dependencies guest-image run clean
 
-app: guest-image
+app: # guest-image
 	./scripts/build-app.sh --kernel "$(KERNEL)" --initrd "$(INITRD)" --base-image "$(BASE_IMAGE)"
 
 bundle: guest-image
@@ -24,11 +24,6 @@ guest-image:
 run: bundle
 	VARMINT_FENCE_POLL_US=1000 \
 	"$(APP_BIN)" "$(CONFIG)" 2> vmm.log
-
-run-sudo: bundle
-	sudo env \
-		VARMINT_FENCE_POLL_US=1000 \
-		"$(APP_BIN)" "$(CONFIG)" 2> vmm.log
 
 clean:
 	rm -rf "$(CURDIR)/build" "$(CURDIR)/dist"

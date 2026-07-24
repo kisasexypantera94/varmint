@@ -4,7 +4,7 @@ use crate::{
     devices::{Runtime, RuntimeEvent},
     display::{DisplayBuffer, DisplayEvent},
     machine::*,
-    memory, virtio,
+    memory, net, virtio,
 };
 use applevisor::prelude::*;
 use std::{
@@ -73,6 +73,7 @@ fn vmm_thread(
     display_proxy: EventLoopProxy<DisplayEvent>,
     config: &VmConfig,
     disk: virtio::Blk,
+    network: crate::net::Backend,
     gicd_size: u64,
     gicr_size: u64,
 ) -> Result<()> {
@@ -105,7 +106,12 @@ fn vmm_thread(
     }
     mem.write(DTB_START, &dtb)?;
 
-    Runtime::new(vm, runtime_event_tx, disk, config.vcpus)?.run(&mem, display, runtime_event_rx, &display_proxy)?;
+    Runtime::new(vm, runtime_event_tx, disk, network, config.vcpus)?.run(
+        &mem,
+        display,
+        runtime_event_rx,
+        &display_proxy,
+    )?;
 
     Ok(())
 }
@@ -136,8 +142,8 @@ fn validate_boot_layout(memory_size: usize, image_size: usize, initrd: Option<&[
     }
 }
 
-pub fn run() -> Result<()> {
-    let config = VmConfig::resolve();
+pub fn run(config_path: &Path) -> Result<()> {
+    let config = VmConfig::load(config_path);
     prepare_disk(&config).unwrap_or_else(|error| {
         panic!(
             "failed to create VM disk {} from {}: {error}",
@@ -177,6 +183,12 @@ pub fn run() -> Result<()> {
 
     let (runtime_event_tx, runtime_event_rx) = std::sync::mpsc::channel();
 
+    let net_rx_tx = runtime_event_tx.clone();
+    let (network, helper) = net::start(move |frame| {
+        let _ = net_rx_tx.send(RuntimeEvent::NetRx(frame));
+    })
+    .unwrap_or_else(|error| panic!("failed to start vmnet helper: {error}"));
+
     let event_loop = app::event_loop();
     let display_proxy = event_loop.create_proxy();
 
@@ -194,13 +206,14 @@ pub fn run() -> Result<()> {
                 display_proxy,
                 config,
                 disk,
+                network,
                 gicd_size,
                 gicr_size,
             )
         });
 
         app::run(event_loop, display, runtime_event_tx);
-    });
-
-    Ok(())
+        drop(helper);
+        std::process::exit(0);
+    })
 }
