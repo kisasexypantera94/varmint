@@ -9,7 +9,7 @@ CONFIG ?= $(CURDIR)/gaming.varmint
 
 .PHONY: app bundle dependencies guest-image run clean
 
-app: # guest-image
+app: guest-image
 	./scripts/build-app.sh --kernel "$(KERNEL)" --initrd "$(INITRD)" --base-image "$(BASE_IMAGE)"
 
 bundle: guest-image

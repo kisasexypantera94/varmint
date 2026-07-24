@@ -1,6 +1,6 @@
 use super::Devices;
-use crate::{audio, memory::GuestMemory, net, virtio};
-use std::{io, sync::mpsc::Receiver};
+use crate::{audio, memory::GuestMemory, virtio};
+use std::sync::mpsc::Receiver;
 
 pub enum RuntimeInputEvent {
     Key {
@@ -32,7 +32,6 @@ pub enum RuntimeInputEvent {
 pub enum RuntimeEvent {
     NetRx(Vec<u8>),
     UartRx(u8),
-    NetTx(Vec<u8>),
     Input(RuntimeInputEvent),
     DisplayResized { width: u32, height: u32 },
     Audio(audio::BackendEvent),
@@ -42,20 +41,12 @@ pub enum RuntimeEvent {
 pub struct RuntimeEventPump<'a> {
     mem: &'a GuestMemory,
     devices: &'a Devices,
-    iface: net::Backend,
     rx: Receiver<RuntimeEvent>,
-    net_tx_error: Option<io::ErrorKind>,
 }
 
 impl<'a> RuntimeEventPump<'a> {
-    pub fn new(mem: &'a GuestMemory, devices: &'a Devices, iface: net::Backend, rx: Receiver<RuntimeEvent>) -> Self {
-        Self {
-            mem,
-            devices,
-            iface,
-            rx,
-            net_tx_error: None,
-        }
+    pub fn new(mem: &'a GuestMemory, devices: &'a Devices, rx: Receiver<RuntimeEvent>) -> Self {
+        Self { mem, devices, rx }
     }
 
     pub fn run(mut self) {
@@ -78,15 +69,6 @@ impl<'a> RuntimeEventPump<'a> {
                 self.devices.net.lock().unwrap().handle_external_event(&frame, self.mem);
             }
             RuntimeEvent::UartRx(byte) => self.devices.uart.lock().unwrap().enqueue(byte),
-            RuntimeEvent::NetTx(frame) => match self.iface.write(&frame) {
-                Ok(()) => self.net_tx_error = None,
-                Err(error) => {
-                    if self.net_tx_error != Some(error.kind()) {
-                        eprintln!("vmnet tx error, dropping frames: {error}");
-                        self.net_tx_error = Some(error.kind());
-                    }
-                }
-            },
             RuntimeEvent::Input(event) => self.handle_input(event, pointer_move),
             RuntimeEvent::DisplayResized { width, height } => {
                 self.devices

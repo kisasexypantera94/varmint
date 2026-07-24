@@ -46,7 +46,6 @@ pub struct Runtime<'a> {
     devices: Devices,
     cpus: CpuRuntime,
     gpu_worker: gpu::Worker,
-    iface: net::Backend,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -141,12 +140,8 @@ impl<'a> Runtime<'a> {
             irq::IrqLine::new(vm, spi_int_start + VIRTBLK_SPI_OFFSET),
         ));
 
-        let iface = backends.net;
-        let net_tx = runtime_event_tx.clone();
         let net = Mutex::new(virtio::MmioTransport::new(
-            virtio::Net::new(iface.mac(), move |frame| {
-                let _ = net_tx.send(RuntimeEvent::NetTx(frame));
-            }),
+            virtio::Net::new(backends.net.mac(), backends.net),
             irq::IrqLine::new(vm, spi_int_start + VIRTNET_SPI_OFFSET),
         ));
 
@@ -192,7 +187,6 @@ impl<'a> Runtime<'a> {
             },
             cpus: CpuRuntime::new(vm, IMAGE_START, DTB_START, vcpus)?,
             gpu_worker,
-            iface,
         })
     }
 
@@ -207,7 +201,7 @@ impl<'a> Runtime<'a> {
             scope.spawn(|| self.gpu_worker.run(mem, display, display_proxy));
 
             scope.spawn(|| {
-                let runtime_events = events::RuntimeEventPump::new(mem, &self.devices, self.iface, runtime_event_rx);
+                let runtime_events = events::RuntimeEventPump::new(mem, &self.devices, runtime_event_rx);
                 runtime_events.run();
             });
 
