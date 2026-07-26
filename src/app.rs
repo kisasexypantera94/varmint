@@ -15,7 +15,7 @@ use winit::{
     event::{DeviceEvent, ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{KeyCode, PhysicalKey},
-    window::{CursorGrabMode, Window, WindowId},
+    window::{CursorGrabMode, Fullscreen, Window, WindowId},
 };
 
 fn winit_to_linux_key(key: winit::keyboard::KeyCode) -> Option<u16> {
@@ -316,6 +316,7 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
         let attrs = Window::default_attributes()
             .with_title("Varmint")
             .with_inner_size(LogicalSize::new(1024u32, 768u32))
+            .with_fullscreen(Some(Fullscreen::Borderless(None)))
             .with_resizable(true);
 
         let window = event_loop.create_window(attrs).unwrap();
