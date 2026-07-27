@@ -38,6 +38,9 @@ brew install cmake meson ninja pkg-config python
 make app
 ```
 
+## Acknowledgements
+Varmint relies on several forks maintained by the UTM project, particularly in the graphics stack. Huge thanks to the UTM project for their work.
+
 ## Resources
 - [Booting AArch64 Linux](https://docs.kernel.org/arch/arm64/booting.html)
 - [VIRTIO](https://docs.oasis-open.org/virtio/virtio/v1.3/csd01/virtio-v1.3-csd01.html)
