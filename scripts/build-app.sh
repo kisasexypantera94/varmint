@@ -7,6 +7,7 @@ BUILD_ROOT="$ROOT/build"
 PREFIX="$BUILD_ROOT/prefix"
 APP_BUNDLE="$ROOT/dist/Varmint.app"
 MANIFEST="$ROOT/runtime/manifest.toml"
+MOLTENVK_PATCH="$ROOT/patches/moltenvk/0001-guard-null-multisample-state-in-mesh-pipeline.patch"
 ENTITLEMENTS="$ROOT/runtime/entitlements.plist"
 VMNET_HELPER="${VMNET_HELPER:-}"
 
@@ -210,6 +211,22 @@ checkout_repo() {
   git -C "$dir" checkout --detach "$commit"
 }
 
+apply_dependency_patch() {
+  local source="$1"
+  local patch="$2"
+
+  need_file "$patch"
+
+  # Dependency source trees are disposable. Drop a patch left by a previous
+  # build so applying the current patch is deterministic and idempotent.
+  git -C "$source" reset --hard HEAD >/dev/null
+
+  if ! git -C "$source" apply --check "$patch"; then
+    die "dependency patch does not apply cleanly: $patch"
+  fi
+  git -C "$source" apply "$patch"
+}
+
 codesign_file() {
   codesign --force --sign - --timestamp=none "$1"
 }
@@ -351,6 +368,7 @@ build_moltenvk() {
 
   log "MoltenVK"
   checkout_repo "$repository" "$commit" "$source"
+  apply_dependency_patch "$source" "$MOLTENVK_PATCH"
   (
     cd "$source"
     env -i PATH="$PATH" HOME="$HOME" LANG="${LANG:-en_US.UTF-8}" \
@@ -462,9 +480,10 @@ verify_dependency_prefix() {
 
 dependency_recipe_hash() {
   {
-    cat "$MANIFEST"
+    cat "$MANIFEST" "$MOLTENVK_PATCH"
     declare -f \
       checkout_repo \
+      apply_dependency_patch \
       codesign_file \
       create_angle_framework_wrappers \
       write_angle_pkgconfig \
@@ -480,6 +499,7 @@ dependency_recipe_hash() {
 
 build_dependencies() {
   need_file "$MANIFEST"
+  need_file "$MOLTENVK_PATCH"
   need_cmd git
   need_cmd python3
   need_cmd xcodebuild
