@@ -183,7 +183,6 @@ pub fn run(config_path: &Path) -> Result<()> {
 
     let mut vm_cfg = VirtualMachineConfig::new();
     vm_cfg.set_ipa_granule(IpaGranule::HV_IPA_GRANULE_4KB)?;
-
     let vm = VirtualMachine::with_gic(vm_cfg, gic_config)?;
 
     let display = Mutex::new(DisplayBuffer::new());
@@ -191,7 +190,7 @@ pub fn run(config_path: &Path) -> Result<()> {
     let (runtime_event_tx, runtime_event_rx) = std::sync::mpsc::channel();
 
     let net_rx_tx = runtime_event_tx.clone();
-    let (network, helper) = net::start(move |frame| {
+    let network = net::start(move |frame| {
         let _ = net_rx_tx.send(RuntimeEvent::NetRx(frame));
     })
     .unwrap_or_else(|error| panic!("failed to start vmnet helper: {error}"));
@@ -244,7 +243,6 @@ pub fn run(config_path: &Path) -> Result<()> {
         });
 
         app::run(event_loop, display, runtime_event_tx);
-        drop(helper);
         std::process::exit(0);
     })
 }

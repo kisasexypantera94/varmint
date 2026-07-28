@@ -9,6 +9,7 @@ mod devices;
 mod display;
 mod irq;
 mod machine;
+mod macos_ui;
 mod memory;
 mod net;
 mod stdio;

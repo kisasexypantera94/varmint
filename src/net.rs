@@ -1,43 +1,113 @@
 mod helper;
 
-pub use helper::Process as Helper;
 use std::{
     io,
-    os::{fd::AsRawFd, unix::net::UnixDatagram},
+    os::fd::AsRawFd,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
     thread,
+    time::Duration,
 };
+use uuid::Uuid;
+
+struct Shared {
+    interface_id: String,
+    connection: Mutex<helper::Connection>,
+    recovering: AtomicBool,
+    generation: AtomicU64,
+}
 
 pub struct Backend {
-    socket: UnixDatagram,
+    shared: Arc<Shared>,
     mac: [u8; 6],
     max_packet_size: u64,
 }
 
-pub fn start(on_frame: impl Fn(Vec<u8>) + Send + 'static) -> io::Result<(Backend, Helper)> {
-    let connection = helper::connect()?;
-    let socket = connection.socket.try_clone()?;
-    let buffer_size = connection.max_packet_size as usize;
+pub fn start(on_frame: impl Fn(Vec<u8>) + Send + 'static) -> io::Result<Backend> {
+    let interface_id = Uuid::new_v4().to_string();
+    let connection = helper::connect(&interface_id)?;
+    let mac = connection.mac;
+    let max_packet_size = connection.max_packet_size;
+    let shared = Arc::new(Shared {
+        interface_id,
+        connection: Mutex::new(connection),
+        recovering: AtomicBool::new(false),
+        generation: AtomicU64::new(0),
+    });
 
+    let rx_shared = shared.clone();
     thread::Builder::new().name("varmint-vmnet-rx".into()).spawn(move || {
-        let mut buffer = vec![0; buffer_size];
+        let mut buffer = vec![0; max_packet_size as usize];
         loop {
-            match socket.recv(&mut buffer) {
-                Ok(size) if size >= 14 => on_frame(buffer[..size].to_vec()),
-                Ok(_) => {}
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-                Err(error) => eprintln!("vmnet rx error: {error}"),
+            let generation = rx_shared.generation.load(Ordering::Acquire);
+            let socket = match rx_shared.connection.lock().unwrap().socket.try_clone() {
+                Ok(socket) => socket,
+                Err(error) => {
+                    eprintln!("vmnet rx socket clone failed: {error}");
+                    request_recovery(rx_shared.clone(), generation);
+                    thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+            };
+            let _ = socket.set_read_timeout(Some(Duration::from_secs(1)));
+
+            loop {
+                if rx_shared.generation.load(Ordering::Acquire) != generation {
+                    break;
+                }
+                match socket.recv(&mut buffer) {
+                    Ok(size) if size >= 14 => on_frame(buffer[..size].to_vec()),
+                    Ok(_) => {}
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                    Err(error) if matches!(error.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => {}
+                    Err(error) => {
+                        eprintln!("vmnet rx error: {error}; restarting helper");
+                        request_recovery(rx_shared.clone(), generation);
+                        break;
+                    }
+                }
             }
         }
     })?;
 
-    Ok((
-        Backend {
-            socket: connection.socket,
-            mac: connection.mac,
-            max_packet_size: connection.max_packet_size,
-        },
-        connection.process,
-    ))
+    Ok(Backend {
+        shared,
+        mac,
+        max_packet_size,
+    })
+}
+
+fn request_recovery(shared: Arc<Shared>, failed_generation: u64) {
+    if shared
+        .recovering
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return;
+    }
+
+    let recovery = shared.clone();
+    if let Err(error) = thread::Builder::new()
+        .name("varmint-vmnet-recovery".into())
+        .spawn(move || {
+            if recovery.generation.load(Ordering::Acquire) == failed_generation {
+                match helper::connect(&recovery.interface_id) {
+                    Ok(connection) => {
+                        *recovery.connection.lock().unwrap() = connection;
+                        recovery.generation.fetch_add(1, Ordering::Release);
+                        eprintln!("vmnet helper restarted");
+                    }
+                    Err(error) => eprintln!("vmnet helper restart failed: {error}"),
+                }
+            }
+            recovery.recovering.store(false, Ordering::Release);
+        })
+    {
+        shared.recovering.store(false, Ordering::Release);
+        eprintln!("failed to spawn vmnet recovery thread: {error}");
+    }
 }
 
 impl Backend {
@@ -53,17 +123,22 @@ impl Backend {
             return;
         }
 
+        let generation = self.shared.generation.load(Ordering::Acquire);
+        let connection = self.shared.connection.lock().unwrap();
         let result = unsafe {
             libc::send(
-                self.socket.as_raw_fd(),
+                connection.socket.as_raw_fd(),
                 frame.as_ptr().cast(),
                 frame.len(),
                 libc::MSG_DONTWAIT,
             )
         };
+        drop(connection);
 
         if result == -1 {
-            eprintln!("vmnet tx error, dropping frame: {}", io::Error::last_os_error());
+            let error = io::Error::last_os_error();
+            eprintln!("vmnet tx error, dropping frame: {error}; restarting helper");
+            request_recovery(self.shared.clone(), generation);
         }
     }
 }

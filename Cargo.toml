@@ -45,3 +45,5 @@ serde_json = "1.0"
 toml = "1.1"
 vm-fdt = "0.3.0"
 zstd = "0.13"
+font8x8 = "0.3.1"
+uuid = { version = "1", features = ["v4"] }

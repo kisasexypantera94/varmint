@@ -33,7 +33,7 @@ pub struct Process {
     directory: PathBuf,
 }
 
-pub fn connect() -> io::Result<Connection> {
+pub fn connect(interface_id: &str) -> io::Result<Connection> {
     let helper = helper_path()?;
     let log = log_path()?;
     let directory = temporary_directory()?;
@@ -41,7 +41,7 @@ pub fn connect() -> io::Result<Connection> {
     let client_socket = directory.join("client.sock");
     let info_path = directory.join("interface.json");
 
-    let pid = match launch(&helper, &helper_socket, &info_path, &log) {
+    let pid = match launch(&helper, &helper_socket, &info_path, &log, interface_id) {
         Ok(pid) => pid,
         Err(error) => {
             let _ = fs::remove_dir_all(&directory);
@@ -88,7 +88,7 @@ impl Drop for Process {
     }
 }
 
-fn launch(helper: &Path, socket: &Path, info: &Path, log: &Path) -> io::Result<libc::pid_t> {
+fn launch(helper: &Path, socket: &Path, info: &Path, log: &Path, interface_id: &str) -> io::Result<libc::pid_t> {
     let uid = unsafe { libc::getuid() };
     let gid = unsafe { libc::getgid() };
     // SUDO_UID/SUDO_GID make the helper drop privileges back to us after
@@ -97,7 +97,7 @@ fn launch(helper: &Path, socket: &Path, info: &Path, log: &Path) -> io::Result<l
     // force quit, crashes); Drop remains the fast path on clean shutdown.
     let watched = std::process::id();
     let command = format!(
-        "umask 022; export SUDO_UID={uid} SUDO_GID={gid}; {} --socket {} --operation-mode shared </dev/null > {} 2>> {} & VARMINT_HELPER=$!; (while kill -0 {watched} 2>/dev/null && kill -0 $VARMINT_HELPER 2>/dev/null; do sleep 2; done; kill $VARMINT_HELPER 2>/dev/null) >/dev/null 2>&1 & echo $VARMINT_HELPER",
+        "umask 022; export SUDO_UID={uid} SUDO_GID={gid}; {} --socket {} --interface-id {interface_id} --operation-mode shared </dev/null > {} 2>> {} & VARMINT_HELPER=$!; (while kill -0 {watched} 2>/dev/null && kill -0 $VARMINT_HELPER 2>/dev/null; do sleep 2; done; kill $VARMINT_HELPER 2>/dev/null) >/dev/null 2>&1 & echo $VARMINT_HELPER",
         quote(helper),
         quote(socket),
         quote(info),

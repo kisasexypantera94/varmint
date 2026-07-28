@@ -10,7 +10,7 @@ use rtrb::{Consumer, Producer, RingBuffer};
 use zerocopy::IntoBytes;
 
 const MAX_PERIOD_BYTES: usize = 16 * 1024;
-const RING_CAPACITY: usize = 8;
+const RING_CAPACITY: usize = 3;
 
 struct Period {
     seq: u64,

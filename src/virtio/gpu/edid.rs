@@ -220,10 +220,10 @@ pub fn build(width: u32, height: u32, _compatibility_mode: Option<(u32, u32)>) -
     let retina_60 = retina_120.with_refresh(60);
     let physical_size = half_retina_120.physical_size();
 
-    let preferred_timing = half_retina_120.timing()?;
+    let preferred_timing = half_retina_60.timing()?;
     let descriptors = [
         preferred_timing.descriptor(physical_size)?,
-        half_retina_60.timing()?.descriptor(physical_size)?,
+        half_retina_120.timing()?.descriptor(physical_size)?,
         text_descriptor(MONITOR_NAME_TAG, MONITOR_NAME),
         range_limits_descriptor(),
     ];
