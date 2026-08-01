@@ -11,21 +11,7 @@ DEBIAN_IMAGE_NAME="${DEBIAN_IMAGE_NAME:-debian-13-nocloud-arm64.qcow2}"
 SOURCE_IMAGE="$CACHE_DIR/$DEBIAN_IMAGE_NAME"
 STAMP="$OUTPUT_DIR/.build-stamp"
 
-INPUTS=(
-  "$SCRIPT_DIR/Dockerfile"
-  "$SCRIPT_DIR/build-image-container.sh"
-  "$SCRIPT_DIR/varmint-provision"
-  "$SCRIPT_DIR/varmint-gpu-check"
-  "$SCRIPT_DIR/varmint-grow-root"
-  "$SCRIPT_DIR/varmint-grow-root.service"
-  "$SCRIPT_DIR/varmint-firstboot"
-  "$SCRIPT_DIR/varmint-clipboard-agent"
-  "$SCRIPT_DIR/varmint-clipboard.desktop"
-  "$SCRIPT_DIR/varmint-steam"
-  "$SCRIPT_DIR/steam.desktop"
-  "$SCRIPT_DIR/varmint-firstboot.service"
-  "$SCRIPT_DIR/varmint-gaming-setup.service"
-)
+INPUTS=("$SCRIPT_DIR")
 OUTPUTS=(
   "$OUTPUT_DIR/Image"
   "$OUTPUT_DIR/initrd"
@@ -38,7 +24,11 @@ command -v shasum >/dev/null 2>&1 || { echo "error: shasum is required" >&2; exi
 
 fingerprint="$({
   printf '%s\n' "$DEBIAN_BASE_URL" "$DEBIAN_IMAGE_NAME"
-  cat "${INPUTS[@]}"
+  find "${INPUTS[@]}" -type f | LC_ALL=C sort | while IFS= read -r input; do
+    printf '%s\0' "${input#$SCRIPT_DIR/}"
+    cat "$input"
+    printf '\0'
+  done
 } | shasum -a 256 | awk '{print $1}')"
 
 outputs_ready=1

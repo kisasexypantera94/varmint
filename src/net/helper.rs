@@ -1,19 +1,20 @@
 use serde::Deserialize;
 use std::{
-    env, fs,
-    fs::DirBuilder,
+    env,
+    fs::{self, DirBuilder, File, OpenOptions},
     io,
     os::{
         fd::AsRawFd,
         unix::{fs::DirBuilderExt, net::UnixDatagram},
     },
     path::{Path, PathBuf},
-    process::Command,
+    process::{Child, Command, Stdio},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-const SCRIPT: &str = "on run argv\ndo shell script (item 1 of argv) with administrator privileges\nend run";
+const WATCHDOG_SCRIPT: &str =
+    r#"while kill -0 "$1" 2>/dev/null && kill -0 "$2" 2>/dev/null; do sleep 2; done; kill "$2" 2>/dev/null"#;
 
 #[derive(Deserialize)]
 struct Info {
@@ -29,7 +30,8 @@ pub struct Connection {
 }
 
 pub struct Process {
-    pid: libc::pid_t,
+    child: Child,
+    watchdog: Child,
     directory: PathBuf,
 }
 
@@ -41,16 +43,22 @@ pub fn connect(interface_id: &str) -> io::Result<Connection> {
     let client_socket = directory.join("client.sock");
     let info_path = directory.join("interface.json");
 
-    let pid = match launch(&helper, &helper_socket, &info_path, &log, interface_id) {
-        Ok(pid) => pid,
+    let mut process = match launch(
+        &helper,
+        &helper_socket,
+        &info_path,
+        &log,
+        interface_id,
+        directory.clone(),
+    ) {
+        Ok(process) => process,
         Err(error) => {
             let _ = fs::remove_dir_all(&directory);
             return Err(error);
         }
     };
-    let process = Process { pid, directory };
 
-    let info = wait_for_info(pid, &info_path, &helper_socket)?;
+    let info = wait_for_info(&mut process, &info_path, &helper_socket)?;
     let mac = parse_mac(&info.vmnet_mac_address)?;
     if !(14..=64 * 1024).contains(&info.vmnet_max_packet_size) {
         return Err(io::Error::new(
@@ -75,63 +83,85 @@ pub fn connect(interface_id: &str) -> io::Result<Connection> {
 
 impl Drop for Process {
     fn drop(&mut self) {
+        let _ = self.watchdog.kill();
+        let _ = self.watchdog.wait();
+
+        let pid = self.child.id() as libc::pid_t;
         unsafe {
-            libc::kill(self.pid, libc::SIGTERM);
+            libc::kill(pid, libc::SIGTERM);
         }
-        for _ in 0..40 {
-            if !process_exists(self.pid) {
-                break;
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(_)) | Err(_) => break,
+                Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(50)),
+                Ok(None) => {
+                    let _ = self.child.kill();
+                    let _ = self.child.wait();
+                    break;
+                }
             }
-            thread::sleep(Duration::from_millis(50));
         }
         let _ = fs::remove_dir_all(&self.directory);
     }
 }
 
-fn launch(helper: &Path, socket: &Path, info: &Path, log: &Path, interface_id: &str) -> io::Result<libc::pid_t> {
-    let uid = unsafe { libc::getuid() };
-    let gid = unsafe { libc::getgid() };
-    // SUDO_UID/SUDO_GID make the helper drop privileges back to us after
-    // opening vmnet, which is also what makes SIGTERM from Drop possible.
-    // The watchdog covers exit paths that skip Drop (Cmd+Q terminate:,
-    // force quit, crashes); Drop remains the fast path on clean shutdown.
-    let watched = std::process::id();
-    let command = format!(
-        "umask 022; export SUDO_UID={uid} SUDO_GID={gid}; {} --socket {} --interface-id {interface_id} --operation-mode shared </dev/null > {} 2>> {} & VARMINT_HELPER=$!; (while kill -0 {watched} 2>/dev/null && kill -0 $VARMINT_HELPER 2>/dev/null; do sleep 2; done; kill $VARMINT_HELPER 2>/dev/null) >/dev/null 2>&1 & echo $VARMINT_HELPER",
-        quote(helper),
-        quote(socket),
-        quote(info),
-        quote(log),
-    );
-    let output = Command::new("/usr/bin/osascript")
-        .args(["-e", SCRIPT, "--"])
-        .arg(command)
-        .output()
-        .map_err(|error| io::Error::new(error.kind(), format!("failed to request vmnet privileges: {error}")))?;
+fn launch(
+    helper: &Path,
+    socket: &Path,
+    info: &Path,
+    log: &Path,
+    interface_id: &str,
+    directory: PathBuf,
+) -> io::Result<Process> {
+    let stdout = File::create(info).map_err(|error| path_error("create", info, error))?;
+    let stderr = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log)
+        .map_err(|error| path_error("open", log, error))?;
+    let mut child = Command::new(helper)
+        .arg("--socket")
+        .arg(socket)
+        .arg("--interface-id")
+        .arg(interface_id)
+        .arg("--operation-mode")
+        .arg("shared")
+        .stdin(Stdio::null())
+        .stdout(stdout)
+        .stderr(stderr)
+        .spawn()
+        .map_err(|error| io::Error::new(error.kind(), format!("failed to start vmnet-helper: {error}")))?;
 
-    if !output.status.success() {
-        let message = String::from_utf8_lossy(&output.stderr);
-        let message = message.trim();
-        return Err(io::Error::other(if message.is_empty() {
-            format!("osascript exited with {}", output.status)
-        } else {
-            message.to_owned()
-        }));
-    }
+    let watchdog = match launch_watchdog(child.id()) {
+        Ok(watchdog) => watchdog,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+    };
 
-    let value = String::from_utf8_lossy(&output.stdout);
-    let pid = value.trim().parse::<libc::pid_t>().map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("invalid vmnet-helper PID: {}", value.trim()),
-        )
-    })?;
-    (pid > 0)
-        .then_some(pid)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("invalid vmnet-helper PID: {pid}")))
+    Ok(Process {
+        child,
+        watchdog,
+        directory,
+    })
 }
 
-fn wait_for_info(pid: libc::pid_t, path: &Path, socket: &Path) -> io::Result<Info> {
+fn launch_watchdog(helper_pid: u32) -> io::Result<Child> {
+    Command::new("/bin/sh")
+        .args(["-c", WATCHDOG_SCRIPT, "varmint-vmnet-watchdog"])
+        .arg(std::process::id().to_string())
+        .arg(helper_pid.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| io::Error::new(error.kind(), format!("failed to start vmnet watchdog: {error}")))
+}
+
+fn wait_for_info(process: &mut Process, path: &Path, socket: &Path) -> io::Result<Info> {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         if socket.exists() {
@@ -149,7 +179,7 @@ fn wait_for_info(pid: libc::pid_t, path: &Path, socket: &Path) -> io::Result<Inf
                 }
             }
         }
-        if !process_exists(pid) {
+        if process.child.try_wait()?.is_some() {
             return Err(io::Error::other("vmnet-helper exited before startup"));
         }
         if Instant::now() >= deadline {
@@ -186,11 +216,6 @@ fn set_buffer_sizes(socket: &UnixDatagram, size: libc::c_int) -> io::Result<()> 
     Ok(())
 }
 
-fn process_exists(pid: libc::pid_t) -> bool {
-    let alive = unsafe { libc::kill(pid, 0) } == 0;
-    alive || io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
-}
-
 fn helper_path() -> io::Result<PathBuf> {
     let executable = std::env::current_exe()?;
     let contents = executable
@@ -212,13 +237,7 @@ fn log_path() -> io::Result<PathBuf> {
     let home = env::var_os("HOME").ok_or_else(|| io::Error::other("HOME is not set"))?;
     let directory = PathBuf::from(home).join("Library/Logs");
     fs::create_dir_all(&directory).map_err(|error| path_error("create", &directory, error))?;
-    let path = directory.join("Varmint.log");
-    // Pre-create as the current user; the helper appends to it as root and
-    // must not end up owning the file.
-    if !path.exists() {
-        fs::File::create(&path).map_err(|error| path_error("create", &path, error))?;
-    }
-    Ok(path)
+    Ok(directory.join("Varmint.log"))
 }
 
 fn temporary_directory() -> io::Result<PathBuf> {
@@ -232,10 +251,6 @@ fn temporary_directory() -> io::Result<PathBuf> {
         .create(&directory)
         .map_err(|error| path_error("create", &directory, error))?;
     Ok(directory)
-}
-
-fn quote(path: &Path) -> String {
-    format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
 }
 
 fn path_error(action: &str, path: &Path, error: io::Error) -> io::Error {

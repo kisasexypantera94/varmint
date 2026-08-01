@@ -82,26 +82,19 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=fex-builder /opt/fex-install /opt/varmint/fex-install
-COPY build-image-container.sh /usr/local/bin/build-varmint-guest
-COPY varmint-provision /opt/varmint/varmint-provision
-COPY varmint-gpu-check /opt/varmint/varmint-gpu-check
-COPY varmint-grow-root /opt/varmint/varmint-grow-root
-COPY varmint-firstboot /opt/varmint/varmint-firstboot
-COPY varmint-clipboard-agent /opt/varmint/varmint-clipboard-agent
-COPY varmint-clipboard.desktop /opt/varmint/varmint-clipboard.desktop
-COPY varmint-steam /opt/varmint/varmint-steam
-COPY steam.desktop /opt/varmint/steam.desktop
-COPY varmint-grow-root.service /opt/varmint/varmint-grow-root.service
-COPY varmint-firstboot.service /opt/varmint/varmint-firstboot.service
-COPY varmint-gaming-setup.service /opt/varmint/varmint-gaming-setup.service
+COPY . /opt/varmint/source
 
-RUN chmod 0755 \
-    /usr/local/bin/build-varmint-guest \
-    /opt/varmint/varmint-provision \
-    /opt/varmint/varmint-gpu-check \
-    /opt/varmint/varmint-grow-root \
-    /opt/varmint/varmint-firstboot \
-    /opt/varmint/varmint-clipboard-agent \
-    /opt/varmint/varmint-steam
+RUN install -Dm0755 /opt/varmint/source/build-image-container.sh /usr/local/bin/build-varmint-guest && \
+    install -Dm0755 /opt/varmint/source/varmint-gpu-check /opt/varmint/rootfs/usr/local/bin/varmint-gpu-check && \
+    install -Dm0755 /opt/varmint/source/varmint-steam /opt/varmint/rootfs/usr/local/bin/varmint-steam && \
+    install -Dm0755 /opt/varmint/source/varmint-clipboard-agent /opt/varmint/rootfs/usr/local/libexec/varmint-clipboard-agent && \
+    install -Dm0755 /opt/varmint/source/varmint-firstboot /opt/varmint/rootfs/usr/local/libexec/varmint-firstboot && \
+    install -Dm0755 /opt/varmint/source/varmint-grow-root /opt/varmint/rootfs/usr/local/libexec/varmint-grow-root && \
+    install -Dm0755 /opt/varmint/source/varmint-provision /opt/varmint/rootfs/usr/local/libexec/varmint-provision && \
+    install -Dm0644 /opt/varmint/source/varmint-firstboot.service /opt/varmint/rootfs/etc/systemd/system/varmint-firstboot.service && \
+    install -Dm0644 /opt/varmint/source/varmint-grow-root.service /opt/varmint/rootfs/etc/systemd/system/varmint-grow-root.service && \
+    install -Dm0644 /opt/varmint/source/varmint-clipboard.desktop /opt/varmint/rootfs/etc/xdg/autostart/varmint-clipboard.desktop && \
+    install -Dm0644 /opt/varmint/source/steam.desktop /opt/varmint/rootfs/usr/local/share/applications/steam.desktop && \
+    rm -rf /opt/varmint/source
 
 ENTRYPOINT ["/usr/local/bin/build-varmint-guest"]

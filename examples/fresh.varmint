@@ -5,10 +5,3 @@ vcpus = 12
 
 disk = "fresh.raw"
 disk_size_gib = 24
-
-kernel_args = [
-  "console=ttyAMA0",
-  "earlycon=pl011,mmio32,0x09000000",
-  "root=LABEL=varmint-root",
-  "rw",
-]

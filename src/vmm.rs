@@ -193,7 +193,7 @@ pub fn run(config_path: &Path) -> Result<()> {
     let network = net::start(move |frame| {
         let _ = net_rx_tx.send(RuntimeEvent::NetRx(frame));
     })
-    .unwrap_or_else(|error| panic!("failed to start vmnet helper: {error}"));
+    .unwrap_or_else(|error| panic!("failed to start vmnet networking: {error}"));
 
     let audio_tx = runtime_event_tx.clone();
     let (_audio_backend, period_sink) = audio::Backend::new(move |event| {

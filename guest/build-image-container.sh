@@ -19,34 +19,19 @@ mkdir -p "$OUTPUT_DIR" "$PUBLISH_DIR" "$stage"
 qemu-img convert -p -O raw "$SOURCE_IMAGE" "$work_image"
 
 virt-customize --network -a "$work_image" \
-    --mkdir /usr/local/libexec \
-    --mkdir /usr/local/share/applications \
-    --mkdir /etc/xdg/autostart \
     --copy-in "$SCRIPT_DIR/fex-install:/tmp" \
-    --copy-in "$SCRIPT_DIR/varmint-provision:/tmp" \
-    --copy-in "$SCRIPT_DIR/varmint-gpu-check:/usr/local/bin" \
-    --copy-in "$SCRIPT_DIR/varmint-grow-root:/usr/local/libexec" \
-    --copy-in "$SCRIPT_DIR/varmint-firstboot:/usr/local/libexec" \
-    --copy-in "$SCRIPT_DIR/varmint-clipboard-agent:/usr/local/libexec" \
-    --copy-in "$SCRIPT_DIR/varmint-clipboard.desktop:/etc/xdg/autostart" \
-    --copy-in "$SCRIPT_DIR/varmint-steam:/usr/local/bin" \
-    --copy-in "$SCRIPT_DIR/steam.desktop:/usr/local/share/applications" \
-    --copy-in "$SCRIPT_DIR/varmint-grow-root.service:/etc/systemd/system" \
-    --copy-in "$SCRIPT_DIR/varmint-firstboot.service:/etc/systemd/system" \
-    --copy-in "$SCRIPT_DIR/varmint-gaming-setup.service:/etc/systemd/system" \
-    --run-command 'cp -a /tmp/fex-install/. / && rm -rf /tmp/fex-install' \
-    --run-command '/tmp/varmint-provision' \
+    --copy-in "$SCRIPT_DIR/rootfs:/tmp" \
+    --run-command 'cp -a /tmp/fex-install/. / && cp -a /tmp/rootfs/. / && rm -rf /tmp/fex-install /tmp/rootfs' \
+    --run-command '/usr/local/libexec/varmint-provision' \
     --run-command 'missing=""; for command in FEXBash FEXRootFSFetcher curl growpart resize2fs sgdisk sudo glxinfo pactl pulseaudio python3 unsquashfs vulkaninfo xclip; do command -v "$command" >/dev/null 2>&1 || missing="$missing $command"; done; [ -z "$missing" ] || { echo "missing required guest commands:$missing" >&2; exit 1; }' \
     --run-command 'test -f /usr/share/fex-emu/GuestThunks/libvulkan-guest.so && test -f /usr/lib/aarch64-linux-gnu/fex-emu/HostThunks/libvulkan-host.so && test -f /usr/lib/aarch64-linux-gnu/fex-emu/HostThunks_32/libvulkan-host.so' \
-    --run-command 'chmod 0755 /usr/local/bin/varmint-gpu-check /usr/local/bin/varmint-steam /usr/local/libexec/varmint-grow-root /usr/local/libexec/varmint-firstboot /usr/local/libexec/varmint-clipboard-agent' \
-    --run-command 'systemctl enable varmint-grow-root.service varmint-firstboot.service varmint-gaming-setup.service' \
+    --run-command 'systemctl enable varmint-grow-root.service varmint-firstboot.service' \
     --run-command 'passwd -l root' \
     --run-command 'printf "varmint\n" > /etc/hostname' \
     --run-command 'truncate -s 0 /etc/machine-id' \
-    --run-command 'rm -f /var/lib/dbus/machine-id /etc/ssh/ssh_host_* /var/lib/varmint/firstboot.done /var/lib/varmint/gaming-setup.done /var/lib/varmint/firstboot.user /tmp/varmint-provision' \
+    --run-command 'rm -f /var/lib/dbus/machine-id /etc/ssh/ssh_host_* /var/lib/varmint/firstboot.done /var/lib/varmint/firstboot.user /usr/local/libexec/varmint-provision' \
     --run-command 'rm -rf /var/lib/cloud/* /etc/systemd/system/getty@tty1.service.d /etc/systemd/system/serial-getty@*.service.d' \
-    --run-command 'apt-get clean' \
-    --run-command 'rm -rf /var/lib/apt/lists/* /var/log/*.log /var/log/journal/*'
+    --run-command 'apt-get clean && rm -rf /var/lib/apt/lists/* /var/log/*.log /var/log/journal/*'
 
 if virt-cat -a "$work_image" /etc/passwd | awk -F: '$3 >= 1000 && $3 < 65534 { found = 1 } END { exit !found }'; then
     echo "error: source image contains a regular user; expected a clean nocloud image" >&2
