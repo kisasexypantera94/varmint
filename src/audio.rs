@@ -7,6 +7,13 @@ use coreaudio::audio_unit::{
     },
 };
 use rtrb::{Consumer, Producer, RingBuffer};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
+    thread::{self, JoinHandle},
+};
 use zerocopy::IntoBytes;
 
 const MAX_PERIOD_BYTES: usize = 16 * 1024;
@@ -24,16 +31,25 @@ pub enum BackendEvent {
 
 pub struct Backend {
     _unit: AudioUnit,
+    completion: Arc<CompletionState>,
+    completion_thread: Option<JoinHandle<()>>,
 }
 
 pub struct PeriodSink {
     producer: Producer<Period>,
 }
 
-struct CallbackState<F> {
+struct CallbackState {
     consumer: Consumer<Period>,
-    on_event: F,
+    completion: Arc<CompletionState>,
+    completion_thread: thread::Thread,
     current: Option<(Period, usize)>,
+}
+
+struct CompletionState {
+    latest_seq: AtomicU64,
+    pending: AtomicBool,
+    running: AtomicBool,
 }
 
 impl Backend {
@@ -42,6 +58,26 @@ impl Backend {
         F: Fn(BackendEvent) + Send + 'static,
     {
         let (producer, consumer) = RingBuffer::new(RING_CAPACITY);
+        let completion = Arc::new(CompletionState {
+            latest_seq: AtomicU64::new(0),
+            pending: AtomicBool::new(false),
+            running: AtomicBool::new(true),
+        });
+
+        let completion_state = Arc::clone(&completion);
+        let completion_thread = thread::Builder::new()
+            .name("audio-completion".into())
+            .spawn(move || {
+                while completion_state.running.load(Ordering::Acquire) {
+                    thread::park();
+
+                    while completion_state.pending.swap(false, Ordering::AcqRel) {
+                        let seq = completion_state.latest_seq.load(Ordering::Acquire);
+                        on_event(BackendEvent::PeriodElapsed(seq));
+                    }
+                }
+            })
+            .expect("failed to start audio completion thread");
 
         let mut unit = AudioUnit::new(IOType::DefaultOutput)?;
 
@@ -56,7 +92,8 @@ impl Backend {
 
         let mut state = CallbackState {
             consumer,
-            on_event,
+            completion: Arc::clone(&completion),
+            completion_thread: completion_thread.thread().clone(),
             current: None,
         };
 
@@ -67,14 +104,31 @@ impl Backend {
 
         unit.start()?;
 
-        Ok((Backend { _unit: unit }, PeriodSink { producer }))
+        Ok((
+            Backend {
+                _unit: unit,
+                completion,
+                completion_thread: Some(completion_thread),
+            },
+            PeriodSink { producer },
+        ))
     }
 }
 
-impl<F: Fn(BackendEvent)> CallbackState<F> {
+impl Drop for Backend {
+    fn drop(&mut self) {
+        self.completion.running.store(false, Ordering::Release);
+
+        if let Some(thread) = self.completion_thread.take() {
+            thread.thread().unpark();
+            let _ = thread.join();
+        }
+    }
+}
+
+impl CallbackState {
     fn render(&mut self, args: Args<Interleaved<i16>>) {
         let out = args.data.buffer.as_mut_bytes();
-
         let mut filled = 0;
 
         while filled < out.len() {
@@ -93,7 +147,9 @@ impl<F: Fn(BackendEvent)> CallbackState<F> {
 
             if *off == period.len {
                 let (done, _) = self.current.take().unwrap();
-                (self.on_event)(BackendEvent::PeriodElapsed(done.seq));
+                self.completion.latest_seq.store(done.seq, Ordering::Release);
+                self.completion.pending.store(true, Ordering::Release);
+                self.completion_thread.unpark();
             }
         }
 

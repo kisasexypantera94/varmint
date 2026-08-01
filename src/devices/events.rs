@@ -34,7 +34,6 @@ pub enum RuntimeEvent {
     UartRx(u8),
     Input(RuntimeInputEvent),
     DisplayResized { width: u32, height: u32 },
-    Audio(audio::BackendEvent),
     Clipboard(Vec<u8>),
 }
 
@@ -75,15 +74,6 @@ impl<'a> RuntimeEventPump<'a> {
                     .gpu
                     .send_event(virtio::gpu::ExternalEvent::DisplayResized { width, height });
             }
-            RuntimeEvent::Audio(event) => match event {
-                audio::BackendEvent::PeriodElapsed(seq) => {
-                    self.devices
-                        .snd
-                        .lock()
-                        .unwrap()
-                        .handle_external_event(virtio::snd::ExternalEvent::PeriodElapsed(seq), self.mem);
-                }
-            },
             RuntimeEvent::Clipboard(payload) => {
                 self.devices
                     .console
@@ -173,5 +163,31 @@ impl<'a> RuntimeEventPump<'a> {
             virtio::input::ExternalInput::AbsPosition { x, y, width, height },
             self.mem,
         );
+    }
+}
+
+pub struct AudioEventPump<'a> {
+    mem: &'a GuestMemory,
+    devices: &'a Devices,
+    rx: Receiver<audio::BackendEvent>,
+}
+
+impl<'a> AudioEventPump<'a> {
+    pub fn new(mem: &'a GuestMemory, devices: &'a Devices, rx: Receiver<audio::BackendEvent>) -> Self {
+        Self { mem, devices, rx }
+    }
+
+    pub fn run(self) {
+        while let Ok(event) = self.rx.recv() {
+            match event {
+                audio::BackendEvent::PeriodElapsed(seq) => {
+                    self.devices
+                        .snd
+                        .lock()
+                        .unwrap()
+                        .handle_external_event(virtio::snd::ExternalEvent::PeriodElapsed(seq), self.mem);
+                }
+            }
+        }
     }
 }

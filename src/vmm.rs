@@ -86,6 +86,7 @@ fn vmm_thread(
     display: &Mutex<DisplayBuffer>,
     runtime_event_tx: Sender<RuntimeEvent>,
     runtime_event_rx: Receiver<RuntimeEvent>,
+    audio_event_rx: Receiver<audio::BackendEvent>,
     display_proxy: EventLoopProxy<DisplayEvent>,
     config: &VmConfig,
     boot: BootPayload,
@@ -117,7 +118,13 @@ fn vmm_thread(
     }
     mem.write(DTB_START, &dtb)?;
 
-    Runtime::new(vm, runtime_event_tx, backends, config.vcpus)?.run(&mem, display, runtime_event_rx, &display_proxy)?;
+    Runtime::new(vm, runtime_event_tx, backends, config.vcpus)?.run(
+        &mem,
+        display,
+        runtime_event_rx,
+        audio_event_rx,
+        &display_proxy,
+    )?;
 
     Ok(())
 }
@@ -195,9 +202,9 @@ pub fn run(config_path: &Path) -> Result<()> {
     })
     .unwrap_or_else(|error| panic!("failed to start vmnet networking: {error}"));
 
-    let audio_tx = runtime_event_tx.clone();
+    let (audio_event_tx, audio_event_rx) = std::sync::mpsc::channel();
     let (_audio_backend, period_sink) = audio::Backend::new(move |event| {
-        let _ = audio_tx.send(RuntimeEvent::Audio(event));
+        let _ = audio_event_tx.send(event);
     })
     .unwrap_or_else(|error| panic!("failed to start audio output: {error}"));
 
@@ -233,6 +240,7 @@ pub fn run(config_path: &Path) -> Result<()> {
                 display,
                 vmm_runtime_event_tx,
                 runtime_event_rx,
+                audio_event_rx,
                 display_proxy,
                 config,
                 boot,

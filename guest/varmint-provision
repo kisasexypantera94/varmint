@@ -78,13 +78,13 @@ apt-get install -y --no-install-recommends -t trixie-backports \
     mesa-vulkan-drivers
 
 # Keep PulseAudio's udev-managed ALSA card lifecycle, but disable timer-based
-# scheduling for virtio-snd and use a fixed 3 x 10 ms playback buffer.
+# scheduling for virtio-snd and use a fixed 4 x 10 ms playback buffer.
 sed -i \
-    's|^[[:space:]]*load-module[[:space:]]\+module-udev-detect.*$|load-module module-udev-detect tsched=0 fixed_latency_range=yes|' \
+    's|^[[:space:]]*load-module[[:space:]]\+module-udev-detect.*$|load-module module-udev-detect tsched=0|' \
     /etc/pulse/default.pa
 
 sed -i \
-    -e 's|^[;[:space:]]*default-fragments[[:space:]]*=.*$|default-fragments = 3|' \
+    -e 's|^[;[:space:]]*default-fragments[[:space:]]*=.*$|default-fragments = 4|' \
     -e 's|^[;[:space:]]*default-fragment-size-msec[[:space:]]*=.*$|default-fragment-size-msec = 10|' \
     /etc/pulse/daemon.conf
 
@@ -97,9 +97,9 @@ ExecStartPre=/bin/sh -c 'i=0; while [ ! -e /dev/snd/controlC0 ]; do i=$((i + 1))
 EOF_PULSE_SYSTEMD
 
 grep -Fx \
-    'load-module module-udev-detect tsched=0 fixed_latency_range=yes' \
+    'load-module module-udev-detect tsched=0' \
     /etc/pulse/default.pa >/dev/null
-grep -Fx 'default-fragments = 3' /etc/pulse/daemon.conf >/dev/null
+grep -Fx 'default-fragments = 4' /etc/pulse/daemon.conf >/dev/null
 grep -Fx 'default-fragment-size-msec = 10' /etc/pulse/daemon.conf >/dev/null
 
 install -d -m 0755 /etc/X11/xorg.conf.d

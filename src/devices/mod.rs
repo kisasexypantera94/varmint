@@ -195,6 +195,7 @@ impl<'a> Runtime<'a> {
         mem: &GuestMemory,
         display: &Mutex<DisplayBuffer>,
         runtime_event_rx: Receiver<RuntimeEvent>,
+        audio_event_rx: Receiver<audio::BackendEvent>,
         display_proxy: &EventLoopProxy<DisplayEvent>,
     ) -> Result<()> {
         thread::scope(|scope| -> Result<()> {
@@ -203,6 +204,11 @@ impl<'a> Runtime<'a> {
             scope.spawn(|| {
                 let runtime_events = events::RuntimeEventPump::new(mem, &self.devices, runtime_event_rx);
                 runtime_events.run();
+            });
+
+            scope.spawn(|| {
+                let audio_events = events::AudioEventPump::new(mem, &self.devices, audio_event_rx);
+                audio_events.run();
             });
 
             self.cpus.run(self.vm, mem, &self.devices)
