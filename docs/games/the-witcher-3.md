@@ -37,8 +37,6 @@ The DirectX 12 version does not currently work in Varmint.
 
 ### 4. Configure graphics
 
-Either use the **Low** or **Medium** preset, or configure the settings manually.
-
 For higher graphics settings, start from the Medium preset and enable each High feature manually. **Keep NVIDIA-specific features disabled, including HairWorks**.
 
 **Do not use the unmodified High preset**. It enables features that are not supported by the current virtual GPU and will crash the game.
