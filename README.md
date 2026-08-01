@@ -3,7 +3,7 @@
 </p>
 
 # varmint
-Varmint is a lightweight virtual machine for Apple Silicon Macs, built on top of Hypervisor.framework.
+Varmint is a lightweight virtual machine for Macs, built on top of Hypervisor.framework.
 
 The current focus is gaming and hardware-accelerated graphics. It boots a Debian arm64 guest with FEX, Steam and Proton, making it possible to run Windows and Linux games on Mac.
 
@@ -20,6 +20,26 @@ Download the latest release
 * audio, networking and input
 * shared clipboard
 * Retina and high-refresh display modes
+
+## Games
+
+Compatibility varies between games. DirectX 9, 10 and 11 titles currently have the best chance of working through DXVK.
+
+See [Running games in Varmint](docs/games/common.md) for general setup and troubleshooting.
+
+| Game                                                                                       | Status | Setup Difficulty |
+| ------------------------------------------------------------------------------------------ | -----: | ----: |
+| [The Witcher 3: Wild Hunt](docs/games/the-witcher-3.md)                                    |      ✅ |    🟢 |
+| [The Witcher: Enhanced Edition](docs/games/the-witcher-enhanced-edition.md)                |      ✅ |    🟢 |
+| [Dragon's Dogma: Dark Arisen](docs/games/dragons-dogma-dark-arisen.md)                     |      ✅ |    🟡 |
+| [Fallout: New Vegas](docs/games/fallout-new-vegas.md)                                      |      ✅ |    🟢 |
+| [Fallout 3](docs/games/fallout-3.md)                                                       |      ✅ |    🟢 |
+| [Subnautica](docs/games/subnautica.md)                                                     |      ✅ |    🟢 |
+
+<!-- | [Subnautica: Below Zero](docs/games/subnautica-below-zero.md)                              |      ✅ |    🟢 | -->
+<!-- | [Team Fortress 2](docs/games/team-fortress-2.md)                                           |      🟡 |    ⚪ | -->
+<!-- | [Portal 1-2](docs/games/portal.md)                                                         |      ❌ |    ⚪ | -->
+<!-- | [Age of Empires II: Definitive Edition](docs/games/age-of-empires-2-definitive-edition.md) |      ✅ |    🟠 | -->
 
 ## Demos
 |                                                       The Witcher 3: Wild Hunt                                                       |                                                       Dragon's Dogma: Dark Arisen                                                       |
