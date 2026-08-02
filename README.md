@@ -7,10 +7,32 @@ Varmint is a lightweight virtual machine for Macs, built on top of Hypervisor.fr
 
 The current focus is gaming and hardware-accelerated graphics. It boots a Debian arm64 guest with FEX, Steam and Proton, making it possible to run Windows and Linux games on Mac.
 
-## Download
-Download the latest release
+## How to use
+1. Download the [latest release](https://github.com/kisasexypantera94/varmint/releases), extract it and move `Varmint.app` to Applications.
 
-**Varmint requires macOS 26 or later.** Download the release archive, extract it and move Varmint to the Applications folder.
+   **Varmint requires macOS 26 or later.**
+
+2. Create a VM configuration:
+   ```bash
+   cat > "$HOME/fresh.varmint" <<'EOF'
+   format_version = 1
+
+   memory_mib = 16384
+   vcpus = 8
+
+   disk = "fresh.raw"
+   disk_size_gib = 24 # can be increased later
+   EOF
+   ```
+
+   The disk image will be created next to the configuration file. To expand it later, stop the VM and increase `disk_size_gib` before the next launch. Disk shrinking is not supported.
+
+3. Open Varmint and select `fresh.varmint`.
+   Since Varmint is not signed or notarized, macOS will block the first launch. Go to **System Settings → Privacy & Security**, click **Open Anyway** and confirm.
+
+4. Wait for Debian to start, create a user and password, then log in. Initial provisioning may take a few more minutes.
+
+5. Open **Applications → Games → Steam**, wait for Steam to finish setting up, then sign in and install a game.
 
 ## Features
 
@@ -22,7 +44,6 @@ Download the latest release
 * Retina and high-refresh display modes
 
 ## Games
-
 Compatibility varies between games. DirectX 9, 10 and 11 titles currently have the best chance of working through DXVK.
 
 See [Running games in Varmint](docs/games/common.md) for general setup and troubleshooting.
