@@ -9,7 +9,9 @@ use crate::{
 use num_enum::TryFromPrimitive;
 use std::{
     fs::{File, OpenOptions},
-    os::unix::fs::FileExt,
+    io,
+    os::{fd::AsRawFd, unix::fs::FileExt},
+    path::Path,
 };
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
@@ -49,26 +51,63 @@ pub struct Blk {
 }
 
 impl Blk {
-    pub fn new(path: &str, host_disk_size: usize) -> Blk {
-        assert_eq!(host_disk_size % 512, 0, "disk size must be a multiple of 512");
+    pub fn new(path: &Path, minimum_size: u64) -> io::Result<Blk> {
+        let file = OpenOptions::new().read(true).write(true).open(path)?;
+        lock_disk(&file, path)?;
 
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .open(path)
-            .unwrap();
-
-        let cur_len = file.metadata().unwrap().len();
-        if cur_len < host_disk_size as u64 {
-            file.set_len(host_disk_size as u64).unwrap();
+        let mut size = file.metadata()?.len();
+        if size != 0 && size % 512 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "disk {} has invalid size {size}; expected a multiple of 512 bytes",
+                    path.display()
+                ),
+            ));
         }
 
-        Blk {
-            sectors: (host_disk_size / 512) as u64,
+        if minimum_size == 0 || minimum_size % 512 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("configured disk size {minimum_size} is not a non-zero multiple of 512 bytes"),
+            ));
+        }
+
+        if size < minimum_size {
+            file.set_len(minimum_size)?;
+            eprintln!(
+                "grew VM disk {} from {} to {} bytes",
+                path.display(),
+                size,
+                minimum_size
+            );
+            size = minimum_size;
+        }
+
+        Ok(Blk {
+            sectors: size / 512,
             file,
-        }
+        })
     }
+}
+
+fn lock_disk(file: &File, path: &Path) -> io::Result<()> {
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+        return Ok(());
+    }
+
+    let error = io::Error::last_os_error();
+    if error.kind() == io::ErrorKind::WouldBlock {
+        return Err(io::Error::new(
+            error.kind(),
+            format!("disk {} is already in use by another Varmint process", path.display()),
+        ));
+    }
+
+    Err(io::Error::new(
+        error.kind(),
+        format!("failed to lock disk {} exclusively: {error}", path.display()),
+    ))
 }
 
 impl Device for Blk {

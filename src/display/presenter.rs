@@ -1,4 +1,7 @@
-use super::iosurface::ScopedIOSurface;
+use super::{
+    iosurface::ScopedIOSurface,
+    stats::{HEIGHT as STATS_HEIGHT, MARGIN as STATS_MARGIN, StatsHud, WIDTH as STATS_WIDTH},
+};
 use objc2::{rc::Retained, runtime::ProtocolObject};
 use objc2_foundation::NSSize;
 use objc2_metal::{
@@ -9,12 +12,18 @@ use objc2_metal::{
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use raw_window_metal::Layer;
-use std::{ffi::c_void, ptr::NonNull};
+use std::{ffi::c_void, ptr::NonNull, time::Instant};
 use winit::window::Window;
 
 type MetalDevice = ProtocolObject<dyn MTLDevice>;
 type MetalCommandQueue = ProtocolObject<dyn MTLCommandQueue>;
 type MetalTexture = ProtocolObject<dyn MTLTexture>;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PresentMode {
+    NewFrame,
+    Redraw,
+}
 
 struct IOSurfaceBackedTexture {
     surface_id: u32,
@@ -37,6 +46,9 @@ pub struct Presenter {
 
     drawable_w: u32,
     drawable_h: u32,
+
+    stats: StatsHud,
+    stats_texture: Option<Retained<MetalTexture>>,
 }
 
 fn bgra_texture_descriptor(width: u32, height: u32) -> Retained<MTLTextureDescriptor> {
@@ -101,6 +113,8 @@ impl Presenter {
             iosurface_texture: None,
             drawable_w: width.max(1),
             drawable_h: height.max(1),
+            stats: StatsHud::new(),
+            stats_texture: None,
         }
     }
 
@@ -116,6 +130,37 @@ impl Presenter {
 
         self.drawable_w = width;
         self.drawable_h = height;
+    }
+
+    pub fn set_stats_visible(&mut self, visible: bool) {
+        self.stats.set_visible(visible);
+        self.sync_stats_texture();
+    }
+
+    fn sync_stats_texture(&mut self) {
+        let Some(pixels) = self.stats.take_pixels() else {
+            return;
+        };
+
+        if self.stats_texture.is_none() {
+            let desc = bgra_texture_descriptor(STATS_WIDTH, STATS_HEIGHT);
+            self.stats_texture = self.device.newTextureWithDescriptor(&desc);
+        }
+
+        let Some(texture) = self.stats_texture.as_ref() else {
+            return;
+        };
+        let _ = Self::upload_rect_to_texture(
+            texture.as_ref(),
+            &pixels,
+            STATS_WIDTH,
+            STATS_HEIGHT,
+            0,
+            0,
+            STATS_WIDTH,
+            STATS_HEIGHT,
+            true,
+        );
     }
 
     fn ensure_texture(&mut self, w: u32, h: u32) -> bool {
@@ -245,54 +290,67 @@ impl Presenter {
         dirty_y: u32,
         dirty_w: u32,
         dirty_h: u32,
-        cached: bool,
+        mode: PresentMode,
     ) -> bool {
-        if let Some(iosurface_id) = iosurface_id {
-            if !cached {
-                self.resize_surface(pw, ph);
-                if !self.ensure_iosurface_texture_for_id(iosurface_id, pw, ph) {
-                    return false;
-                }
-            }
+        let started = (mode == PresentMode::NewFrame && self.stats.is_visible()).then(Instant::now);
 
-            let Some(backing) = self.iosurface_texture.as_ref() else {
-                return false;
-            };
-            if backing.surface_id != iosurface_id {
-                return false;
-            }
-            return self.blit_texture_to_drawable(backing.texture.as_ref(), pw, ph);
+        let presented = if let Some(iosurface_id) = iosurface_id {
+            self.present_iosurface(iosurface_id, pw, ph, mode)
+        } else {
+            self.present_rect(pixels, pw, ph, dirty_x, dirty_y, dirty_w, dirty_h, mode)
+        };
+
+        if let Some(started) = started {
+            self.stats.record_frame(presented, started.elapsed());
         }
+        self.stats.refresh();
+        self.sync_stats_texture();
 
-        self.present_rect(pixels, pw, ph, dirty_x, dirty_y, dirty_w, dirty_h, cached)
+        presented
     }
 
-    pub fn present_rect(
+    fn present_iosurface(&mut self, iosurface_id: u32, width: u32, height: u32, mode: PresentMode) -> bool {
+        if mode == PresentMode::NewFrame {
+            self.resize_surface(width, height);
+            if !self.ensure_iosurface_texture_for_id(iosurface_id, width, height) {
+                return false;
+            }
+        }
+
+        let Some(backing) = self.iosurface_texture.as_ref() else {
+            return false;
+        };
+        if backing.surface_id != iosurface_id {
+            return false;
+        }
+
+        self.blit_texture_to_drawable(backing.texture.as_ref(), width, height)
+    }
+
+    fn present_rect(
         &mut self,
         pixels: &[u32],
-        pw: u32,
-        ph: u32,
+        width: u32,
+        height: u32,
         dirty_x: u32,
         dirty_y: u32,
         dirty_w: u32,
         dirty_h: u32,
-        cached: bool,
+        mode: PresentMode,
     ) -> bool {
-        if pw == 0 || ph == 0 {
+        if width == 0 || height == 0 {
             return false;
         }
 
-        if cached {
+        if mode == PresentMode::Redraw {
             let Some(texture) = self.texture.as_ref() else {
                 return false;
             };
-            return self.blit_texture_to_drawable(texture.as_ref(), pw, ph);
+            return self.blit_texture_to_drawable(texture.as_ref(), width, height);
         }
 
-        self.resize_surface(pw, ph);
-
-        let force_full = self.ensure_texture(pw, ph);
-
+        self.resize_surface(width, height);
+        let force_full = self.ensure_texture(width, height);
         let Some(texture) = self.texture.as_ref() else {
             return false;
         };
@@ -300,8 +358,8 @@ impl Presenter {
         if !Self::upload_rect_to_texture(
             texture.as_ref(),
             pixels,
-            pw,
-            ph,
+            width,
+            height,
             dirty_x,
             dirty_y,
             dirty_w,
@@ -311,7 +369,7 @@ impl Presenter {
             return false;
         }
 
-        self.blit_texture_to_drawable(texture.as_ref(), pw, ph)
+        self.blit_texture_to_drawable(texture.as_ref(), width, height)
     }
 
     fn blit_texture_to_drawable(&self, src: &MetalTexture, width: u32, height: u32) -> bool {
@@ -354,6 +412,38 @@ impl Presenter {
                 0,
                 zero_origin,
             );
+        }
+
+        if self.stats.is_visible() {
+            if let Some(stats_texture) = self.stats_texture.as_ref() {
+                let stats_w = stats_texture.width().min(dst.width());
+                let stats_h = stats_texture.height().min(dst.height());
+                if stats_w > 0 && stats_h > 0 {
+                    let stats_size = MTLSize {
+                        width: stats_w,
+                        height: stats_h,
+                        depth: 1,
+                    };
+                    let destination_origin = MTLOrigin {
+                        x: STATS_MARGIN.min(dst.width().saturating_sub(stats_w)),
+                        y: STATS_MARGIN.min(dst.height().saturating_sub(stats_h)),
+                        z: 0,
+                    };
+                    unsafe {
+                        blit.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+                            stats_texture.as_ref(),
+                            0,
+                            0,
+                            zero_origin,
+                            stats_size,
+                            dst.as_ref(),
+                            0,
+                            0,
+                            destination_origin,
+                        );
+                    }
+                }
+            }
         }
 
         blit.endEncoding();

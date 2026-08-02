@@ -289,19 +289,8 @@ unsafe impl Send for AngleCopySession {}
 
 impl AngleCopySession {
     fn new() -> Option<Self> {
-        let egl_lib = open_library(&[
-            "libEGL.dylib",
-            "@rpath/libEGL.dylib",
-            "/opt/homebrew/opt/angle-utm/lib/libEGL.dylib",
-            "/opt/homebrew/opt/angle/lib/libEGL.dylib",
-        ])?;
-
-        let gles_lib = open_library(&[
-            "libGLESv2.dylib",
-            "@rpath/libGLESv2.dylib",
-            "/opt/homebrew/opt/angle-utm/lib/libGLESv2.dylib",
-            "/opt/homebrew/opt/angle/lib/libGLESv2.dylib",
-        ])?;
+        let egl_lib = open_library(&["@rpath/libEGL.dylib", "libEGL.dylib"])?;
+        let gles_lib = open_library(&["@rpath/libGLESv2.dylib", "libGLESv2.dylib"])?;
 
         let egl_get_proc_address: EglGetProcAddress = unsafe { symbol(egl_lib, "eglGetProcAddress")? };
         let egl_get_display: EglGetDisplay = unsafe { symbol(egl_lib, "eglGetDisplay")? };

@@ -1,0 +1,204 @@
+#!/bin/sh
+set -eu
+
+STATE_DIR=/var/lib/varmint
+USER_FILE=$STATE_DIR/firstboot.user
+DONE_FILE=$STATE_DIR/firstboot.done
+FEX_ROOTFS=Ubuntu_24_04
+STEAM_URL=https://repo.steampowered.com/steam/archive/stable/steam-launcher_latest_all.deb
+
+cleanup() {
+    stty echo 2>/dev/null || true
+    [ -z "${partial:-}" ] || rm -f "$partial" || true
+}
+trap cleanup EXIT HUP INT TERM
+
+load_user() {
+    [ -s "$USER_FILE" ] || return 1
+    username=$(cat "$USER_FILE")
+    entry=$(getent passwd "$username") || {
+        printf 'Saved Varmint user %s no longer exists.\n' "$username" >&2
+        exit 1
+    }
+    home_dir=$(printf '%s\n' "$entry" | cut -d: -f6)
+}
+
+save_user() {
+    printf '%s\n' "$username" > "$USER_FILE"
+    chmod 0600 "$USER_FILE"
+    load_user
+}
+
+create_user() {
+    install -d -m 0755 "$STATE_DIR"
+    load_user && return
+
+    username=$(awk -F: '$3 >= 1000 && $3 < 65534 { print $1; exit }' /etc/passwd)
+    if [ -n "$username" ]; then
+        save_user
+        return
+    fi
+
+    while :; do
+        printf 'Username: '
+        IFS= read -r username
+        case "$username" in
+            root|'')
+                printf 'Choose a non-root username.\n'
+                ;;
+            *[!a-z0-9_-]*|[0-9-]*)
+                printf 'Use lowercase letters, digits, underscore or dash; start with a letter or underscore.\n'
+                ;;
+            *)
+                getent passwd "$username" >/dev/null \
+                    && printf 'That user already exists.\n' \
+                    || break
+                ;;
+        esac
+    done
+
+    while :; do
+        printf 'Password: '
+        stty -echo
+        IFS= read -r password
+        stty echo
+        printf '\nRepeat password: '
+        stty -echo
+        IFS= read -r confirmation
+        stty echo
+        printf '\n'
+
+        if [ -z "$password" ]; then
+            printf 'Password cannot be empty.\n'
+        elif [ "$password" != "$confirmation" ]; then
+            printf 'Passwords do not match.\n'
+        else
+            break
+        fi
+    done
+
+    useradd --create-home --shell /bin/bash "$username"
+    printf '%s:%s\n' "$username" "$password" | chpasswd
+    unset password confirmation
+
+    for group in sudo audio video render input; do
+        getent group "$group" >/dev/null && usermod -aG "$group" "$username"
+    done
+    save_user
+}
+
+run_as_user() {
+    sudo -H -u "$username" env -i \
+        HOME="$home_dir" \
+        USER="$username" \
+        LOGNAME="$username" \
+        PATH=/usr/local/bin:/usr/bin:/bin \
+        XDG_CONFIG_HOME="$home_dir/.config" \
+        XDG_DATA_HOME="$home_dir/.local/share" \
+        XDG_CACHE_HOME="$home_dir/.cache" \
+        "$@"
+}
+
+setup_fex() {
+    rootfs=$home_dir/.local/share/fex-emu/RootFS/$FEX_ROOTFS
+    config=$home_dir/.config/fex-emu/Config.json
+
+    if [ ! -d "$rootfs" ]; then
+        printf '\nDownloading and extracting the FEX Ubuntu 24.04 rootfs...\n'
+        run_as_user FEXRootFSFetcher \
+            --assume-yes \
+            --extract \
+            --distro-name ubuntu \
+            --distro-version 24.04 \
+            --force-ui tty
+    fi
+    [ -d "$rootfs" ] || {
+        printf 'FEX rootfs setup did not create %s.\n' "$rootfs" >&2
+        exit 1
+    }
+
+    run_as_user sh -c 'mkdir -p "$(dirname "$1")"; cat > "$1"' sh "$config" <<EOF_CONFIG
+{
+  "Config": {
+    "RootFS": "$FEX_ROOTFS",
+    "TSOEnabled": "0",
+    "VectorTSOEnabled": "0",
+    "MemcpySetTSOEnabled": "0",
+    "HalfBarrierTSOEnabled": "1"
+  },
+  "ThunksDB": {
+    "Vulkan": 1
+  }
+}
+EOF_CONFIG
+}
+
+install_steam() {
+    dpkg-query -W -f='${Status}\n' steam-launcher 2>/dev/null \
+        | grep -Fx 'install ok installed' >/dev/null \
+        && return
+
+    printf '\nInstalling the Steam launcher...\n'
+    cache_dir=/var/cache/varmint
+    steam_deb=$cache_dir/steam-launcher_latest_all.deb
+    install -d -m 0755 "$cache_dir"
+
+    if [ ! -s "$steam_deb" ]; then
+        partial=$steam_deb.partial.$$
+        curl --fail --location --retry 3 --retry-delay 2 \
+            --output "$partial" "$STEAM_URL"
+        mv "$partial" "$steam_deb"
+        partial=
+    fi
+
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y "$steam_deb"
+
+    # steam-launcher installs Valve's apt source, but Steam updates itself.
+    # Keeping the source can break every later apt update when Valve's key
+    # no longer satisfies Debian's signature policy.
+    rm -f \
+        /etc/apt/sources.list.d/steam-stable.list \
+        /etc/apt/sources.list.d/steam-beta.list
+
+    dpkg-query -W -f='${Status}\n' steam-launcher 2>/dev/null \
+        | grep -Fx 'install ok installed' >/dev/null || {
+            printf 'Steam launcher package was not installed successfully.\n' >&2
+            exit 1
+        }
+}
+
+verify_setup() {
+    arch=$(run_as_user FEXBash -c 'uname -m')
+    [ "$arch" = x86_64 ] || {
+        printf 'FEX verification failed: expected x86_64, got %s.\n' "$arch" >&2
+        exit 1
+    }
+    run_as_user FEXBash -c 'command -v steam >/dev/null' || {
+        printf 'Steam launcher is not available inside FEX.\n' >&2
+        exit 1
+    }
+}
+
+main() {
+    printf '%s\n\n' 'Varmint first boot'
+    create_user
+
+    command -v ssh-keygen >/dev/null 2>&1 && ssh-keygen -A
+    passwd -l root >/dev/null 2>&1 || true
+
+    printf '\nPreparing the gaming environment. This may take a few minutes...\n'
+    setup_fex
+    install_steam
+    verify_setup
+
+    systemctl unmask lightdm.service >/dev/null 2>&1 || true
+    systemctl enable lightdm.service >/dev/null
+    systemctl set-default graphical.target >/dev/null
+    systemctl start lightdm.service
+
+    touch "$DONE_FILE"
+    printf '\nVarmint is ready for %s.\n' "$username"
+}
+
+main "$@"

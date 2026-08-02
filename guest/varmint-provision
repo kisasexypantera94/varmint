@@ -1,0 +1,137 @@
+#!/bin/sh
+set -eu
+
+export DEBIAN_FRONTEND=noninteractive
+
+cat > /etc/apt/apt.conf.d/80-varmint-retries <<'EOF_APT'
+Acquire::Retries "3";
+EOF_APT
+
+cat > /etc/apt/sources.list.d/varmint-backports.sources <<'EOF_BACKPORTS'
+Types: deb
+URIs: http://deb.debian.org/debian
+Suites: trixie-backports
+Components: main
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+EOF_BACKPORTS
+
+apt-get update
+apt-get purge -y \
+    pipewire-alsa \
+    pipewire-audio \
+    pipewire-pulse \
+    wireplumber
+
+apt-get install -y --no-install-recommends \
+    adwaita-icon-theme \
+    ca-certificates \
+    cloud-guest-utils \
+    curl \
+    dbus-user-session \
+    e2fsprogs \
+    fonts-dejavu-core \
+    fonts-liberation \
+    gdisk \
+    librsvg2-common \
+    lightdm \
+    lightdm-gtk-greeter \
+    libasound2-plugins \
+    libasound2t64 \
+    libdrm2 \
+    libegl1 \
+    libfmt10 \
+    libgl1 \
+    libssl3t64 \
+    libstdc++6 \
+    libvulkan1 \
+    libwayland-client0 \
+    libx11-6 \
+    libxcb1 \
+    libxrandr2 \
+    libxrender1 \
+    libxxhash0 \
+    mesa-utils \
+    openssh-server \
+    pavucontrol \
+    pulseaudio \
+    pulseaudio-utils \
+    python3 \
+    rtkit \
+    squashfs-tools \
+    sudo \
+    systemd-timesyncd \
+    vulkan-tools \
+    x11-xserver-utils \
+    xclip \
+    xdg-user-dirs \
+    xfce4 \
+    xfce4-power-manager \
+    xfce4-terminal \
+    xserver-xorg \
+    xserver-xorg-input-libinput
+
+apt-get install -y --no-install-recommends -t trixie-backports \
+    libegl-mesa0 \
+    libgbm1 \
+    libgl1-mesa-dri \
+    libglx-mesa0 \
+    mesa-vulkan-drivers
+
+# Keep PulseAudio's udev-managed ALSA card lifecycle, but disable timer-based
+# scheduling for virtio-snd and use a fixed 4 x 10 ms playback buffer.
+sed -i \
+    's|^[[:space:]]*load-module[[:space:]]\+module-udev-detect.*$|load-module module-udev-detect tsched=0|' \
+    /etc/pulse/default.pa
+
+sed -i \
+    -e 's|^[;[:space:]]*default-fragments[[:space:]]*=.*$|default-fragments = 4|' \
+    -e 's|^[;[:space:]]*default-fragment-size-msec[[:space:]]*=.*$|default-fragment-size-msec = 10|' \
+    /etc/pulse/daemon.conf
+
+# The user PulseAudio service can otherwise start before the virtio-snd ALSA
+# card is present and remain attached to auto_null until manually restarted.
+install -d -m 0755 /etc/systemd/user/pulseaudio.service.d
+cat > /etc/systemd/user/pulseaudio.service.d/varmint-audio.conf <<'EOF_PULSE_SYSTEMD'
+[Service]
+ExecStartPre=/bin/sh -c 'i=0; while [ ! -e /dev/snd/controlC0 ]; do i=$((i + 1)); [ "$i" -ge 100 ] && exit 1; sleep 0.1; done'
+EOF_PULSE_SYSTEMD
+
+grep -Fx \
+    'load-module module-udev-detect tsched=0' \
+    /etc/pulse/default.pa >/dev/null
+grep -Fx 'default-fragments = 4' /etc/pulse/daemon.conf >/dev/null
+grep -Fx 'default-fragment-size-msec = 10' /etc/pulse/daemon.conf >/dev/null
+
+install -d -m 0755 /etc/X11/xorg.conf.d
+cat > /etc/X11/xorg.conf.d/20-varmint-cursor.conf <<'EOF_XORG'
+Section "Device"
+    Identifier "Varmint GPU"
+    Driver "modesetting"
+    Option "SWCursor" "true"
+EndSection
+EOF_XORG
+
+install -d -m 0755 /etc/lightdm/lightdm.conf.d
+cat > /etc/lightdm/lightdm.conf.d/50-varmint.conf <<'EOF_LIGHTDM'
+[Seat:*]
+greeter-session=lightdm-gtk-greeter
+user-session=xfce
+EOF_LIGHTDM
+
+install -d -m 0755 /etc/sysctl.d
+cat > /etc/sysctl.d/60-varmint-gaming.conf <<'EOF_SYSCTL'
+vm.overcommit_memory = 1
+EOF_SYSCTL
+
+install -d -m 0755 /etc/udev/rules.d
+cat > /etc/udev/rules.d/70-varmint-clipboard.rules <<'EOF_UDEV'
+SUBSYSTEM=="virtio-ports", ATTR{name}=="clipboard", MODE="0660", TAG+="uaccess"
+EOF_UDEV
+
+systemctl enable openssh-server.service >/dev/null 2>&1 || true
+systemctl enable systemd-timesyncd.service >/dev/null 2>&1 || true
+systemctl disable lightdm.service >/dev/null 2>&1 || true
+systemctl set-default multi-user.target
+
+apt-get clean
+rm -rf /var/lib/apt/lists/*

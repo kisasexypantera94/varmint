@@ -8,12 +8,11 @@ use crate::{
     irq,
     machine::*,
     memory::GuestMemory,
-    net, uart, virtio,
+    net, stdio, uart, virtio,
 };
 use applevisor::prelude::*;
 pub use events::{RuntimeEvent, RuntimeInputEvent};
 use std::{
-    io::{self, Write},
     sync::{
         Mutex,
         mpsc::{Receiver, Sender},
@@ -21,6 +20,14 @@ use std::{
     thread,
 };
 use winit::event_loop::EventLoopProxy;
+
+pub struct HostBackends {
+    pub disk: virtio::Blk,
+    pub net: net::Backend,
+    pub audio: audio::PeriodSink,
+    pub clipboard: clipboard::Sink,
+    pub serial: stdio::Sink,
+}
 
 pub struct Devices {
     uart: Mutex<uart::Uart>,
@@ -39,10 +46,6 @@ pub struct Runtime<'a> {
     devices: Devices,
     cpus: CpuRuntime,
     gpu_worker: gpu::Worker,
-    clipboard_rx: Receiver<Vec<u8>>,
-    iface: net::Backend,
-    runtime_event_tx: Sender<RuntimeEvent>,
-    _audio_backend: audio::Backend,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -119,29 +122,26 @@ const MMIO_REGIONS: &[MmioRegion] = &[
 ];
 
 impl<'a> Runtime<'a> {
-    pub fn new(vm: &'a VirtualMachineInstance<GicEnabled>, runtime_event_tx: Sender<RuntimeEvent>) -> Result<Self> {
+    pub fn new(
+        vm: &'a VirtualMachineInstance<GicEnabled>,
+        runtime_event_tx: Sender<RuntimeEvent>,
+        backends: HostBackends,
+        vcpus: usize,
+    ) -> Result<Self> {
         let (spi_int_start, _) = GicConfig::get_spi_interrupt_range()?;
 
-        let uart = Mutex::new(uart::Uart::new(irq::IrqLine::new(vm, spi_int_start + UART_SPI_OFFSET)));
+        let uart = Mutex::new(uart::Uart::new(
+            irq::IrqLine::new(vm, spi_int_start + UART_SPI_OFFSET),
+            backends.serial,
+        ));
 
         let blk = Mutex::new(virtio::MmioTransport::new(
-            virtio::Blk::new("dev0.img", 40 * 1024 * 1024 * 1024),
+            backends.disk,
             irq::IrqLine::new(vm, spi_int_start + VIRTBLK_SPI_OFFSET),
         ));
 
-        let net_ready_tx = runtime_event_tx.clone();
-        let mut iface = net::Backend::new().unwrap();
-        iface
-            .set_event_callback(move || {
-                let _ = net_ready_tx.send(RuntimeEvent::NetReady);
-            })
-            .unwrap();
-
-        let net_tx = runtime_event_tx.clone();
         let net = Mutex::new(virtio::MmioTransport::new(
-            virtio::Net::new(iface.mac(), move |frame| {
-                let _ = net_tx.send(RuntimeEvent::NetTx(frame));
-            }),
+            virtio::Net::new(backends.net.mac(), backends.net),
             irq::IrqLine::new(vm, spi_int_start + VIRTNET_SPI_OFFSET),
         ));
 
@@ -162,20 +162,13 @@ impl<'a> Runtime<'a> {
             irq::IrqLine::new(vm, spi_int_start + VIRTINPUT_MOUSE_SPI_OFFSET),
         ));
 
-        let audio_tx = runtime_event_tx.clone();
-        let (audio_backend, period_sink) = audio::Backend::new(move |event| {
-            let _ = audio_tx.send(RuntimeEvent::Audio(event));
-        })
-        .unwrap();
-
         let snd = Mutex::new(virtio::MmioTransport::new(
-            virtio::Snd::new(period_sink),
+            virtio::Snd::new(backends.audio),
             irq::IrqLine::new(vm, spi_int_start + VIRTSND_SPI_OFFSET),
         ));
 
-        let (clipboard_tx, clipboard_rx) = std::sync::mpsc::channel();
         let console = Mutex::new(virtio::MmioTransport::new(
-            virtio::Console::new(clipboard_tx),
+            virtio::Console::new(backends.clipboard),
             irq::IrqLine::new(vm, spi_int_start + VIRTCONSOLE_SPI_OFFSET),
         ));
 
@@ -192,12 +185,8 @@ impl<'a> Runtime<'a> {
                 snd,
                 console,
             },
-            cpus: CpuRuntime::new(vm, IMAGE_START, DTB_START)?,
+            cpus: CpuRuntime::new(vm, IMAGE_START, DTB_START, vcpus)?,
             gpu_worker,
-            clipboard_rx,
-            iface,
-            runtime_event_tx,
-            _audio_backend: audio_backend,
         })
     }
 
@@ -206,22 +195,20 @@ impl<'a> Runtime<'a> {
         mem: &GuestMemory,
         display: &Mutex<DisplayBuffer>,
         runtime_event_rx: Receiver<RuntimeEvent>,
+        audio_event_rx: Receiver<audio::BackendEvent>,
         display_proxy: &EventLoopProxy<DisplayEvent>,
     ) -> Result<()> {
         thread::scope(|scope| -> Result<()> {
-            scope.spawn(|| events::run_stdin(&self.devices.uart));
             scope.spawn(|| self.gpu_worker.run(mem, display, display_proxy));
 
-            let clipboard_tx = self.runtime_event_tx.clone();
-            scope.spawn(move || {
-                clipboard::run(self.clipboard_rx, |payload| {
-                    let _ = clipboard_tx.send(RuntimeEvent::Clipboard(payload));
-                });
+            scope.spawn(|| {
+                let runtime_events = events::RuntimeEventPump::new(mem, &self.devices, runtime_event_rx);
+                runtime_events.run();
             });
 
             scope.spawn(|| {
-                let runtime_events = events::RuntimeEventPump::new(mem, &self.devices, self.iface, runtime_event_rx);
-                runtime_events.run();
+                let audio_events = events::AudioEventPump::new(mem, &self.devices, audio_event_rx);
+                audio_events.run();
             });
 
             self.cpus.run(self.vm, mem, &self.devices)
@@ -245,10 +232,7 @@ impl Devices {
         let result = match route.device {
             MmioDevice::Uart => {
                 if is_write {
-                    self.uart.lock().unwrap().write(route.offset, value as u32, |value| {
-                        io::stdout().write_all(&[value as u8]).unwrap();
-                        io::stdout().flush().unwrap();
-                    });
+                    self.uart.lock().unwrap().write(route.offset, value as u32);
                     None
                 } else {
                     Some(self.uart.lock().unwrap().read(route.offset) as u64)

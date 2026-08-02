@@ -1,10 +1,6 @@
 use super::Devices;
-use crate::{audio, memory::GuestMemory, net, uart, virtio};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use std::{
-    io::Read,
-    sync::{Mutex, mpsc::Receiver},
-};
+use crate::{audio, memory::GuestMemory, virtio};
+use std::sync::mpsc::Receiver;
 
 pub enum RuntimeInputEvent {
     Key {
@@ -34,33 +30,22 @@ pub enum RuntimeInputEvent {
 }
 
 pub enum RuntimeEvent {
-    NetReady,
-    NetTx(Vec<u8>),
+    NetRx(Vec<u8>),
+    UartRx(u8),
     Input(RuntimeInputEvent),
     DisplayResized { width: u32, height: u32 },
-    Audio(audio::BackendEvent),
     Clipboard(Vec<u8>),
 }
 
 pub struct RuntimeEventPump<'a> {
     mem: &'a GuestMemory,
     devices: &'a Devices,
-    iface: net::Backend,
     rx: Receiver<RuntimeEvent>,
-    net_buf: Vec<u8>,
 }
 
 impl<'a> RuntimeEventPump<'a> {
-    pub fn new(mem: &'a GuestMemory, devices: &'a Devices, iface: net::Backend, rx: Receiver<RuntimeEvent>) -> Self {
-        let net_buf = vec![0; iface.max_packet_size() as usize];
-
-        Self {
-            mem,
-            devices,
-            iface,
-            rx,
-            net_buf,
-        }
+    pub fn new(mem: &'a GuestMemory, devices: &'a Devices, rx: Receiver<RuntimeEvent>) -> Self {
+        Self { mem, devices, rx }
     }
 
     pub fn run(mut self) {
@@ -79,25 +64,16 @@ impl<'a> RuntimeEventPump<'a> {
 
     fn handle_event(&mut self, event: RuntimeEvent, pointer_move: &mut Option<(u32, u32, u32, u32)>) {
         match event {
-            RuntimeEvent::NetReady => self.handle_net_ready(),
-            RuntimeEvent::NetTx(frame) => {
-                self.iface.write(&frame).unwrap();
+            RuntimeEvent::NetRx(frame) => {
+                self.devices.net.lock().unwrap().handle_external_event(&frame, self.mem);
             }
+            RuntimeEvent::UartRx(byte) => self.devices.uart.lock().unwrap().enqueue(byte),
             RuntimeEvent::Input(event) => self.handle_input(event, pointer_move),
             RuntimeEvent::DisplayResized { width, height } => {
                 self.devices
                     .gpu
                     .send_event(virtio::gpu::ExternalEvent::DisplayResized { width, height });
             }
-            RuntimeEvent::Audio(event) => match event {
-                audio::BackendEvent::PeriodElapsed(seq) => {
-                    self.devices
-                        .snd
-                        .lock()
-                        .unwrap()
-                        .handle_external_event(virtio::snd::ExternalEvent::PeriodElapsed(seq), self.mem);
-                }
-            },
             RuntimeEvent::Clipboard(payload) => {
                 self.devices
                     .console
@@ -105,21 +81,6 @@ impl<'a> RuntimeEventPump<'a> {
                     .unwrap()
                     .handle_external_event(virtio::console::ExternalEvent::HostClipboard(&payload), self.mem);
             }
-        }
-    }
-
-    fn handle_net_ready(&mut self) {
-        loop {
-            let n_read = self.iface.read(&mut self.net_buf).unwrap();
-            if n_read == 0 {
-                break;
-            }
-
-            self.devices
-                .net
-                .lock()
-                .unwrap()
-                .handle_external_event(&self.net_buf[..n_read], self.mem);
         }
     }
 
@@ -205,59 +166,27 @@ impl<'a> RuntimeEventPump<'a> {
     }
 }
 
-struct RawModeGuard;
-
-impl RawModeGuard {
-    fn new() -> std::io::Result<Self> {
-        enable_raw_mode()?;
-        Ok(Self)
-    }
+pub struct AudioEventPump<'a> {
+    mem: &'a GuestMemory,
+    devices: &'a Devices,
+    rx: Receiver<audio::BackendEvent>,
 }
 
-impl Drop for RawModeGuard {
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
+impl<'a> AudioEventPump<'a> {
+    pub fn new(mem: &'a GuestMemory, devices: &'a Devices, rx: Receiver<audio::BackendEvent>) -> Self {
+        Self { mem, devices, rx }
     }
-}
 
-pub fn run_stdin(uart: &Mutex<uart::Uart>) {
-    let _raw = RawModeGuard::new().unwrap();
-    let stdin = std::io::stdin();
-    let mut buf = [0u8; 1];
-
-    const PREFIX: u8 = 0x1d;
-    let mut got_prefix = false;
-
-    eprintln!("[VM] Press Ctrl-] x to exit");
-
-    loop {
-        match stdin.lock().read(&mut buf) {
-            Ok(0) => break,
-            Ok(_) => {
-                let b = buf[0];
-
-                if got_prefix {
-                    got_prefix = false;
-                    match b {
-                        b'x' => {
-                            eprintln!("Received break command");
-                            break;
-                        }
-                        _ => eprint!("unknown command: {b:#x}\r\n"),
-                    }
-                    continue;
+    pub fn run(self) {
+        while let Ok(event) = self.rx.recv() {
+            match event {
+                audio::BackendEvent::PeriodElapsed(seq) => {
+                    self.devices
+                        .snd
+                        .lock()
+                        .unwrap()
+                        .handle_external_event(virtio::snd::ExternalEvent::PeriodElapsed(seq), self.mem);
                 }
-
-                if b == PREFIX {
-                    got_prefix = true;
-                    continue;
-                }
-
-                uart.lock().unwrap().enqueue(b);
-            }
-            Err(e) => {
-                eprintln!("stdin read error: {e}");
-                break;
             }
         }
     }

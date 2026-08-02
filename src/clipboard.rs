@@ -3,9 +3,29 @@ use objc2_foundation::NSString;
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
-    sync::mpsc::{Receiver, TryRecvError},
+    sync::mpsc::{Receiver, Sender, TryRecvError},
+    thread,
     time::Duration,
 };
+
+pub struct Sink {
+    tx: Sender<Vec<u8>>,
+}
+
+impl Sink {
+    pub fn push(&self, bytes: Vec<u8>) {
+        let _ = self.tx.send(bytes);
+    }
+}
+
+pub fn start(on_host_change: impl FnMut(Vec<u8>) + Send + 'static) -> Sink {
+    let (tx, rx) = std::sync::mpsc::channel();
+    thread::Builder::new()
+        .name("varmint-clipboard".into())
+        .spawn(move || run(rx, on_host_change))
+        .unwrap_or_else(|error| panic!("failed to spawn clipboard thread: {error}"));
+    Sink { tx }
+}
 
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 
@@ -83,7 +103,7 @@ const FRAME_LEN_PREFIX: usize = 4;
 
 const MAX_FRAME: usize = 16 * 1024 * 1024;
 
-pub fn run(out_rx: Receiver<Vec<u8>>, mut on_input: impl FnMut(Vec<u8>)) {
+fn run(out_rx: Receiver<Vec<u8>>, mut on_input: impl FnMut(Vec<u8>)) {
     let pb = Pasteboard::general();
 
     let mut last_change = pb.change_count();

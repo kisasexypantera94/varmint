@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+import os
+import select
+import struct
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+PORT = Path("/dev/virtio-ports/clipboard")
+POLL_INTERVAL = 0.25
+RETRY_INTERVAL = 1.0
+MAX_FRAME = 16 * 1024 * 1024
+
+
+def log(message):
+    print(f"varmint-clipboard-agent: {message}", file=sys.stderr, flush=True)
+
+
+def find_port():
+    if PORT.exists():
+        return PORT
+    for entry in Path("/sys/class/virtio-ports").glob("vport*p*"):
+        try:
+            if (entry / "name").read_text(encoding="utf-8").strip() == "clipboard":
+                return Path("/dev") / entry.name
+        except OSError:
+            pass
+    raise FileNotFoundError("clipboard virtio-console port is not available")
+
+
+def read_clipboard():
+    result = subprocess.run(
+        ["xclip", "-selection", "clipboard", "-out"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.stdout if result.returncode == 0 else None
+
+
+def write_clipboard(payload):
+    subprocess.run(
+        ["xclip", "-selection", "clipboard", "-in"],
+        input=payload,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=True,
+    )
+
+
+def write_all(fd, payload):
+    view = memoryview(payload)
+    while view:
+        try:
+            written = os.write(fd, view)
+            if written == 0:
+                raise OSError("clipboard port stopped accepting data")
+            view = view[written:]
+        except BlockingIOError:
+            select.select([], [fd], [])
+
+
+def run_session():
+    if not os.environ.get("DISPLAY"):
+        raise RuntimeError("DISPLAY is not set")
+
+    port = find_port()
+    fd = os.open(port, os.O_RDWR | os.O_NONBLOCK)
+    received = bytearray()
+    last = read_clipboard()
+    log(f"using {port}")
+
+    try:
+        while True:
+            readable, _, _ = select.select([fd], [], [], POLL_INTERVAL)
+            if readable:
+                chunk = os.read(fd, 65536)
+                if not chunk:
+                    raise OSError("clipboard port closed")
+                received.extend(chunk)
+
+                while len(received) >= 4:
+                    size = struct.unpack_from("<I", received)[0]
+                    if size > MAX_FRAME:
+                        raise ValueError(f"clipboard frame is too large: {size}")
+                    if len(received) < 4 + size:
+                        break
+
+                    payload = bytes(received[4:4 + size])
+                    del received[:4 + size]
+                    if payload != last:
+                        write_clipboard(payload)
+                        last = payload
+
+            payload = read_clipboard()
+            if payload is None or payload == last:
+                continue
+            if len(payload) > MAX_FRAME:
+                log(f"clipboard contents are too large: {len(payload)}")
+            else:
+                write_all(fd, struct.pack("<I", len(payload)) + payload)
+            last = payload
+    finally:
+        os.close(fd)
+
+
+def main():
+    while True:
+        try:
+            run_session()
+        except Exception as error:
+            log(str(error))
+            time.sleep(RETRY_INTERVAL)
+
+
+if __name__ == "__main__":
+    main()

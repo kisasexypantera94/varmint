@@ -1,7 +1,7 @@
 mod psci;
 mod sysreg;
 
-use crate::{devices::Devices, machine::NUM_VCPUS, memory::GuestMemory};
+use crate::{devices::Devices, memory::GuestMemory};
 use applevisor::prelude::*;
 use std::{
     sync::{
@@ -50,12 +50,12 @@ struct SecondaryWorker {
 }
 
 impl CpuRuntime {
-    pub fn new(vm: &VirtualMachineInstance<GicEnabled>, entry_point: u64, x0: u64) -> Result<Self> {
+    pub fn new(vm: &VirtualMachineInstance<GicEnabled>, entry_point: u64, x0: u64, vcpus: usize) -> Result<Self> {
         let boot_vcpu = vm.vcpu_create()?;
         configure_vcpu(&boot_vcpu, BOOT_VCPU_ID)?;
         set_entry_state(&boot_vcpu, entry_point, x0)?;
 
-        let (secondaries, secondary_workers) = SecondaryCpus::new();
+        let (secondaries, secondary_workers) = SecondaryCpus::new(vcpus);
 
         Ok(Self {
             boot_vcpu,
@@ -83,11 +83,11 @@ impl CpuRuntime {
 }
 
 impl SecondaryCpus {
-    fn new() -> (Self, Vec<SecondaryWorker>) {
+    fn new(vcpus: usize) -> (Self, Vec<SecondaryWorker>) {
         let mut cpus = Vec::new();
         let mut workers = Vec::new();
 
-        for vcpu_id in FIRST_SECONDARY_VCPU_ID..NUM_VCPUS {
+        for vcpu_id in FIRST_SECONDARY_VCPU_ID..vcpus {
             let (boot_tx, boot_rx) = sync_channel(1);
             cpus.push(SecondaryCpu {
                 boot_tx,

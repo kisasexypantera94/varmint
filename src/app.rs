@@ -1,6 +1,7 @@
 use crate::{
     devices::{RuntimeEvent, RuntimeInputEvent},
-    display::{DisplayBuffer, DisplayEvent, Presenter},
+    display::{DisplayBuffer, DisplayEvent, PresentMode, Presenter},
+    macos_ui,
     virtio::input::keys::*,
 };
 use std::{
@@ -15,7 +16,7 @@ use winit::{
     event::{DeviceEvent, ElementState, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::{KeyCode, PhysicalKey},
-    window::{CursorGrabMode, Window, WindowId},
+    window::{CursorGrabMode, Fullscreen, Window, WindowId},
 };
 
 fn winit_to_linux_key(key: winit::keyboard::KeyCode) -> Option<u16> {
@@ -139,6 +140,7 @@ struct AppState<'a> {
     dirty_rect: Option<(usize, usize, usize, usize)>,
     iosurface_id: Option<u32>,
     last_seq: u64,
+    frame_pending: bool,
     next_keepalive: Instant,
 
     last_mouse_pos: Option<(f64, f64)>,
@@ -146,11 +148,7 @@ struct AppState<'a> {
     rel_mouse_frac_dx: f64,
     rel_mouse_frac_dy: f64,
 
-    stat_last: std::time::Instant,
-    stat_produced: u64,
-    stat_presented: u64,
-    stat_update_ns: u128,
-    stat_loops: u64,
+    stats_visible: bool,
 }
 
 impl<'a> AppState<'a> {
@@ -167,56 +165,52 @@ impl<'a> AppState<'a> {
             dirty_rect: None,
             iosurface_id: None,
             last_seq: 0,
+            frame_pending: false,
             next_keepalive: Instant::now(),
             last_mouse_pos: None,
             mouse_captured: false,
             rel_mouse_frac_dx: 0.0,
             rel_mouse_frac_dy: 0.0,
-            stat_last: std::time::Instant::now(),
-            stat_produced: 0,
-            stat_presented: 0,
-            stat_update_ns: 0,
-            stat_loops: 0,
+            stats_visible: false,
         }
     }
 
-    fn blit(&mut self, cached: bool) -> bool {
-        if cached {
-            self.next_keepalive = Instant::now() + PRESENT_KEEPALIVE;
+    fn present(&mut self, requested_mode: PresentMode) -> bool {
+        self.next_keepalive = Instant::now() + PRESENT_KEEPALIVE;
+
+        let mode = if self.frame_pending {
+            PresentMode::NewFrame
+        } else {
+            requested_mode
+        };
+
+        let Some(presenter) = self.presenter.as_mut() else {
+            return false;
+        };
+        if self.present_w == 0 || self.present_h == 0 {
+            return false;
         }
 
-        if let Some(p) = self.presenter.as_mut() {
-            if self.present_w > 0 && self.present_h > 0 {
-                let t0 = std::time::Instant::now();
+        let full = (0, 0, self.present_w, self.present_h);
+        let (x, y, width, height) = self.dirty_rect.unwrap_or(full);
+        let presented = presenter.present_iosurface_or_rect(
+            self.iosurface_id,
+            &self.front,
+            self.present_w as u32,
+            self.present_h as u32,
+            x as u32,
+            y as u32,
+            width as u32,
+            height as u32,
+            mode,
+        );
 
-                let full = (0, 0, self.present_w, self.present_h);
-                let (x, y, w, h) = self.dirty_rect.unwrap_or(full);
-
-                let presented = p.present_iosurface_or_rect(
-                    self.iosurface_id,
-                    &self.front,
-                    self.present_w as u32,
-                    self.present_h as u32,
-                    x as u32,
-                    y as u32,
-                    w as u32,
-                    h as u32,
-                    cached,
-                );
-
-                self.stat_update_ns += t0.elapsed().as_nanos();
-                if presented {
-                    self.stat_presented += 1;
-                    if !cached {
-                        self.dirty_rect = None;
-                    }
-                    self.next_keepalive = Instant::now() + PRESENT_KEEPALIVE;
-                }
-                return presented;
-            }
+        if presented && mode == PresentMode::NewFrame {
+            self.dirty_rect = None;
+            self.frame_pending = false;
         }
 
-        false
+        presented
     }
 
     fn poll_display(&mut self) -> bool {
@@ -224,11 +218,11 @@ impl<'a> AppState<'a> {
             return false;
         };
 
-        self.stat_produced += update.sequence.wrapping_sub(self.last_seq);
         self.last_seq = update.sequence;
         self.present_w = update.width;
         self.present_h = update.height;
         self.iosurface_id = update.iosurface_id;
+        self.frame_pending = true;
 
         let (x, y, w, h) = update.dirty_rect;
         if w != 0 && h != 0 {
@@ -290,25 +284,6 @@ impl<'a> AppState<'a> {
         *accum -= whole;
         whole.clamp(i32::MIN as f64, i32::MAX as f64) as i32
     }
-
-    fn print_stats(&mut self) {
-        if self.stat_last.elapsed() >= std::time::Duration::from_secs(1) {
-            let avg_ms = if self.stat_presented == 0 {
-                0.0
-            } else {
-                self.stat_update_ns as f64 / self.stat_presented as f64 / 1_000_000.0
-            };
-            eprintln!(
-                "display: loops={} produced={} presented={} avg_update_ms={:.3}",
-                self.stat_loops, self.stat_produced, self.stat_presented, avg_ms,
-            );
-            self.stat_loops = 0;
-            self.stat_produced = 0;
-            self.stat_presented = 0;
-            self.stat_update_ns = 0;
-            self.stat_last = std::time::Instant::now();
-        }
-    }
 }
 
 impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
@@ -316,6 +291,7 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
         let attrs = Window::default_attributes()
             .with_title("Varmint")
             .with_inner_size(LogicalSize::new(1024u32, 768u32))
+            .with_fullscreen(Some(Fullscreen::Borderless(None)))
             .with_resizable(true);
 
         let window = event_loop.create_window(attrs).unwrap();
@@ -324,14 +300,19 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
         self.surface_w = width;
         self.surface_h = height;
         self.presenter = Some(Presenter::new(window, width, height));
+        macos_ui::install_main_menu();
+        macos_ui::set_statistics_checked(self.stats_visible);
+        if let Some(presenter) = self.presenter.as_mut() {
+            presenter.set_stats_visible(self.stats_visible);
+        }
 
         let _ = self.host_tx.send(RuntimeEvent::DisplayResized {
             width: logical_size.width,
             height: logical_size.height,
         });
 
-        if self.poll_display() || self.dirty_rect.is_some() {
-            self.blit(false);
+        if self.poll_display() || self.frame_pending {
+            self.present(PresentMode::NewFrame);
         }
     }
 
@@ -362,11 +343,11 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
                     height: logical_size.height,
                 });
 
-                self.blit(false);
+                self.present(PresentMode::Redraw);
             }
 
             WindowEvent::RedrawRequested => {
-                self.blit(false);
+                self.present(PresentMode::Redraw);
             }
 
             WindowEvent::Focused(focused) => {
@@ -381,9 +362,6 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
                             self.set_mouse_capture(!self.mouse_captured);
                         }
                         return;
-                    }
-                    if pressed && code == KeyCode::F11 {
-                        self.set_mouse_capture(false);
                     }
                     if let Some(linux_code) = winit_to_linux_key(code) {
                         let _ = self.host_tx.send(RuntimeEvent::Input(RuntimeInputEvent::Key {
@@ -454,8 +432,8 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: DisplayEvent) {
         match event {
             DisplayEvent::Changed => {
-                if self.poll_display() || self.dirty_rect.is_some() {
-                    self.blit(false);
+                if self.poll_display() || self.frame_pending {
+                    self.present(PresentMode::NewFrame);
                 }
             }
         }
@@ -478,13 +456,23 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if macos_ui::take_toggle_statistics() {
+            self.stats_visible = !self.stats_visible;
+            macos_ui::set_statistics_checked(self.stats_visible);
+            if let Some(presenter) = self.presenter.as_mut() {
+                presenter.set_stats_visible(self.stats_visible);
+            }
+            self.present(PresentMode::Redraw);
+        }
+        if macos_ui::take_show_about() {
+            macos_ui::show_about();
+        }
+
         if Instant::now() >= self.next_keepalive {
-            self.blit(true);
+            self.present(PresentMode::Redraw);
         }
 
         event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_keepalive));
-        self.stat_loops += 1;
-        self.print_stats();
     }
 }
 

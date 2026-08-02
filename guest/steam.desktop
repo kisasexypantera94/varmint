@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Steam
+Comment=Launch Steam through FEX
+Exec=/usr/local/bin/varmint-steam
+Icon=steam
+Terminal=false
+Categories=Game;

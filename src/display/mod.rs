@@ -2,8 +2,9 @@ mod angle;
 mod iosurface;
 mod presenter;
 mod scanout;
+mod stats;
 
-pub use presenter::Presenter;
+pub use presenter::{PresentMode, Presenter};
 pub use scanout::ScanoutPublisher;
 use zerocopy::IntoBytes;
 

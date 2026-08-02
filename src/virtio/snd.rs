@@ -275,17 +275,11 @@ struct PendingPeriod {
     written: u32,
 }
 
-struct PendingRelease {
-    token: ChainToken,
-    written: u32,
-}
-
 pub struct Snd {
     period_sink: PeriodSink,
 
     stream: Stream,
     pending: VecDeque<PendingPeriod>,
-    pending_release: Option<PendingRelease>,
     next_period: u64,
 }
 
@@ -295,7 +289,6 @@ impl Snd {
             period_sink,
             stream: Stream::new(),
             pending: VecDeque::new(),
-            pending_release: None,
             next_period: 0,
         }
     }
@@ -330,7 +323,7 @@ impl Device for Snd {
             QueueType::Control | QueueType::Tx => {
                 while let Some(chain) = ctx.pop_chain(queue_idx) {
                     let action = match QueueType::try_from(queue_idx).unwrap() {
-                        QueueType::Control => self.control(&chain.data, chain.token, ctx.mem()),
+                        QueueType::Control => self.control(&chain.data, ctx),
                         QueueType::Tx => self.submit_period(&chain.data, chain.token, ctx.mem()),
                         _ => unreachable!(),
                     };
@@ -351,22 +344,22 @@ impl Device for Snd {
 }
 
 impl Snd {
-    fn control(&mut self, chain: &ChainData, token: ChainToken, mem: &GuestMemory) -> ChainAction {
-        let Some(hdr) = chain.read_obj::<Hdr>(0, mem) else {
+    fn control(&mut self, chain: &ChainData, ctx: &mut DeviceContext<'_>) -> ChainAction {
+        let Some(hdr) = chain.read_obj::<Hdr>(0, ctx.mem()) else {
             eprintln!("virtio-snd: unreadable control header");
-            return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
+            return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
         };
 
         match RequestCode::try_from(hdr.code) {
             Ok(RequestCode::PcmInfo) => {
-                let Some(q) = chain.read_obj::<QueryInfo>(0, mem) else {
-                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
+                let Some(q) = chain.read_obj::<QueryInfo>(0, ctx.mem()) else {
+                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 };
 
                 let (start, count) = (q.start_id, q.count);
 
                 if start + count > NUM_STREAMS {
-                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
+                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 }
 
                 let mut resp = Hdr {
@@ -389,15 +382,15 @@ impl Snd {
                     resp.extend_from_slice(info.as_bytes());
                 }
 
-                ChainAction::Complete(chain.write_response(&resp, mem))
+                ChainAction::Complete(chain.write_response(&resp, ctx.mem()))
             }
             Ok(RequestCode::PcmSetParams) => {
-                let Some(p) = chain.read_obj::<PcmSetParams>(0, mem) else {
-                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
+                let Some(p) = chain.read_obj::<PcmSetParams>(0, ctx.mem()) else {
+                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 };
 
                 if p.hdr.stream_id != STREAM_ID || matches!(self.stream.state, StreamState::Running) {
-                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
+                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 }
 
                 if p.format != PcmFormat::S16 as u8
@@ -405,12 +398,12 @@ impl Snd {
                     || p.channels != 2
                     || p.features != 0
                 {
-                    return ChainAction::Complete(self.respond_status(chain, Status::NotSupp, mem));
+                    return ChainAction::Complete(self.respond_status(chain, Status::NotSupp, ctx.mem()));
                 }
 
                 let (period, buffer) = (p.period_bytes, p.buffer_bytes);
                 if period == 0 || buffer % period != 0 || period % 4 != 0 {
-                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
+                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 }
 
                 self.stream.buffer_bytes = buffer;
@@ -420,75 +413,78 @@ impl Snd {
                 self.stream.rate = p.rate;
                 self.stream.state = StreamState::ParamsSet;
 
-                ChainAction::Complete(self.respond_status(chain, Status::Ok, mem))
+                ChainAction::Complete(self.respond_status(chain, Status::Ok, ctx.mem()))
             }
             Ok(RequestCode::PcmPrepare) => {
-                let Some(p) = chain.read_obj::<PcmHdr>(0, mem) else {
-                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
+                let Some(p) = chain.read_obj::<PcmHdr>(0, ctx.mem()) else {
+                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 };
 
                 if p.stream_id != STREAM_ID || matches!(self.stream.state, StreamState::Initial | StreamState::Running)
                 {
-                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
+                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 }
 
                 self.stream.state = StreamState::Prepared;
-                ChainAction::Complete(self.respond_status(chain, Status::Ok, mem))
+                ChainAction::Complete(self.respond_status(chain, Status::Ok, ctx.mem()))
             }
             Ok(RequestCode::PcmStart) => {
-                let Some(p) = chain.read_obj::<PcmHdr>(0, mem) else {
-                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
+                let Some(p) = chain.read_obj::<PcmHdr>(0, ctx.mem()) else {
+                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 };
 
                 if p.stream_id != STREAM_ID || !matches!(self.stream.state, StreamState::Prepared) {
-                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
+                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 }
 
                 self.stream.state = StreamState::Running;
-                ChainAction::Complete(self.respond_status(chain, Status::Ok, mem))
+                ChainAction::Complete(self.respond_status(chain, Status::Ok, ctx.mem()))
             }
             Ok(RequestCode::PcmStop) => {
-                let Some(p) = chain.read_obj::<PcmHdr>(0, mem) else {
-                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
+                let Some(p) = chain.read_obj::<PcmHdr>(0, ctx.mem()) else {
+                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 };
 
                 if p.stream_id != STREAM_ID || !matches!(self.stream.state, StreamState::Running) {
-                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
+                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 }
 
                 self.stream.state = StreamState::Prepared;
-                ChainAction::Complete(self.respond_status(chain, Status::Ok, mem))
+                ChainAction::Complete(self.respond_status(chain, Status::Ok, ctx.mem()))
             }
             Ok(RequestCode::PcmRelease) => {
-                let Some(p) = chain.read_obj::<PcmHdr>(0, mem) else {
-                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
+                let Some(p) = chain.read_obj::<PcmHdr>(0, ctx.mem()) else {
+                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 };
 
                 if p.stream_id != STREAM_ID
                     || !matches!(self.stream.state, StreamState::ParamsSet | StreamState::Prepared)
                 {
-                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
+                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 }
 
-                let written = self.respond_status(chain, Status::Ok, mem);
                 self.stream.state = StreamState::Initial;
 
-                if self.pending.is_empty() {
-                    ChainAction::Complete(written)
-                } else {
-                    self.pending_release = Some(PendingRelease { token, written });
-                    ChainAction::Deferred
+                while let Some(period) = self.pending.pop_front() {
+                    ctx.complete(period.token, period.written);
                 }
+
+                while let Some(period) = ctx.pop_chain(QueueType::Tx as usize) {
+                    let written = self.respond_pcm_status(&period.data, Status::IoErr, ctx.mem());
+                    ctx.complete(period.token, written);
+                }
+
+                ChainAction::Complete(self.respond_status(chain, Status::Ok, ctx.mem()))
             }
             Ok(RequestCode::ChmapInfo) => {
-                let Some(q) = chain.read_obj::<QueryInfo>(0, mem) else {
-                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
+                let Some(q) = chain.read_obj::<QueryInfo>(0, ctx.mem()) else {
+                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 };
                 let (start, count) = (q.start_id, q.count);
                 match start.checked_add(count) {
                     Some(end) if end <= NUM_CHMAPS => {}
                     _ => {
-                        return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem));
+                        return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                     }
                 }
 
@@ -511,14 +507,14 @@ impl Snd {
                     resp.extend_from_slice(info.as_bytes());
                 }
 
-                ChainAction::Complete(chain.write_response(&resp, mem))
+                ChainAction::Complete(chain.write_response(&resp, ctx.mem()))
             }
             Ok(RequestCode::JackInfo | RequestCode::JackRemap) => {
-                ChainAction::Complete(self.respond_status(chain, Status::NotSupp, mem))
+                ChainAction::Complete(self.respond_status(chain, Status::NotSupp, ctx.mem()))
             }
             Err(v) => {
                 eprintln!("virtio-snd: unknown control code: 0x{:x}", v.number);
-                ChainAction::Complete(self.respond_status(chain, Status::BadMsg, mem))
+                ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()))
             }
         }
     }
@@ -526,9 +522,14 @@ impl Snd {
     fn submit_period(&mut self, chain: &ChainData, token: ChainToken, mem: &GuestMemory) -> ChainAction {
         const PAYLOAD_OFFSET: usize = size_of::<PcmXfer>();
 
-        let Some(_pcm_xfer) = chain.read_obj::<PcmXfer>(0, mem) else {
+        let Some(pcm_xfer) = chain.read_obj::<PcmXfer>(0, mem) else {
             return ChainAction::Complete(0);
         };
+
+        if pcm_xfer.stream_id != STREAM_ID || !matches!(self.stream.state, StreamState::Prepared | StreamState::Running)
+        {
+            return ChainAction::Complete(self.respond_pcm_status(chain, Status::IoErr, mem));
+        }
 
         if chain
             .read_at(PAYLOAD_OFFSET, &mut self.stream.period_scratch, mem)
@@ -538,17 +539,10 @@ impl Snd {
         };
 
         if !self.period_sink.push(self.next_period, &self.stream.period_scratch) {
-            return ChainAction::Complete(0);
+            return ChainAction::Complete(self.respond_pcm_status(chain, Status::IoErr, mem));
         }
 
-        let written = chain.write_response(
-            PcmStatus {
-                status: Status::Ok as u32,
-                latency_bytes: 0, // TODO: get from CoreAudio,
-            }
-            .as_bytes(),
-            mem,
-        );
+        let written = self.respond_pcm_status(chain, Status::Ok, mem);
 
         self.pending.push_back(PendingPeriod {
             seq: self.next_period,
@@ -564,6 +558,14 @@ impl Snd {
     fn respond_status(&self, chain: &ChainData, status: Status, mem: &GuestMemory) -> u32 {
         let hdr = Hdr { code: status as u32 };
         chain.write_response(hdr.as_bytes(), mem)
+    }
+
+    fn respond_pcm_status(&self, chain: &ChainData, status: Status, mem: &GuestMemory) -> u32 {
+        let status = PcmStatus {
+            status: status as u32,
+            latency_bytes: 0,
+        };
+        chain.write_response(status.as_bytes(), mem)
     }
 }
 
@@ -583,11 +585,6 @@ impl ExternalEventHandler for Snd {
                     }
                     let p = self.pending.pop_front().unwrap();
                     ctx.complete(p.token, p.written);
-                }
-                if self.pending.is_empty() {
-                    if let Some(r) = self.pending_release.take() {
-                        ctx.complete(r.token, r.written);
-                    }
                 }
             }
         }

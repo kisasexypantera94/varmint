@@ -1,0 +1,22 @@
+[Unit]
+Description=Set up Varmint
+Wants=network-online.target systemd-time-wait-sync.service
+Requires=varmint-grow-root.service
+After=systemd-user-sessions.service network-online.target systemd-time-wait-sync.service varmint-grow-root.service
+Before=getty@tty1.service
+ConditionPathExists=!/var/lib/varmint/firstboot.done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/varmint-firstboot
+StandardInput=tty-force
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

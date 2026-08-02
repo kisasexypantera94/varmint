@@ -1,4 +1,5 @@
 use crate::{
+    clipboard,
     memory::GuestMemory,
     virtio::{
         chain::ChainData,
@@ -6,7 +7,7 @@ use crate::{
         device::{Device, DeviceContext, ExternalEventHandler},
     },
 };
-use std::{collections::VecDeque, sync::mpsc::Sender};
+use std::collections::VecDeque;
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes};
 
 const DEVICE_ID: u32 = 3;
@@ -66,17 +67,17 @@ const RX_CHUNK: usize = 4096;
 
 pub struct Console {
     config: ConsoleConfig,
-    clipboard_tx: Sender<Vec<u8>>,
+    clipboard: clipboard::Sink,
     rx_to_guest: VecDeque<Vec<u8>>,
     ctrl_to_guest: VecDeque<Vec<u8>>,
     port_open: bool,
 }
 
 impl Console {
-    pub fn new(clipboard_tx: Sender<Vec<u8>>) -> Console {
+    pub fn new(clipboard: clipboard::Sink) -> Console {
         Console {
             config: ConsoleConfig::new(),
-            clipboard_tx,
+            clipboard,
             rx_to_guest: VecDeque::new(),
             ctrl_to_guest: VecDeque::new(),
             port_open: false,
@@ -133,7 +134,7 @@ impl Console {
             eprintln!("console clip TX: failed to read {total} bytes from guest memory");
             return 0;
         }
-        let _ = self.clipboard_tx.send(buf);
+        self.clipboard.push(buf);
         0
     }
 

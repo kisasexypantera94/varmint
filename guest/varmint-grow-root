@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+
+root_device="$(findmnt -n -o SOURCE /)"
+parent="$(lsblk -dnro PKNAME "$root_device")"
+partition="$(lsblk -dnro PARTN "$root_device")"
+
+if [ -z "$parent" ] || [ -z "$partition" ]; then
+    echo "varmint-grow-root: cannot resolve root partition from $root_device" >&2
+    exit 1
+fi
+
+disk="/dev/$parent"
+sgdisk -e "$disk" >/dev/null 2>&1 || true
+
+status=0
+growpart "$disk" "$partition" >/dev/null 2>&1 || status=$?
+if [ "$status" -gt 1 ]; then
+    echo "varmint-grow-root: growpart failed for $disk partition $partition" >&2
+    exit "$status"
+fi
+
+resize2fs "$root_device"

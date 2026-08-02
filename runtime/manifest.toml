@@ -1,0 +1,29 @@
+schema_version = 1
+
+[runtime]
+minimum_macos = "26.0"
+architectures = ["arm64"]
+dylibs = [
+  "libvirglrenderer.1.dylib",
+  "libepoxy.0.dylib",
+  "libEGL.dylib",
+  "libGLESv2.dylib",
+  "libMoltenVK.dylib",
+]
+
+[dependencies.angle]
+repository = "https://github.com/utmapp/WebKit.git"
+commit = "ed78ab6e1a37f4f11583a0bd038f22ec91f3ff10"
+
+[dependencies.epoxy]
+repository = "https://github.com/utmapp/libepoxy.git"
+commit = "5014658f79e4d6872a1ad6754da9098ccd9d4fc5"
+
+[dependencies.moltenvk]
+repository = "https://github.com/utmapp/MoltenVK.git"
+commit = "111c14f3abf5c00118fc7a5b00c92d7abbf40f62"
+version = "1.4.2-utm-geometry"
+
+[dependencies.virglrenderer]
+repository = "https://github.com/utmapp/virglrenderer.git"
+commit = "d48a2d0d9a722fffd3f92c83e71d9426a4892a66"

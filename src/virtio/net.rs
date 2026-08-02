@@ -32,12 +32,12 @@ struct NetHeader {
 
 pub struct Net {
     mac: [u8; 6],
-    tx: Box<dyn Fn(Vec<u8>) + Send>,
+    backend: crate::net::Backend,
 }
 
 impl Net {
-    pub fn new(mac: [u8; 6], tx: impl Fn(Vec<u8>) + Send + 'static) -> Net {
-        Net { mac, tx: Box::new(tx) }
+    pub fn new(mac: [u8; 6], backend: crate::net::Backend) -> Net {
+        Net { mac, backend }
     }
 
     fn handle_tx(&self, chain: &crate::virtio::chain::ChainData, mem: &crate::memory::GuestMemory) -> u32 {
@@ -55,7 +55,7 @@ impl Net {
             return 0;
         }
 
-        (self.tx)(eth);
+        self.backend.write(&eth);
         0
     }
 
