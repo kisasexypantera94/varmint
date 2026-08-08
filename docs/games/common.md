@@ -4,25 +4,6 @@ This page covers common behavior and troubleshooting that applies to multiple ga
 
 Game-specific Proton versions, launch options and workarounds are listed on the individual game pages.
 
-## DirectX 9 games
-
-As a rule of thumb, use the following launch option for older DirectX 9 games:
-
-```text
-FEX_X87REDUCEDPRECISION=1 %command%
-```
-
-Many older games make heavy use of x87 floating-point instructions. Reduced x87 precision can significantly improve their performance under FEX.
-
-This option is part of the tested configuration for games such as:
-
-* Fallout 3
-* Fallout: New Vegas
-* The Witcher: Enhanced Edition
-* Dragon’s Dogma: Dark Arisen
-
-It is not required for every DirectX 9 game, so prefer the configuration listed on the game’s documentation page when one is available.
-
 ## Shader and pipeline warm-up
 
 Some games may stutter or occasionally crash during their first few runs as new shaders and graphics pipelines are encountered.

@@ -13,7 +13,11 @@ DEPS_SRC="$BUILD_ROOT/deps/src"
 DEPS_VENV="$BUILD_ROOT/deps/venv"
 APP_BUNDLE="$ROOT/dist/Varmint.app"
 MANIFEST="$ROOT/runtime/manifest.toml"
-MOLTENVK_PATCH="$ROOT/patches/moltenvk/0001-guard-null-multisample-state-in-mesh-pipeline.patch"
+MOLTENVK_PATCHES=(
+  "$ROOT/patches/moltenvk/0001-guard-null-multisample-state-in-mesh-pipeline.patch"
+  "$ROOT/patches/moltenvk/0002-fix-query-device-available-range.patch"
+  "$ROOT/patches/moltenvk/0003-fix-query-copy-availability-offset.patch"
+)
 ENTITLEMENTS="$ROOT/runtime/entitlements.plist"
 VMNET_HELPER_ENTITLEMENTS="$ROOT/runtime/vmnet-helper-entitlements.plist"
 ICON_SOURCE="$ROOT/assets/icon.icon"

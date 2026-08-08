@@ -56,10 +56,11 @@ See [Running games in Varmint](docs/games/common.md) for general setup and troub
 | [Fallout: New Vegas](docs/games/fallout-new-vegas.md)                                      |      ✅ |    🟢 |
 | [Fallout 3](docs/games/fallout-3.md)                                                       |      ✅ |    🟢 |
 | [Subnautica](docs/games/subnautica.md)                                                     |      ✅ |    🟢 |
+| [Portal 1-2](docs/games/portal.md)                                                         |      ✅ |    🟢 |
+| [Team Fortress 2](docs/games/team-fortress-2.md)                                           |      ✅ |    🟢 |
+| [Half-Life 2](docs/games/half-life-2.md)                                                   |      ✅ |    🟢 |
 
 <!-- | [Subnautica: Below Zero](docs/games/subnautica-below-zero.md)                              |      ✅ |    🟢 | -->
-<!-- | [Team Fortress 2](docs/games/team-fortress-2.md)                                           |      🟡 |    ⚪ | -->
-<!-- | [Portal 1-2](docs/games/portal.md)                                                         |      ❌ |    ⚪ | -->
 <!-- | [Age of Empires II: Definitive Edition](docs/games/age-of-empires-2-definitive-edition.md) |      ✅ |    🟠 | -->
 
 ## Demos

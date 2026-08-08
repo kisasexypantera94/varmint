@@ -11,7 +11,6 @@ Use the following configuration:
 ```text
 Proton version: Proton 10.0
 Renderer:       DirectX 9
-Launch options: FEX_X87REDUCEDPRECISION=1 %command%
 ```
 
 ### 1. Select Proton 10
@@ -23,15 +22,7 @@ In Steam:
 3. Enable **Force the use of a specific Steam Play compatibility tool**.
 4. Select **Proton 10.0**.
 
-### 2. Set the launch options
-
-In the game properties, enter the following as a single line under **Launch Options**:
-
-```text
-FEX_X87REDUCEDPRECISION=1 %command%
-```
-
-### 3. Convert the movie files
+### 2. Convert the movie files
 
 Make sure the game is installed and closed.
 
@@ -97,7 +88,7 @@ echo "Dragon's Dogma movie conversion complete."
 
 The script installs FFmpeg, keeps a backup of every original movie and replaces each game file only after successful conversion.
 
-### 4. Start the game
+### 3. Start the game
 
 Launch the game normally from Steam.
 
@@ -171,5 +162,4 @@ Steam App ID 367500
 Proton 10.0
 DirectX 9 through DXVK
 AVI/MJPEG movie conversion applied
-Launch options: FEX_X87REDUCEDPRECISION=1 %command%
 ```

@@ -1,0 +1,24 @@
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKQueryPool.h b/MoltenVK/MoltenVK/GPUObjects/MVKQueryPool.h
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKQueryPool.h
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKQueryPool.h
+@@ -92,7 +92,7 @@
+     /** Called from the MVKCmdBeginQuery command when it is added to the command buffer */
+     virtual void beginQueryAddedTo(uint32_t query, MVKCommandBuffer* cmdBuffer) {};
+
+-    /** Returns whether all the queries in [firstQuery, endQuery) are available on the device. */
+-    bool areQueriesDeviceAvailable(uint32_t firstQuery, uint32_t endQuery);
++    /** Returns whether queryCount queries starting at firstQuery are available on the device. */
++    bool areQueriesDeviceAvailable(uint32_t firstQuery, uint32_t queryCount);
+
+ #pragma mark Construction
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKQueryPool.mm b/MoltenVK/MoltenVK/GPUObjects/MVKQueryPool.mm
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKQueryPool.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKQueryPool.mm
+@@ -102,5 +102,6 @@
+
+-bool MVKQueryPool::areQueriesDeviceAvailable(uint32_t firstQuery, uint32_t endQuery) {
++bool MVKQueryPool::areQueriesDeviceAvailable(uint32_t firstQuery, uint32_t queryCount) {
++    uint32_t endQuery = firstQuery + queryCount;
+     for (uint32_t query = firstQuery; query < endQuery; query++) {
+         if ( _availability[query] < DeviceAvailable ) { return false; }
+     }

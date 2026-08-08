@@ -124,7 +124,8 @@ setup_fex() {
     "TSOEnabled": "0",
     "VectorTSOEnabled": "0",
     "MemcpySetTSOEnabled": "0",
-    "HalfBarrierTSOEnabled": "1"
+    "HalfBarrierTSOEnabled": "1",
+    "X87ReducedPrecision": "1"
   },
   "ThunksDB": {
     "Vulkan": 1

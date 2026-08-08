@@ -116,11 +116,13 @@ build_epoxy() {
 
 build_moltenvk() {
   local source="$DEPS_SRC/MoltenVK"
-  local package dylib
+  local package dylib patch
 
   log "MoltenVK"
   checkout_repo "$MOLTENVK_REPOSITORY" "$MOLTENVK_COMMIT" "$source"
-  apply_dependency_patch "$source" "$MOLTENVK_PATCH"
+  for patch in "${MOLTENVK_PATCHES[@]}"; do
+    apply_dependency_patch "$source" "$patch"
+  done
   (
     cd "$source"
     clean_env ./fetchDependencies --macos -v
@@ -191,7 +193,7 @@ verify_dependency_prefix() {
 dependency_recipe_hash() {
   cat \
     "$MANIFEST" \
-    "$MOLTENVK_PATCH" \
+    "${MOLTENVK_PATCHES[@]}" \
     "$COMMON_SCRIPT" \
     "$DEPENDENCIES_SCRIPT"
   printf '%s\n' "$SDK" "$ARCH" "$CONFIGURATION"
@@ -199,9 +201,11 @@ dependency_recipe_hash() {
 
 build_dependencies() {
   local stamp="$PREFIX/.varmint-dependencies"
-  local expected_stamp
+  local expected_stamp patch
 
-  need_file "$MOLTENVK_PATCH"
+  for patch in "${MOLTENVK_PATCHES[@]}"; do
+    need_file "$patch"
+  done
   require_commands git xcodebuild meson ninja pkg-config rsync \
     install_name_tool codesign lipo shasum
 
