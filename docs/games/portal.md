@@ -10,6 +10,7 @@ Use the following configuration:
 Runtime:           Native Linux
 Renderer:          Vulkan
 Graphics settings: Default
+Launch options:    -vulkan
 ```
 
 ### 1. Use the native Linux version
@@ -18,7 +19,11 @@ In Steam, leave **Force the use of a specific Steam Play compatibility tool** di
 
 ### 2. Launch the Vulkan version
 
-Start the game from Steam and select the Vulkan version when prompted.
+In the game properties, enter the following as a single line under **Launch Options**:
+
+```text
+-vulkan
+```
 
 No additional launch options are required.
 
