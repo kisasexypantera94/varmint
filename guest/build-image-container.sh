@@ -23,7 +23,8 @@ virt-customize --network -a "$work_image" \
     --copy-in "$SCRIPT_DIR/rootfs:/tmp" \
     --run-command 'cp -a /tmp/fex-install/. / && cp -a /tmp/rootfs/. / && rm -rf /tmp/fex-install /tmp/rootfs' \
     --run-command '/usr/local/libexec/varmint-provision' \
-    --run-command 'missing=""; for command in FEXBash FEXRootFSFetcher curl growpart resize2fs sgdisk sudo glxinfo pactl pulseaudio python3 unsquashfs vulkaninfo xclip; do command -v "$command" >/dev/null 2>&1 || missing="$missing $command"; done; [ -z "$missing" ] || { echo "missing required guest commands:$missing" >&2; exit 1; }' \
+    --run-command 'missing=""; for command in FEXBash FEXRootFSFetcher curl e2fsck fsck growpart resize2fs sgdisk sudo glxinfo pactl pulseaudio python3 unsquashfs update-initramfs vulkaninfo xclip; do command -v "$command" >/dev/null 2>&1 || missing="$missing $command"; done; [ -z "$missing" ] || { echo "missing required guest commands:$missing" >&2; exit 1; }' \
+    --run-command 'for initrd in /boot/initrd.img-*; do listing="$(lsinitramfs "$initrd")"; printf "%s\n" "$listing" | grep -Eq "(^|/)sbin/fsck$" && printf "%s\n" "$listing" | grep -Eq "(^|/)sbin/e2fsck$" && printf "%s\n" "$listing" | grep -Eq "(^|/)sbin/fsck.ext4$" || { echo "initramfs is missing ext4 fsck tools: $initrd" >&2; exit 1; }; done' \
     --run-command 'test -f /usr/share/fex-emu/GuestThunks/libvulkan-guest.so && test -f /usr/lib/aarch64-linux-gnu/fex-emu/HostThunks/libvulkan-host.so && test -f /usr/lib/aarch64-linux-gnu/fex-emu/HostThunks_32/libvulkan-host.so' \
     --run-command 'systemctl enable varmint-grow-root.service varmint-firstboot.service' \
     --run-command 'passwd -l root' \

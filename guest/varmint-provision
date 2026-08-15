@@ -77,6 +77,14 @@ apt-get install -y --no-install-recommends -t trixie-backports \
     libglx-mesa0 \
     mesa-vulkan-drivers
 
+# The stock cloud initramfs may not contain fsck even though e2fsprogs is
+# installed in the root filesystem. Rebuild it with the Varmint hook so a
+# dirty ext4 root is repaired before it is mounted and grown online.
+command -v fsck >/dev/null 2>&1
+command -v e2fsck >/dev/null 2>&1
+command -v update-initramfs >/dev/null 2>&1
+update-initramfs -u -k all
+
 # Keep PulseAudio's udev-managed ALSA card lifecycle, but disable timer-based
 # scheduling for virtio-snd and use a fixed 4 x 10 ms playback buffer.
 sed -i \
@@ -127,6 +135,17 @@ install -d -m 0755 /etc/udev/rules.d
 cat > /etc/udev/rules.d/70-varmint-clipboard.rules <<'EOF_UDEV'
 SUBSYSTEM=="virtio-ports", ATTR{name}=="clipboard", MODE="0660", TAG+="uaccess"
 EOF_UDEV
+
+# Host keys are deliberately removed from the published image so cloned VMs do
+# not share an SSH identity. Generate them immediately before sshd validates its
+# configuration, independently of the interactive first-boot provisioning.
+install -d -m 0755 /etc/systemd/system/ssh.service.d
+cat > /etc/systemd/system/ssh.service.d/varmint-hostkeys.conf <<'EOF_SSH'
+[Service]
+ExecStartPre=
+ExecStartPre=/usr/bin/ssh-keygen -A
+ExecStartPre=/usr/sbin/sshd -t
+EOF_SSH
 
 systemctl enable openssh-server.service >/dev/null 2>&1 || true
 systemctl enable systemd-timesyncd.service >/dev/null 2>&1 || true

@@ -6,24 +6,11 @@ Game-specific Proton versions, launch options and workarounds are listed on the 
 
 ## Shader and pipeline warm-up
 
-Some games may stutter or occasionally crash during their first few runs as new shaders and graphics pipelines are encountered.
+Some games may stutter during their first runs as new graphics pipelines are compiled by the host graphics stack.
 
-Later runs are often smoother because DXVK and the graphics stack can reuse cached pipeline information.
+The results are cached by macOS, so later runs are usually much smoother. New areas, effects or rendering states can still cause brief first-time stutters.
 
-For normal gameplay:
-
-* leave the DXVK state and shader caches enabled;
-* retry the game before changing its configuration after a one-off pipeline crash;
-* expect new areas, effects or combat encounters to stutter more on their first appearance.
-
-Do not normally use:
-
-```text
-DXVK_STATE_CACHE=0
-DXVK_SHADER_CACHE=0
-```
-
-Disabling the caches can make both stuttering and graphics-pipeline failures substantially more reproducible.
+For normal gameplay, keep the default shader and pipeline caches enabled and avoid clearing them unless you are debugging.
 
 ## Audio recovery
 
@@ -63,7 +50,7 @@ Steam and Proton may need to:
 * create the game’s Proton prefix;
 * install runtime components;
 * process shader-cache data;
-* initialize DXVK caches.
+* initialize graphics caches.
 
 A blank window or a long pause during the first launch does not always mean the game has failed. Later launches are usually faster.
 

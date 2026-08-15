@@ -185,7 +185,6 @@ main() {
     printf '%s\n\n' 'Varmint first boot'
     create_user
 
-    command -v ssh-keygen >/dev/null 2>&1 && ssh-keygen -A
     passwd -l root >/dev/null 2>&1 || true
 
     printf '\nPreparing the gaming environment. This may take a few minutes...\n'

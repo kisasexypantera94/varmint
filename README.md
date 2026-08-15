@@ -1,5 +1,5 @@
 <p align="left">
-  <img src="./assets/icon.png" width="150">
+  <img src="./assets/icon.png" width="100">
 </p>
 
 # varmint
@@ -59,6 +59,8 @@ See [Running games in Varmint](docs/games/common.md) for general setup and troub
 | [Portal 1-2](docs/games/portal.md)                                                         |      ✅ |    🟢 |
 | [Team Fortress 2](docs/games/team-fortress-2.md)                                           |      ✅ |    🟢 |
 | [Half-Life 2](docs/games/half-life-2.md)                                                   |      ✅ |    🟢 |
+| [Dishonored](docs/games/dishonored.md)                                                     |      ✅ |    🟢 |
+| [Deus Ex: Human Revolution](docs/games/deus-ex-human-revolution.md)                         |      ✅ |    🟢 |
 
 <!-- | [Subnautica: Below Zero](docs/games/subnautica-below-zero.md)                              |      ✅ |    🟢 | -->
 <!-- | [Age of Empires II: Definitive Edition](docs/games/age-of-empires-2-definitive-edition.md) |      ✅ |    🟠 | -->

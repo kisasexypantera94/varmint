@@ -91,6 +91,7 @@ RUN install -Dm0755 /opt/varmint/source/build-image-container.sh /usr/local/bin/
     install -Dm0755 /opt/varmint/source/varmint-firstboot /opt/varmint/rootfs/usr/local/libexec/varmint-firstboot && \
     install -Dm0755 /opt/varmint/source/varmint-grow-root /opt/varmint/rootfs/usr/local/libexec/varmint-grow-root && \
     install -Dm0755 /opt/varmint/source/varmint-provision /opt/varmint/rootfs/usr/local/libexec/varmint-provision && \
+    install -Dm0755 /opt/varmint/source/varmint-initramfs-fsck-hook /opt/varmint/rootfs/etc/initramfs-tools/hooks/varmint-fsck && \
     install -Dm0644 /opt/varmint/source/varmint-firstboot.service /opt/varmint/rootfs/etc/systemd/system/varmint-firstboot.service && \
     install -Dm0644 /opt/varmint/source/varmint-grow-root.service /opt/varmint/rootfs/etc/systemd/system/varmint-grow-root.service && \
     install -Dm0644 /opt/varmint/source/varmint-clipboard.desktop /opt/varmint/rootfs/etc/xdg/autostart/varmint-clipboard.desktop && \
