@@ -281,6 +281,8 @@ pub struct Snd {
     stream: Stream,
     pending: VecDeque<PendingPeriod>,
     next_period: u64,
+    consumed_through: Option<u64>,
+    tx_completions_since_notify: usize,
 }
 
 impl Snd {
@@ -290,6 +292,8 @@ impl Snd {
             stream: Stream::new(),
             pending: VecDeque::new(),
             next_period: 0,
+            consumed_through: None,
+            tx_completions_since_notify: 0,
         }
     }
 }
@@ -320,17 +324,30 @@ impl Device for Snd {
 
     fn queue_notified(&mut self, queue_idx: usize, ctx: &mut DeviceContext<'_>) {
         match QueueType::try_from(queue_idx).unwrap() {
-            QueueType::Control | QueueType::Tx => {
+            QueueType::Control => {
                 while let Some(chain) = ctx.pop_chain(queue_idx) {
-                    let action = match QueueType::try_from(queue_idx).unwrap() {
-                        QueueType::Control => self.control(&chain.data, ctx),
-                        QueueType::Tx => self.submit_period(&chain.data, chain.token, ctx.mem()),
-                        _ => unreachable!(),
-                    };
-
-                    if let ChainAction::Complete(written) = action {
+                    if let ChainAction::Complete(written) = self.control(&chain.data, ctx) {
                         ctx.complete(chain.token, written);
                     }
+                }
+            }
+            QueueType::Tx => {
+                let mut added = false;
+
+                while let Some(chain) = ctx.pop_chain(queue_idx) {
+                    if !added {
+                        self.tx_completions_since_notify = 0;
+                        added = true;
+                    }
+
+                    if let ChainAction::Complete(written) = self.submit_period(&chain.data, chain.token, ctx.mem()) {
+                        ctx.complete(chain.token, written);
+                        self.tx_completions_since_notify += 1;
+                    }
+                }
+
+                if added {
+                    self.publish_consumed(ctx);
                 }
             }
             QueueType::Event | QueueType::Rx => {}
@@ -338,7 +355,10 @@ impl Device for Snd {
     }
 
     fn reset(&mut self) {
+        self.period_sink.reset();
         self.pending.clear();
+        self.consumed_through = None;
+        self.tx_completions_since_notify = 0;
         self.stream = Stream::new();
     }
 }
@@ -438,6 +458,7 @@ impl Snd {
                 }
 
                 self.stream.state = StreamState::Running;
+                self.period_sink.start();
                 ChainAction::Complete(self.respond_status(chain, Status::Ok, ctx.mem()))
             }
             Ok(RequestCode::PcmStop) => {
@@ -449,6 +470,7 @@ impl Snd {
                     return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 }
 
+                self.period_sink.stop();
                 self.stream.state = StreamState::Prepared;
                 ChainAction::Complete(self.respond_status(chain, Status::Ok, ctx.mem()))
             }
@@ -463,7 +485,10 @@ impl Snd {
                     return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 }
 
+                self.period_sink.reset();
                 self.stream.state = StreamState::Initial;
+                self.consumed_through = None;
+                self.tx_completions_since_notify = 0;
 
                 while let Some(period) = self.pending.pop_front() {
                     ctx.complete(period.token, period.written);
@@ -555,6 +580,36 @@ impl Snd {
         ChainAction::Deferred
     }
 
+    fn publish_consumed(&mut self, ctx: &mut DeviceContext<'_>) {
+        let Some(consumed_through) = self.consumed_through else {
+            return;
+        };
+
+        let period_bytes = self.stream.period_scratch.len();
+        let periods = if period_bytes == 0 {
+            1
+        } else {
+            self.stream.buffer_bytes as usize / period_bytes
+        };
+
+        // virtio-snd driver can miss a full buffer wrap when completions are batched.
+        // Keep one period pending until the guest refills the TX queue.
+        let max_without_refill = periods.saturating_sub(1).max(1);
+
+        while self.tx_completions_since_notify < max_without_refill {
+            let Some(front) = self.pending.front() else {
+                break;
+            };
+            if front.seq > consumed_through {
+                break;
+            }
+
+            let period = self.pending.pop_front().unwrap();
+            ctx.complete(period.token, period.written);
+            self.tx_completions_since_notify += 1;
+        }
+    }
+
     fn respond_status(&self, chain: &ChainData, status: Status, mem: &GuestMemory) -> u32 {
         let hdr = Hdr { code: status as u32 };
         chain.write_response(hdr.as_bytes(), mem)
@@ -579,13 +634,8 @@ impl ExternalEventHandler for Snd {
     fn on_event(&mut self, event: ExternalEvent, ctx: &mut DeviceContext<'_>) {
         match event {
             ExternalEvent::PeriodElapsed(seq) => {
-                while let Some(front) = self.pending.front() {
-                    if front.seq > seq {
-                        break;
-                    }
-                    let p = self.pending.pop_front().unwrap();
-                    ctx.complete(p.token, p.written);
-                }
+                self.consumed_through = Some(seq);
+                self.publish_consumed(ctx);
             }
         }
     }
