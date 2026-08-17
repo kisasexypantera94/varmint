@@ -10,7 +10,7 @@ Use the following configuration:
 Game version:   Classic
 Proton version: Proton 9.0
 Renderer:       DirectX 11
-Launch options: None
+Launch options: FEX_X87REDUCEDPRECISION=0 %command%
 ```
 
 ### 1. Select the Classic version
@@ -29,13 +29,25 @@ In the game properties:
 2. Enable **Force the use of a specific Steam Play compatibility tool**.
 3. Select **Proton 9.0**.
 
-### 3. Use DirectX 11
+### 3. Disable reduced x87 precision
+
+Set the following Steam launch option:
+
+```text
+FEX_X87REDUCEDPRECISION=0 %command%
+```
+
+Varmint currently enables reduced x87 precision by default for compatibility with some older games.
+
+This breaks the 32-bit REDlauncher installer and causes it to fail with a `Path not found` error. Disabling it for The Witcher 3 allows REDlauncher to install and run normally.
+
+### 4. Use DirectX 11
 
 In RED launcher select the DirectX 11 version of the game.
 
 The DirectX 12 version does not currently work in Varmint.
 
-### 4. Configure graphics
+### 5. Configure graphics
 
 For higher graphics settings, start from the Medium preset and enable each High feature manually. **Keep NVIDIA-specific features disabled, including HairWorks**.
 
@@ -67,6 +79,7 @@ The cache does not necessarily fix the broken pipeline itself. It appears to mak
 ## Known limitations
 
 * only the DirectX 11 version currently works;
+* `FEX_X87REDUCEDPRECISION` must be disabled for REDlauncher;
 * NVIDIA-specific graphics features are unsupported;
 * the game may require several warm-up runs before becoming stable;
 * occasional graphics-pipeline crashes may still occur.
@@ -78,6 +91,7 @@ The Witcher 3: Wild Hunt
 Steam Classic branch
 Proton 9.0
 DirectX 11
+FEX_X87REDUCEDPRECISION=0
 DXVK caches enabled
 NVIDIA HairWorks disabled
 ```
