@@ -79,7 +79,7 @@ impl Worker {
         let Self { rx, irq, tx } = self;
         let mut renderer = build_virglrenderer(tx).expect("virglrenderer init failed");
         let mut scanout = ScanoutPublisher::new(display, display_proxy.clone());
-        let gpu_dev = virtio::Gpu::new(&mut renderer, move |frame| scanout.present(frame));
+        let gpu_dev = virtio::Gpu::new(&mut renderer, move |frame| scanout.present(frame), mem.size() as u64);
         let mut gpu = virtio::MmioTransport::new(gpu_dev, irq);
 
         while let Ok(req) = rx.recv() {

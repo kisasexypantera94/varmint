@@ -155,6 +155,20 @@ fn validate_boot_layout(memory_size: usize, image_size: usize, initrd: Option<&[
     }
 }
 
+fn configure_ipa_size(vm_cfg: &mut VirtualMachineConfig, memory_size: usize) -> Result<()> {
+    let shm_end = RAM_START
+        .checked_add(memory_size as u64)
+        .and_then(|end| end.checked_add(virtio::gpu::HOST_VISIBLE_SHM_SIZE))
+        .unwrap_or_else(|| panic!("GPU SHM address range overflows"));
+    let ipa_bits =
+        (u64::BITS - shm_end.saturating_sub(1).leading_zeros()).max(VirtualMachineConfig::get_default_ipa_size()?);
+    let max_ipa = VirtualMachineConfig::get_max_ipa_size()?;
+    if ipa_bits > max_ipa {
+        panic!("memory size exceeds the Hypervisor.framework IPA limit of {max_ipa} bits");
+    }
+    vm_cfg.set_ipa_size(ipa_bits)
+}
+
 pub fn run(config_path: &Path) -> Result<()> {
     let config = VmConfig::load(config_path);
     prepare_disk(&config).unwrap_or_else(|error| {
@@ -190,6 +204,7 @@ pub fn run(config_path: &Path) -> Result<()> {
 
     let mut vm_cfg = VirtualMachineConfig::new();
     vm_cfg.set_ipa_granule(IpaGranule::HV_IPA_GRANULE_4KB)?;
+    configure_ipa_size(&mut vm_cfg, config.memory_size)?;
     let vm = VirtualMachine::with_gic(vm_cfg, gic_config)?;
 
     let display = Mutex::new(DisplayBuffer::new());

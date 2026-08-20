@@ -1,5 +1,6 @@
 //! https://docs.oasis-open.org/virtio/virtio/v1.3/csd01/virtio-v1.3-csd01.html#x1-4040006
 use crate::{
+    machine::RAM_START,
     memory::GuestMemory,
     virtio::{
         chain::ChainData,
@@ -27,8 +28,7 @@ const BYTES_PER_PIXEL: usize = 4;
 const EVENT_DISPLAY: u32 = 1;
 
 const HOST_VISIBLE_SHM_ID: u64 = 1;
-const HOST_VISIBLE_SHM_BASE: u64 = 0x8_0000_0000;
-const HOST_VISIBLE_SHM_SIZE: u64 = 4 * 1024 * 1024 * 1024;
+pub const HOST_VISIBLE_SHM_SIZE: u64 = 4 * 1024 * 1024 * 1024;
 const APPLE_HV_PAGE_SIZE: usize = 0x1000;
 
 const MAP_CACHE_MASK: u32 = 0x0f;
@@ -562,12 +562,14 @@ pub struct Gpu<'a> {
     submit_buf: Vec<u8>,
     renderer: &'a mut VirglRenderer,
     on_present: Box<dyn for<'frame> FnMut(Presentation<'frame>) -> bool + 'a>,
+    shm_base: u64,
 }
 
 impl<'a> Gpu<'a> {
     pub fn new(
         renderer: &'a mut VirglRenderer,
         on_present: impl for<'frame> FnMut(Presentation<'frame>) -> bool + 'a,
+        memory_size: u64,
     ) -> Gpu<'a> {
         Gpu {
             resources: HashMap::new(),
@@ -580,6 +582,7 @@ impl<'a> Gpu<'a> {
             submit_buf: Vec::new(),
             renderer,
             on_present: Box::new(on_present),
+            shm_base: RAM_START + memory_size,
         }
     }
 }
@@ -635,7 +638,7 @@ impl<'a> Device for Gpu<'a> {
     fn shared_memory_region(&self, id: u32) -> Option<ShmRegion> {
         if id as u64 == HOST_VISIBLE_SHM_ID {
             Some(ShmRegion {
-                base: HOST_VISIBLE_SHM_BASE,
+                base: self.shm_base,
                 len: HOST_VISIBLE_SHM_SIZE,
             })
         } else {
@@ -1756,7 +1759,7 @@ impl<'a> Gpu<'a> {
             }
         };
 
-        let guest_addr = HOST_VISIBLE_SHM_BASE + offset;
+        let guest_addr = self.shm_base + offset;
 
         let mapping = match BlobMapping::map(map_ptr, guest_addr, size as usize) {
             Ok(mapping) => mapping,
