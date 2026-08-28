@@ -56,6 +56,8 @@ values = {
     "MOLTENVK_VERSION": dependencies["moltenvk"]["version"],
     "VIRGL_REPOSITORY": dependencies["virglrenderer"]["repository"],
     "VIRGL_COMMIT": dependencies["virglrenderer"]["commit"],
+    "DXMT_REPOSITORY": dependencies["dxmt"]["repository"],
+    "DXMT_COMMIT": dependencies["dxmt"]["commit"],
 }
 for key, value in values.items():
     print(f"{key}={shlex.quote(str(value))}")

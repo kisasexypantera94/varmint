@@ -18,6 +18,12 @@ MOLTENVK_PATCHES=(
   "$ROOT/patches/moltenvk/0002-fix-query-device-available-range.patch"
   "$ROOT/patches/moltenvk/0003-fix-query-copy-availability-offset.patch"
 )
+VIRGL_PATCHES=(
+  "$ROOT/patches/virglrenderer/0001-fix-neptune-renderer-lifecycle.patch"
+)
+DXMT_PATCHES=(
+  "$ROOT/patches/dxmt/0001-fix-neptune-staging-and-vertex-sample-flicker.patch"
+)
 ENTITLEMENTS="$ROOT/runtime/entitlements.plist"
 VMNET_HELPER_ENTITLEMENTS="$ROOT/runtime/vmnet-helper-entitlements.plist"
 ICON_SOURCE="$ROOT/assets/icon.icon"

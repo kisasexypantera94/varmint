@@ -9,6 +9,7 @@ dylibs = [
   "libEGL.dylib",
   "libGLESv2.dylib",
   "libMoltenVK.dylib",
+  "libdxmt-native.dylib",
 ]
 
 [dependencies.angle]
@@ -21,9 +22,13 @@ commit = "5014658f79e4d6872a1ad6754da9098ccd9d4fc5"
 
 [dependencies.moltenvk]
 repository = "https://github.com/utmapp/MoltenVK.git"
-commit = "111c14f3abf5c00118fc7a5b00c92d7abbf40f62"
+commit = "ef1c5461774f5fbd224ddcfd91fd2c0ea23f0384"
 version = "1.4.2-utm-geometry"
 
 [dependencies.virglrenderer]
 repository = "https://github.com/utmapp/virglrenderer.git"
-commit = "d48a2d0d9a722fffd3f92c83e71d9426a4892a66"
+commit = "39810b663aed9beee61e72b8386a8dd08041c6b4"
+
+[dependencies.dxmt]
+repository = "https://github.com/utmapp/dxmt.git"
+commit = "822ae637a39512ddbd8e0bbd7744af514670c9d3"

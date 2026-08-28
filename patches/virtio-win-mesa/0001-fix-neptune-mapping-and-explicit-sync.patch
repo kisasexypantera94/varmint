@@ -1,0 +1,76 @@
+diff --git a/src/virtio/neptune/npt_overrides_d3d11_context.c b/src/virtio/neptune/npt_overrides_d3d11_context.c
+index c627e2b7d17..75f2bcc6478 100644
+--- a/src/virtio/neptune/npt_overrides_d3d11_context.c
++++ b/src/virtio/neptune/npt_overrides_d3d11_context.c
+@@ -168,6 +168,9 @@ ctx_Map_texture(void *self, struct npt_d3d11_texture *t, UINT Subresource,
+ 
+    uint32_t mip_h = 0, mip_d = 0;
+    npt_d3d11_texture_get_mip_dimensions(t, Subresource, &mip_h, &mip_d);
++   const uint32_t map_rows =
++      npt_dxgi_format_subresource_rows(npt_d3d11_texture_get_format(t),
++                                       mip_h);
+ 
+    uint32_t row_pitch = 0, depth_pitch = 0;
+    HRESULT hr = npt_dispatch_resource_map(
+@@ -175,7 +178,7 @@ ctx_Map_texture(void *self, struct npt_d3d11_texture *t, UINT Subresource,
+       npt_d3d11_map_to_access_flags(MapType), MapFlags,
+       npt_d3d11_texture_get_map_shmem_res_id(t),
+       /*byte_size=*/per_slot,
+-      mip_h, mip_d,
++      map_rows, mip_d,
+       /*shmem_offset=*/npt_d3d11_texture_slot_offset(t, 0),
+       &row_pitch, &depth_pitch);
+    if (NPT_FAILED(hr))
+diff --git a/src/virtio/neptune/npt_resource.c b/src/virtio/neptune/npt_resource.c
+index 6042100a4d8..973b92e11e8 100644
+--- a/src/virtio/neptune/npt_resource.c
++++ b/src/virtio/neptune/npt_resource.c
+@@ -760,7 +760,7 @@ bool
+ npt_d3d11_texture_has_desc(const struct npt_d3d11_texture *t)
+ {
+    const struct npt_d3d11_texture_aux *aux = tex_aux(t);
+-   return aux && aux->bytes_per_pixel != 0;
++   return aux && aux->width != 0;
+ }
+ 
+ bool
+@@ -768,8 +768,8 @@ npt_d3d11_texture_is_mappable(const struct npt_d3d11_texture *t)
+ {
+    const struct npt_d3d11_texture_aux *aux = tex_aux(t);
+    if (!aux) return false;
+-   if (aux->bytes_per_pixel == 0 ||
+-       aux->width == 0 || aux->height == 0 || aux->depth == 0)
++   if (aux->width == 0 || aux->height == 0 || aux->depth == 0 ||
++       npt_dxgi_format_row_bytes(aux->format, aux->width) == 0)
+       return false;
+    if (aux->usage == D3D11_USAGE_DYNAMIC)
+       return (aux->cpu_access_flags & D3D11_CPU_ACCESS_WRITE) != 0;
+@@ -891,10 +891,13 @@ npt_d3d11_texture_ensure_map_shmem(struct npt_d3d11_texture *t)
+    if (!npt_d3d11_texture_is_mappable(t)) return false;
+    struct npt_d3d11_texture_aux *aux = tex_aux(t);
+    if (!aux) return false;
+-   const uint32_t row_bytes = aux->width * aux->bytes_per_pixel;
++   const uint32_t row_bytes =
++      npt_dxgi_format_row_bytes(aux->format, aux->width);
++   const uint32_t rows =
++      npt_dxgi_format_subresource_rows(aux->format, aux->height);
+    const uint32_t aligned_row_pitch = (row_bytes + 255u) & ~255u;
+    const uint64_t per_slot = (uint64_t)aligned_row_pitch *
+-                             (uint64_t)aux->height *
++                             (uint64_t)rows *
+                              (uint64_t)aux->depth;
+    const uint64_t aligned_slot = (per_slot + 63u) & ~(uint64_t)63u;
+    /* Per-slot cap; slots are lazily allocated up to NPT_D3D_MAP_SLOT_MAX. */
+diff --git a/src/virtio/neptune/nptunix/meson.build b/src/virtio/neptune/nptunix/meson.build
+index 8d5a8ae22af..424d2e206bf 100644
+--- a/src/virtio/neptune/nptunix/meson.build
++++ b/src/virtio/neptune/nptunix/meson.build
+@@ -48,7 +48,7 @@
+ npt_dep_xcb_dri3_new = dependency('xcb-dri3',
+                                    version : '>= 1.16', native : true,
+                                    required : false)
+-npt_have_explicit_sync = npt_dep_xcb_dri3_new.found()
++npt_have_explicit_sync = false
+ 
+ if npt_have_explicit_sync
+   npt_dep_xcb_dri3    = npt_dep_xcb_dri3_new

@@ -157,14 +157,19 @@ prepare_python() {
 
 build_virglrenderer() {
   local source="$DEPS_SRC/virglrenderer"
+  local patch
 
   log "virglrenderer"
   checkout_repo "$VIRGL_REPOSITORY" "$VIRGL_COMMIT" "$source"
+  for patch in "${VIRGL_PATCHES[@]}"; do
+    apply_dependency_patch "$source" "$patch"
+  done
   prepare_python
   (
     export PATH="$DEPS_VENV/bin:$PATH"
     meson_install "$source" \
       -Dvenus=true \
+      -Dneptune=true \
       -Dvulkan-dload=false \
       -Dplatforms=egl \
       -Drender-server-worker=thread \
@@ -178,6 +183,31 @@ build_virglrenderer() {
   codesign_file "$PREFIX/lib/libvirglrenderer.1.dylib"
 }
 
+build_dxmt() {
+  local source="$DEPS_SRC/dxmt"
+  local llvm_path patch
+
+  log "DXMT"
+  checkout_repo "$DXMT_REPOSITORY" "$DXMT_COMMIT" "$source"
+  git -C "$source" submodule update --init --recursive
+
+  for patch in "${DXMT_PATCHES[@]}"; do
+    apply_dependency_patch "$source" "$patch"
+  done
+
+  llvm_path="${DXMT_LLVM_PATH:-}"
+  if [ -z "$llvm_path" ]; then
+    need_cmd brew
+    llvm_path="$(brew --prefix llvm@15)"
+  fi
+  [ -d "$llvm_path" ] || die "DXMT LLVM 15 not found: $llvm_path"
+
+  meson_install "$source"     --buildtype=release     -Dnative_llvm_path="$llvm_path"     -Denable_tests=false     -Denable_nvapi=false     -Denable_d3d12=false
+
+  need_file "$PREFIX/lib/libdxmt-native.dylib"
+  codesign_file "$PREFIX/lib/libdxmt-native.dylib"
+}
+
 verify_dependency_prefix() {
   local dylib
   require_commands lipo pkg-config
@@ -187,13 +217,15 @@ verify_dependency_prefix() {
     lipo -archs "$PREFIX/lib/$dylib" | tr ' ' '\n' | grep -qx "$ARCH" \
       || die "$dylib does not contain $ARCH"
   done
-  PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" pkg-config --exists epoxy egl glesv2 vulkan
+  PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"     pkg-config --exists epoxy egl glesv2 vulkan dxmt-native
 }
 
 dependency_recipe_hash() {
   cat \
     "$MANIFEST" \
     "${MOLTENVK_PATCHES[@]}" \
+    "${VIRGL_PATCHES[@]}" \
+    "${DXMT_PATCHES[@]}" \
     "$COMMON_SCRIPT" \
     "$DEPENDENCIES_SCRIPT"
   printf '%s\n' "$SDK" "$ARCH" "$CONFIGURATION"
@@ -203,7 +235,11 @@ build_dependencies() {
   local stamp="$PREFIX/.varmint-dependencies"
   local expected_stamp patch
 
-  for patch in "${MOLTENVK_PATCHES[@]}"; do
+  for patch in \
+    "${MOLTENVK_PATCHES[@]}" \
+    "${VIRGL_PATCHES[@]}" \
+    "${DXMT_PATCHES[@]}"
+  do
     need_file "$patch"
   done
   require_commands git xcodebuild meson ninja pkg-config rsync \
@@ -224,6 +260,7 @@ build_dependencies() {
   build_epoxy
   build_moltenvk
   build_virglrenderer
+  build_dxmt
   verify_dependency_prefix
   printf '%s\n' "$expected_stamp" > "$stamp"
   commit_dependency_prefix_update
