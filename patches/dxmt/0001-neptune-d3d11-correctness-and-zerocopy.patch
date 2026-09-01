@@ -1,0 +1,503 @@
+diff --git a/src/airconv/airconv_public.h b/src/airconv/airconv_public.h
+index cc1be7b..c7d7a99 100644
+--- a/src/airconv/airconv_public.h
++++ b/src/airconv/airconv_public.h
+@@ -5,7 +5,7 @@
+ #ifndef __AIRCONV_H
+ #define __AIRCONV_H
+ 
+-#define AIRCONV_VERSION 32
++#define AIRCONV_VERSION 33
+ 
+ #ifdef __cplusplus
+ #include <string>
+diff --git a/src/airconv/nt/dxbc_converter_base.cpp b/src/airconv/nt/dxbc_converter_base.cpp
+index 7b42744..9ed4616 100644
+--- a/src/airconv/nt/dxbc_converter_base.cpp
++++ b/src/airconv/nt/dxbc_converter_base.cpp
+@@ -1660,6 +1660,9 @@ Converter::operator()(const InstSampleLOD &sample) {
+   auto [Value, Residency] =
+       air.CreateSample(Tex->Texture, Tex->Handle, SamplerHandle, Coord, ArrayIndex, sample.offsets, sample_level{LOD});
+ 
++  if (ctx.shader_type == microsoft::D3D10_SB_VERTEX_SHADER)
++    Value = ir.CreateFreeze(Value);
++
+   StoreOperand(sample.dst, MaskSwizzle(Value, GetMask(sample.dst), Tex->Swizzle));
+ }
+ 
+diff --git a/src/d3d11/d3d11_buffer.cpp b/src/d3d11/d3d11_buffer.cpp
+index c354db3..99c28ab 100644
+--- a/src/d3d11/d3d11_buffer.cpp
++++ b/src/d3d11/d3d11_buffer.cpp
+@@ -23,6 +23,9 @@
+ #include "dxmt_format.hpp"
+ #include "d3d11_resource.hpp"
+ 
++#include <mutex>
++#include <unordered_map>
++
+ namespace dxmt {
+ 
+ struct BufferViewInfo {
+@@ -42,6 +45,8 @@ private:
+   bool allow_raw_view;
+ 
+   Rc<DynamicBuffer> dynamic_;
++  std::mutex external_mutex_;
++  std::unordered_map<void *, uint32_t> external_cookies_;
+ 
+   using SRVBase = TResourceViewBase<tag_shader_resource_view<D3D11Buffer>>;
+ 
+@@ -137,6 +142,50 @@ public:
+     *pBindFlags = desc.BindFlags;
+     return dynamic_;
+   }
++
++  HRESULT
++  bindDynamicBufferExternalFd(int fd, uint64_t backing_length,
++                              uint32_t cookie, uint32_t flags) override {
++    if (!dynamic_ || fd < 0 || backing_length < desc.ByteWidth)
++      return E_NOTIMPL;
++
++    auto allocation = buffer_->allocateExternal(
++        fd, backing_length, dynamic_->allocationFlags(), cookie);
++    if (!allocation)
++      return E_OUTOFMEMORY;
++
++    void *mapped = allocation->mappedMemory(0);
++    bool ok = false;
++    if (flags & 0x1u)
++      ok = dynamic_->bindInitialExternal(std::move(allocation));
++    else
++      ok = dynamic_->addExternal(std::move(allocation));
++    if (!ok)
++      return E_FAIL;
++
++    std::lock_guard<std::mutex> lock(external_mutex_);
++    external_cookies_[mapped] = cookie;
++    return S_OK;
++  }
++
++  bool
++  isDynamicBufferExternal() override {
++    return dynamic_ && dynamic_->externalMode();
++  }
++
++  bool
++  dynamicBufferExternalCookie(void *mapped_ptr,
++                              uint32_t *out_cookie) override {
++    if (!mapped_ptr || !out_cookie)
++      return false;
++    std::lock_guard<std::mutex> lock(external_mutex_);
++    auto it = external_cookies_.find(mapped_ptr);
++    if (it == external_cookies_.end())
++      return false;
++    *out_cookie = it->second;
++    return true;
++  }
++
+   Rc<DynamicLinearTexture>
+   dynamicLinearTexture(UINT *, UINT *) final {
+     return {};
+diff --git a/src/d3d11/d3d11_context_def.cpp b/src/d3d11/d3d11_context_def.cpp
+index 5c9ccf0..93a5ff0 100644
+--- a/src/d3d11/d3d11_context_def.cpp
++++ b/src/d3d11/d3d11_context_def.cpp
+@@ -123,6 +123,8 @@ public:
+       }
+     }
+     Rc<BufferAllocation> new_allocation = dynamic->allocate(ctx_state.cmd_queue.CoherentSeqId());
++    if (!new_allocation)
++      return nullptr;
+     uint32_t id = ctx_state.current_cmdlist->used_dynamic_buffers.size();
+     // track the current allocation in case of a following NO_OVERWRITE map
+     if (ret == ctx_state.current_dynamic_buffer_allocations.end()) {
+@@ -173,6 +175,10 @@ public:
+         }
+ 
+         pMappedResource->pData = MapDynamicBuffer(dynamic);
++        if (!pMappedResource->pData)
++          return dynamic->externalMode()
++              ? kNeedExternalBufferAllocation
++              : E_OUTOFMEMORY;
+         pMappedResource->RowPitch = buffer_length;
+         pMappedResource->DepthPitch = buffer_length;
+         break;
+diff --git a/src/d3d11/d3d11_context_imm.cpp b/src/d3d11/d3d11_context_imm.cpp
+index 46326e1..382db71 100644
+--- a/src/d3d11/d3d11_context_imm.cpp
++++ b/src/d3d11/d3d11_context_imm.cpp
+@@ -122,7 +122,10 @@ public:
+         allocation->useSuballocation(next_sub);
+       });
+     } else {
+-      dynamic->updateImmediateName(current_seq_id, dynamic->allocate(coherent_seq_id), 0, false);
++      auto allocation = dynamic->allocate(coherent_seq_id);
++      if (!allocation)
++        return nullptr;
++      dynamic->updateImmediateName(current_seq_id, std::move(allocation), 0, false);
+       EmitST([allocation = dynamic->immediateName(),
+               buffer = Rc(dynamic->buffer)](ArgumentEncodingContext &enc) mutable {
+         allocation->useSuballocation(0);
+@@ -167,6 +170,10 @@ public:
+         }
+ 
+         pMappedResource->pData = MapDynamicBuffer(dynamic, current_seq_id, coherent_seq_id);
++        if (!pMappedResource->pData)
++          return dynamic->externalMode()
++              ? kNeedExternalBufferAllocation
++              : E_OUTOFMEMORY;
+         pMappedResource->RowPitch = buffer_length;
+         pMappedResource->DepthPitch = buffer_length;
+         break;
+diff --git a/src/d3d11/d3d11_context_impl.cpp b/src/d3d11/d3d11_context_impl.cpp
+index 5b00f63..646a4e3 100644
+--- a/src/d3d11/d3d11_context_impl.cpp
++++ b/src/d3d11/d3d11_context_impl.cpp
+@@ -1225,7 +1225,8 @@ public:
+         // Also MSDN: A resource cannot be used as a destination if: the resource is created with immutable or
+         // dynamic usage.
+         // So it's legal?
+-        UNIMPLEMENTED("update buffer: staging");
++        memcpy(static_cast<uint8_t *>(staging->mappedImmediateMemory()) + copy_offset,
++               pSrcData, copy_len);
+       } else if (auto bindable = GetResourceCommon(pDstResource)) {
+         auto [staging_buffer, offset] = AllocateStagingBuffer(copy_len, 16);
+         staging_buffer.updateContents(offset, pSrcData, copy_len);
+diff --git a/src/d3d11/d3d11_resource.hpp b/src/d3d11/d3d11_resource.hpp
+index 80927e5..74d69bf 100644
+--- a/src/d3d11/d3d11_resource.hpp
++++ b/src/d3d11/d3d11_resource.hpp
+@@ -26,6 +26,9 @@ DEFINE_COM_INTERFACE("9a6f6549-d4b1-45ea-8794-8503d190d3d1",
+ 
+ namespace dxmt {
+ 
++static constexpr HRESULT kNeedExternalBufferAllocation =
++    (HRESULT)0x8004d101u;
++
+ template <typename RESOURCE_DESC>
+ void UpgradeResourceDescription(const RESOURCE_DESC *pSrc, RESOURCE_DESC &dst) {
+   dst = *pSrc;
+@@ -131,6 +134,15 @@ struct D3D11ResourceCommon : ID3D11Resource {
+ 
+   virtual Rc<StagingResource> staging(UINT Subresource) = 0;
+   virtual Rc<DynamicBuffer> dynamicBuffer(UINT *pBufferLength, UINT *pBindFlags) = 0;
++  virtual HRESULT bindDynamicBufferExternalFd(int fd, uint64_t backing_length,
++                                              uint32_t cookie, uint32_t flags) {
++    return E_NOTIMPL;
++  }
++  virtual bool isDynamicBufferExternal() { return false; }
++  virtual bool dynamicBufferExternalCookie(void *mapped_ptr,
++                                           uint32_t *out_cookie) {
++    return false;
++  }
+   virtual Rc<DynamicLinearTexture> dynamicLinearTexture(UINT *pBytesPerRow, UINT *pBytesPerImage) = 0;
+   virtual Rc<DynamicBuffer> dynamicTexture(UINT Subresource, UINT *pBytesPerRow, UINT *pBytesPerImage) = 0;
+ 
+diff --git a/src/dxmt-native/dxmt_native.cpp b/src/dxmt-native/dxmt_native.cpp
+index 1db9591..a72e13b 100644
+--- a/src/dxmt-native/dxmt_native.cpp
++++ b/src/dxmt-native/dxmt_native.cpp
+@@ -11,9 +11,44 @@
+  */
+ 
+ #include "log/log.hpp"
++#include "dxmt_native.h"
++#include "../d3d11/d3d11_resource.hpp"
+ 
+ namespace dxmt {
+ 
+ Logger Logger::s_instance("dxmt.log");
+ 
+ } // namespace dxmt
++
++static dxmt::D3D11ResourceCommon *
++dxmt_native_resource(void *d3d11_resource) {
++  if (!d3d11_resource)
++    return nullptr;
++  return dxmt::GetResourceCommon(
++      static_cast<ID3D11Resource *>(d3d11_resource));
++}
++
++extern "C" int32_t
++dxmt_d3d11_buffer_bind_external_fd(void *d3d11_buffer, int fd,
++                                   uint64_t backing_length,
++                                   uint32_t cookie, uint32_t flags) {
++  auto *resource = dxmt_native_resource(d3d11_buffer);
++  if (!resource)
++    return (int32_t)E_INVALIDARG;
++  return (int32_t)resource->bindDynamicBufferExternalFd(
++      fd, backing_length, cookie, flags);
++}
++
++extern "C" int
++dxmt_d3d11_buffer_is_external(void *d3d11_buffer) {
++  auto *resource = dxmt_native_resource(d3d11_buffer);
++  return resource && resource->isDynamicBufferExternal() ? 1 : 0;
++}
++
++extern "C" int
++dxmt_d3d11_buffer_external_cookie(void *d3d11_buffer, void *mapped_ptr,
++                                  uint32_t *out_cookie) {
++  auto *resource = dxmt_native_resource(d3d11_buffer);
++  return resource && resource->dynamicBufferExternalCookie(mapped_ptr, out_cookie)
++      ? 0 : -1;
++}
+diff --git a/src/dxmt-native/dxmt_native.exports b/src/dxmt-native/dxmt_native.exports
+index 9ec353e..11573cb 100644
+--- a/src/dxmt-native/dxmt_native.exports
++++ b/src/dxmt-native/dxmt_native.exports
+@@ -29,3 +29,7 @@ _dxmt_event_clear
+ _dxmt_event_close
+ _dxmt_event_dup_fd
+ _dxmt_event_wait
++
++_dxmt_d3d11_buffer_bind_external_fd
++_dxmt_d3d11_buffer_is_external
++_dxmt_d3d11_buffer_external_cookie
+diff --git a/src/dxmt-native/dxmt_native.h b/src/dxmt-native/dxmt_native.h
+index 1470e14..54637b7 100644
+--- a/src/dxmt-native/dxmt_native.h
++++ b/src/dxmt-native/dxmt_native.h
+@@ -40,6 +40,21 @@ void  dxmt_event_close(void* handle);
+ int   dxmt_event_dup_fd(void* handle);
+ dxmt_wait_status dxmt_event_wait(void* handle, uint64_t timeout_ns);
+ 
++/* == Neptune external D3D11 buffers ======================================= */
++
++#define DXMT_D3D11_EXTERNAL_BIND_INITIAL 0x1u
++#define DXMT_E_NEED_EXTERNAL_BUFFER_ALLOCATION ((int32_t)0x8004d101u)
++
++int32_t dxmt_d3d11_buffer_bind_external_fd(void *d3d11_buffer,
++                                           int fd,
++                                           uint64_t backing_length,
++                                           uint32_t cookie,
++                                           uint32_t flags);
++int dxmt_d3d11_buffer_is_external(void *d3d11_buffer);
++int dxmt_d3d11_buffer_external_cookie(void *d3d11_buffer,
++                                      void *mapped_ptr,
++                                      uint32_t *out_cookie);
++
+ /* == Cross-process shared textures ========================================= */
+ 
+ #define DXMT_SHARED_TEXTURE_MAGIC 0x58544D44u /* 'DMTX' */
+diff --git a/src/dxmt/dxmt_buffer.cpp b/src/dxmt/dxmt_buffer.cpp
+index e918e63..07e672a 100644
+--- a/src/dxmt/dxmt_buffer.cpp
++++ b/src/dxmt/dxmt_buffer.cpp
+@@ -24,11 +24,24 @@
+ #include "wsi_platform.hpp"
+ #include <cassert>
+ #include <mutex>
++#ifdef __APPLE__
++#include <sys/mman.h>
++#include <unistd.h>
++#endif
+ 
+ namespace dxmt {
+ 
+ std::atomic_uint64_t global_buffer_seq = {0};
+ 
++ExternalBufferBacking::~ExternalBufferBacking() {
++#ifdef __APPLE__
++  if (mapping && mapping != MAP_FAILED)
++    munmap(mapping, length);
++  if (fd >= 0)
++    close(fd);
++#endif
++}
++
+ BufferAllocation::BufferAllocation(WMT::Device device, const WMTBufferInfo &info, Flags<BufferAllocationFlag> flags) :
+     info_(info),
+     flags_(flags) {
+@@ -167,6 +180,57 @@ Buffer::allocate(Flags<BufferAllocationFlag> flags) {
+   return new BufferAllocation(device_, info, flags);
+ };
+ 
++Rc<BufferAllocation>
++Buffer::allocateExternal(int fd, uint64_t backing_length,
++                         Flags<BufferAllocationFlag> flags,
++                         uint32_t cookie) {
++#ifndef __APPLE__
++  (void)fd;
++  (void)backing_length;
++  (void)flags;
++  (void)cookie;
++  return {};
++#else
++  if (fd < 0 || backing_length < length_)
++    return {};
++
++  int owned_fd = dup(fd);
++  if (owned_fd < 0)
++    return {};
++
++  void *mapping = mmap(nullptr, backing_length, PROT_READ | PROT_WRITE,
++                       MAP_SHARED, owned_fd, 0);
++  if (mapping == MAP_FAILED) {
++    close(owned_fd);
++    return {};
++  }
++
++  WMTResourceOptions options = WMTResourceHazardTrackingModeUntracked;
++  if (flags.test(BufferAllocationFlag::CpuWriteCombined))
++    options |= WMTResourceOptionCPUCacheModeWriteCombined;
++  if (flags.test(BufferAllocationFlag::CpuInvisible))
++    options |= WMTResourceStorageModePrivate;
++  if (flags.test(BufferAllocationFlag::GpuManaged))
++    options |= WMTResourceStorageModeManaged;
++
++  WMTBufferInfo info;
++  info.memory.set(mapping);
++  info.length = backing_length;
++  info.options = options;
++
++  Rc<BufferAllocation> allocation = new BufferAllocation(device_, info, flags);
++  allocation->external_backing_ =
++      std::make_unique<ExternalBufferBacking>(owned_fd, mapping, backing_length);
++  allocation->external_cookie_ = cookie;
++
++  /* Neptune uses one logical D3D buffer per SHM allocation. */
++  allocation->suballocation_size_ = length_;
++  allocation->suballocation_count_ = 1;
++  allocation->fenceTrackers.resize(1);
++  return allocation;
++#endif
++}
++
+ Rc<BufferAllocation>
+ Buffer::rename(Rc<BufferAllocation> &&newAllocation) {
+   Rc<BufferAllocation> old = std::move(current_);
+diff --git a/src/dxmt/dxmt_buffer.hpp b/src/dxmt/dxmt_buffer.hpp
+index 9feb708..b19c453 100644
+--- a/src/dxmt/dxmt_buffer.hpp
++++ b/src/dxmt/dxmt_buffer.hpp
+@@ -26,6 +26,7 @@
+ #include "thread.hpp"
+ #include "util_flags.hpp"
+ #include "util_svector.hpp"
++#include <memory>
+ 
+ namespace dxmt {
+ 
+@@ -72,6 +73,16 @@ struct BufferViewDescriptor {
+ 
+ class Buffer;
+ 
++struct ExternalBufferBacking {
++  int fd = -1;
++  void *mapping = nullptr;
++  uint64_t length = 0;
++
++  ExternalBufferBacking(int fd, void *mapping, uint64_t length) :
++      fd(fd), mapping(mapping), length(length) {}
++  ~ExternalBufferBacking();
++};
++
+ struct BufferView {
+   WMT::Reference<WMT::Texture> texture;
+   uint64_t gpu_resource_id;
+@@ -152,6 +163,9 @@ private:
+   BufferAllocation(const BufferAllocation &) = delete;
+   BufferAllocation(BufferAllocation &&) = delete;
+ 
++  /* Declared before obj_/views so the external mapping is destroyed last. */
++  std::unique_ptr<ExternalBufferBacking> external_backing_;
++  uint32_t external_cookie_ = ~0u;
+   WMT::Reference<WMT::Buffer> obj_;
+   WMTBufferInfo info_;
+   uint32_t version_ = 0;
+@@ -180,6 +194,10 @@ public:
+ 
+   Rc<BufferAllocation> allocate(Flags<BufferAllocationFlag> flags);
+ 
++  Rc<BufferAllocation> allocateExternal(int fd, uint64_t backing_length,
++                                        Flags<BufferAllocationFlag> flags,
++                                        uint32_t cookie);
++
+   Rc<BufferAllocation> rename(Rc<BufferAllocation> &&newAllocation);
+ 
+   Buffer(uint64_t length, WMT::Device device) : length_(length), device_(device) {}
+diff --git a/src/dxmt/dxmt_dynamic.cpp b/src/dxmt/dxmt_dynamic.cpp
+index ce7941e..19a20c3 100644
+--- a/src/dxmt/dxmt_dynamic.cpp
++++ b/src/dxmt/dxmt_dynamic.cpp
+@@ -34,11 +34,48 @@ DynamicBuffer::allocate(uint64_t coherent_seq_id) {
+     fifo.pop();
+     break;
+   }
+-  if (!ret.ptr())
+-    ret = buffer->allocate(flags_);
++  if (!ret.ptr()) {
++    if (external_mode_) {
++      if (!fresh_external_.empty()) {
++        ret = std::move(fresh_external_.front());
++        fresh_external_.pop();
++      }
++    } else {
++      ret = buffer->allocate(flags_);
++    }
++  }
+   return ret;
+ }
+ 
++bool
++DynamicBuffer::bindInitialExternal(Rc<BufferAllocation> &&allocation) {
++  std::lock_guard<dxmt::mutex> lock(mutex_);
++  if (external_mode_ || !allocation || !fifo.empty() || owned_by_command_list_ ||
++      name_.ptr() != buffer->current())
++    return false;
++
++  auto old = buffer->rename(Rc<BufferAllocation>(allocation));
++  name_ = std::move(allocation);
++  name_suballocation_ = 0;
++  external_mode_ = true;
++  return true;
++}
++
++bool
++DynamicBuffer::addExternal(Rc<BufferAllocation> &&allocation) {
++  std::lock_guard<dxmt::mutex> lock(mutex_);
++  if (!external_mode_ || !allocation)
++    return false;
++  fresh_external_.push(std::move(allocation));
++  return true;
++}
++
++bool
++DynamicBuffer::externalMode() {
++  std::lock_guard<dxmt::mutex> lock(mutex_);
++  return external_mode_;
++}
++
+ void
+ DynamicBuffer::updateImmediateName(uint64_t current_seq_id, Rc<BufferAllocation> &&allocation, uint32_t suballocation, bool owned_by_command_list) {
+   std::lock_guard<dxmt::mutex> lock(mutex_);
+diff --git a/src/dxmt/dxmt_dynamic.hpp b/src/dxmt/dxmt_dynamic.hpp
+index 9ee3b1d..c8e74a4 100644
+--- a/src/dxmt/dxmt_dynamic.hpp
++++ b/src/dxmt/dxmt_dynamic.hpp
+@@ -11,6 +11,10 @@ public:
+   void decRef();
+ 
+   Rc<BufferAllocation> allocate(uint64_t coherent_seq_id);
++  bool bindInitialExternal(Rc<BufferAllocation> &&allocation);
++  bool addExternal(Rc<BufferAllocation> &&allocation);
++  bool externalMode();
++  Flags<BufferAllocationFlag> allocationFlags() const { return flags_; }
+   void updateImmediateName(uint64_t current_seq_id, Rc<BufferAllocation> &&allocation, uint32_t suballocation, bool owned_by_command_list);
+   void recycle(uint64_t current_seq_id, Rc<BufferAllocation> &&allocation);
+   uint32_t nextSuballocation();
+@@ -46,10 +50,12 @@ private:
+   Flags<BufferAllocationFlag> flags_;
+   std::atomic<uint32_t> refcount_ = {0u};
+   std::queue<QueueEntry> fifo;
++  std::queue<Rc<BufferAllocation>> fresh_external_;
+   dxmt::mutex mutex_;
+   Rc<BufferAllocation> name_;
+   uint32_t name_suballocation_ = 0;
+   bool owned_by_command_list_ = false;
++  bool external_mode_ = false;
+ };
+ 
+ class DynamicLinearTexture {

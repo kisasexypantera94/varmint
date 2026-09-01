@@ -19,10 +19,10 @@ MOLTENVK_PATCHES=(
   "$ROOT/patches/moltenvk/0003-fix-query-copy-availability-offset.patch"
 )
 VIRGL_PATCHES=(
-  "$ROOT/patches/virglrenderer/0001-fix-neptune-renderer-lifecycle.patch"
+  "$ROOT/patches/virglrenderer/0001-neptune-renderer-and-d3d11-zerocopy.patch"
 )
 DXMT_PATCHES=(
-  "$ROOT/patches/dxmt/0001-fix-neptune-staging-and-vertex-sample-flicker.patch"
+  "$ROOT/patches/dxmt/0001-neptune-d3d11-correctness-and-zerocopy.patch"
 )
 ENTITLEMENTS="$ROOT/runtime/entitlements.plist"
 VMNET_HELPER_ENTITLEMENTS="$ROOT/runtime/vmnet-helper-entitlements.plist"
