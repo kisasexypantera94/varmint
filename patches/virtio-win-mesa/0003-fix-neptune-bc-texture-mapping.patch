@@ -1,0 +1,36 @@
+--- a/src/virtio/neptune/npt_resource.c
++++ b/src/virtio/neptune/npt_resource.c
+@@ -863,7 +863,7 @@
+ npt_d3d11_texture_has_desc(const struct npt_d3d11_texture *t)
+ {
+    const struct npt_d3d11_texture_aux *aux = tex_aux(t);
+-   return aux && aux->bytes_per_pixel != 0;
++   return aux && npt_dxgi_format_row_bytes(aux->format, aux->width) != 0;
+ }
+ 
+ bool
+@@ -871,7 +871,7 @@
+ {
+    const struct npt_d3d11_texture_aux *aux = tex_aux(t);
+    if (!aux) return false;
+-   if (aux->bytes_per_pixel == 0 ||
++   if (npt_dxgi_format_row_bytes(aux->format, aux->width) == 0 ||
+        aux->width == 0 || aux->height == 0 || aux->depth == 0)
+       return false;
+    if (aux->usage == D3D11_USAGE_DYNAMIC)
+@@ -994,10 +994,13 @@
+    if (!npt_d3d11_texture_is_mappable(t)) return false;
+    struct npt_d3d11_texture_aux *aux = tex_aux(t);
+    if (!aux) return false;
+-   const uint32_t row_bytes = aux->width * aux->bytes_per_pixel;
++   const uint32_t row_bytes =
++      npt_dxgi_format_row_bytes(aux->format, aux->width);
++   const uint32_t rows =
++      npt_dxgi_format_subresource_rows(aux->format, aux->height);
+    const uint32_t aligned_row_pitch = (row_bytes + 255u) & ~255u;
+    const uint64_t per_slot = (uint64_t)aligned_row_pitch *
+-                             (uint64_t)aux->height *
++                             (uint64_t)rows *
+                              (uint64_t)aux->depth;
+    const uint64_t aligned_slot = (per_slot + 63u) & ~(uint64_t)63u;
+    /* Per-slot cap; slots are lazily allocated up to NPT_D3D_MAP_SLOT_MAX. */

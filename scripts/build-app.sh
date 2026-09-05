@@ -19,7 +19,9 @@ MOLTENVK_PATCHES=(
   "$ROOT/patches/moltenvk/0003-fix-query-copy-availability-offset.patch"
 )
 VIRGL_PATCHES=(
-  "$ROOT/patches/virglrenderer/0001-neptune-renderer-and-d3d11-zerocopy.patch"
+  "$ROOT/patches/virglrenderer/0001-revert-neptune-oob-event-fence-channel.patch"
+  "$ROOT/patches/virglrenderer/0002-fix-neptune-renderer-lifecycle.patch"
+  "$ROOT/patches/virglrenderer/0003-add-neptune-d3d11-dynamic-buffer-zerocopy.patch"
 )
 DXMT_PATCHES=(
   "$ROOT/patches/dxmt/0001-neptune-d3d11-correctness-and-zerocopy.patch"

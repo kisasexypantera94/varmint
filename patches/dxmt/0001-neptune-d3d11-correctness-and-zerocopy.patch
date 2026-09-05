@@ -256,7 +256,7 @@ index 9ec353e..11573cb 100644
 +_dxmt_d3d11_buffer_is_external
 +_dxmt_d3d11_buffer_external_cookie
 diff --git a/src/dxmt-native/dxmt_native.h b/src/dxmt-native/dxmt_native.h
-index 1470e14..54637b7 100644
+index be58bae..88fbc0d 100644
 --- a/src/dxmt-native/dxmt_native.h
 +++ b/src/dxmt-native/dxmt_native.h
 @@ -40,6 +40,21 @@ void  dxmt_event_close(void* handle);

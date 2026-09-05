@@ -1,69 +1,5 @@
-diff --git a/server/render_state.c b/server/render_state.c
-index f0f54873..8b4fa683 100644
---- a/server/render_state.c
-+++ b/server/render_state.c
-@@ -204,36 +204,44 @@ render_state_init(uint32_t init_flags)
-       return false;
- 
-    SCOPE_LOCK_STATE();
-+
-    if (!state.init_count) {
-       if (virgl_fence_table_init())
-          return false;
-+      list_inithead(&state.contexts);
-+   }
-+
- #ifdef ENABLE_VENUS
--      if (want_venus) {
--         /* always use sync thread and async fence cb for low latency */
--         static const uint32_t vkr_flags =
--            VKR_RENDERER_THREAD_SYNC | VKR_RENDERER_ASYNC_FENCE_CB;
--         if (!vkr_renderer_init(vkr_flags, &render_state_vkr_cbs)) {
-+   if (want_venus && !state.venus_inited) {
-+      /* always use sync thread and async fence cb for low latency */
-+      static const uint32_t vkr_flags =
-+         VKR_RENDERER_THREAD_SYNC | VKR_RENDERER_ASYNC_FENCE_CB;
-+      if (!vkr_renderer_init(vkr_flags, &render_state_vkr_cbs)) {
-+         if (!state.init_count)
-             virgl_fence_table_cleanup();
--            return false;
--         }
-+         return false;
-       }
-+      state.venus_inited = true;
-+   }
- #endif
-+
- #ifdef ENABLE_NEPTUNE
--      if (want_neptune) {
--         if (!npt_renderer_init(0, &render_state_npt_cbs)) {
-+   if (want_neptune && !state.neptune_inited) {
-+      if (!npt_renderer_init(0, &render_state_npt_cbs)) {
-+         if (!state.init_count) {
- #ifdef ENABLE_VENUS
--            if (want_venus)
-+            if (state.venus_inited) {
-                vkr_renderer_fini();
-+               state.venus_inited = false;
-+            }
- #endif
-             virgl_fence_table_cleanup();
--            return false;
-          }
-+         return false;
-       }
--#endif
--      list_inithead(&state.contexts);
--      state.venus_inited = want_venus;
--      state.neptune_inited = want_neptune;
-+      state.neptune_inited = true;
-    }
-+#endif
- 
-    state.init_count++;
- 
 diff --git a/src/neptune/npt_context.c b/src/neptune/npt_context.c
-index d1d02250..86818baf 100644
+index 90dbb6e9..c2923a80 100644
 --- a/src/neptune/npt_context.c
 +++ b/src/neptune/npt_context.c
 @@ -22,6 +22,7 @@
@@ -74,8 +10,8 @@ index d1d02250..86818baf 100644
  #include "npt_ring.h"
  #include "npt_shared.h"
  #include "neptune-protocol/npt_protocol_host_dispatch.h"
-@@ -278,6 +279,29 @@ npt_context_lookup_object(struct npt_context *ctx,
-    return NULL;
+@@ -353,6 +354,29 @@ npt_context_lookup_object(struct npt_context *ctx,
+    return obj;
  }
  
 +void *
@@ -104,7 +40,7 @@ index d1d02250..86818baf 100644
  void
  npt_context_release_object(struct npt_context *ctx, uint64_t guest_id)
  {
-@@ -507,6 +531,10 @@ npt_context_destroy(struct npt_context *ctx)
+@@ -588,6 +612,10 @@ npt_context_destroy(struct npt_context *ctx)
     npt_event_drain_parked_fences(ctx);
     npt_event_fini(ctx);
  
@@ -116,7 +52,7 @@ index d1d02250..86818baf 100644
      * teardown.  Free any straggler entries to plug a guest leak. */
     hash_table_foreach(ctx->object_table, entry) {
 diff --git a/src/neptune/npt_context.h b/src/neptune/npt_context.h
-index 63939b67..a4000bb0 100644
+index 0e36cfb9..8a1fb7ff 100644
 --- a/src/neptune/npt_context.h
 +++ b/src/neptune/npt_context.h
 @@ -43,6 +43,9 @@ struct npt_sync_map_entry {
@@ -129,7 +65,7 @@ index 63939b67..a4000bb0 100644
  };
  
  struct npt_resource {
-@@ -359,6 +362,12 @@ npt_context_lookup_object(struct npt_context *ctx,
+@@ -367,6 +370,12 @@ npt_context_lookup_object(struct npt_context *ctx,
                            uint64_t id,
                            npt_object_type expected);
  
@@ -263,7 +199,7 @@ index 250d57f2..af185902 100644
  
     /* NPT_WA_* bits describing the workarounds the loaded backend needs, set in
 diff --git a/src/neptune/npt_resource.c b/src/neptune/npt_resource.c
-index c10ce6fe..95eb5e0b 100644
+index 279bc4de..01b3d3c5 100644
 --- a/src/neptune/npt_resource.c
 +++ b/src/neptune/npt_resource.c
 @@ -16,6 +16,7 @@
@@ -274,7 +210,7 @@ index c10ce6fe..95eb5e0b 100644
  #include "npt_transport_defs.h"
  
  #include "neptune-protocol/npt_protocol_host_dispatch_types.h"
-@@ -144,6 +145,72 @@ npt_sync_map_remove(struct npt_context *ctx, struct npt_sync_map_entry *e)
+@@ -213,6 +214,72 @@ npt_sync_map_remove(struct npt_context *ctx, struct npt_sync_map_entry *e)
        ctx->sync_maps.entries[--ctx->sync_maps.count];
  }
  
@@ -347,7 +283,7 @@ index c10ce6fe..95eb5e0b 100644
  HRESULT
  npt_resource_map(struct npt_context *ctx,
                   uint64_t context_id, uint64_t resource_id,
-@@ -155,11 +222,99 @@ npt_resource_map(struct npt_context *ctx,
+@@ -224,11 +291,99 @@ npt_resource_map(struct npt_context *ctx,
                   uint32_t mip_height, uint32_t mip_depth,
                   uint32_t shmem_offset,
                   uint32_t *out_row_pitch, uint32_t *out_depth_pitch,
@@ -448,7 +384,7 @@ index c10ce6fe..95eb5e0b 100644
  
     void *resource = npt_context_lookup_object(ctx, NULL, resource_id,
                                                NPT_OBJECT_TYPE_IUNKNOWN);
-@@ -294,6 +449,16 @@ npt_resource_unmap(struct npt_context *ctx,
+@@ -370,6 +525,16 @@ npt_resource_unmap(struct npt_context *ctx,
                     uint64_t written_range_begin,
                     uint64_t written_range_end)
  {

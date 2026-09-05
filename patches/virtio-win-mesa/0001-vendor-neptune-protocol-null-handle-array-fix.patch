@@ -1,0 +1,396 @@
+diff --git a/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d11devicecontext.h b/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d11devicecontext.h
+index a550b695921..5f81234124d 100644
+--- a/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d11devicecontext.h
++++ b/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d11devicecontext.h
+@@ -40,8 +40,8 @@ npt_sizeof_ID3D11DeviceContext_VSSetConstantBuffers(const UINT StartSlot,const U
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumBuffers, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumBuffers);
+-    cmd_size += sizeof(uint64_t) * NumBuffers;
++    cmd_size += npt_sizeof_array_count(ppConstantBuffers ? NumBuffers : 0);
++    cmd_size += sizeof(uint64_t) * (ppConstantBuffers ? (size_t)NumBuffers : 0);
+     return cmd_size;
+ }
+ 
+@@ -165,8 +165,8 @@ npt_sizeof_ID3D11DeviceContext_PSSetShaderResources(const UINT StartSlot,const U
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumViews, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumViews);
+-    cmd_size += sizeof(uint64_t) * NumViews;
++    cmd_size += npt_sizeof_array_count(ppShaderResourceViews ? NumViews : 0);
++    cmd_size += sizeof(uint64_t) * (ppShaderResourceViews ? (size_t)NumViews : 0);
+     return cmd_size;
+ }
+ 
+@@ -289,8 +289,8 @@ npt_sizeof_ID3D11DeviceContext_PSSetShader(const ID3D11PixelShader * pPixelShade
+     (void)max_mode;  /* unused when the command has no struct/union inputs */
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += sizeof(uint64_t);
+-    cmd_size += npt_sizeof_array_count(NumClassInstances);
+-    cmd_size += sizeof(uint64_t) * NumClassInstances;
++    cmd_size += npt_sizeof_array_count(ppClassInstances ? NumClassInstances : 0);
++    cmd_size += sizeof(uint64_t) * (ppClassInstances ? (size_t)NumClassInstances : 0);
+     cmd_size += npt_sizeof_UINT(&NumClassInstances, max_mode);
+     return cmd_size;
+ }
+@@ -415,8 +415,8 @@ npt_sizeof_ID3D11DeviceContext_PSSetSamplers(const UINT StartSlot,const UINT Num
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumSamplers, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumSamplers);
+-    cmd_size += sizeof(uint64_t) * NumSamplers;
++    cmd_size += npt_sizeof_array_count(ppSamplers ? NumSamplers : 0);
++    cmd_size += sizeof(uint64_t) * (ppSamplers ? (size_t)NumSamplers : 0);
+     return cmd_size;
+ }
+ 
+@@ -539,8 +539,8 @@ npt_sizeof_ID3D11DeviceContext_VSSetShader(const ID3D11VertexShader * pVertexSha
+     (void)max_mode;  /* unused when the command has no struct/union inputs */
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += sizeof(uint64_t);
+-    cmd_size += npt_sizeof_array_count(NumClassInstances);
+-    cmd_size += sizeof(uint64_t) * NumClassInstances;
++    cmd_size += npt_sizeof_array_count(ppClassInstances ? NumClassInstances : 0);
++    cmd_size += sizeof(uint64_t) * (ppClassInstances ? (size_t)NumClassInstances : 0);
+     cmd_size += npt_sizeof_UINT(&NumClassInstances, max_mode);
+     return cmd_size;
+ }
+@@ -1171,8 +1171,8 @@ npt_sizeof_ID3D11DeviceContext_PSSetConstantBuffers(const UINT StartSlot,const U
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumBuffers, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumBuffers);
+-    cmd_size += sizeof(uint64_t) * NumBuffers;
++    cmd_size += npt_sizeof_array_count(ppConstantBuffers ? NumBuffers : 0);
++    cmd_size += sizeof(uint64_t) * (ppConstantBuffers ? (size_t)NumBuffers : 0);
+     return cmd_size;
+ }
+ 
+@@ -1400,8 +1400,8 @@ npt_sizeof_ID3D11DeviceContext_IASetVertexBuffers(const UINT StartSlot,const UIN
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumBuffers, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumBuffers);
+-    cmd_size += sizeof(uint64_t) * NumBuffers;
++    cmd_size += npt_sizeof_array_count(ppVertexBuffers ? NumBuffers : 0);
++    cmd_size += sizeof(uint64_t) * (ppVertexBuffers ? (size_t)NumBuffers : 0);
+     cmd_size += npt_sizeof_array_count(pStrides ? NumBuffers : 0);
+     if (pStrides)
+         cmd_size += npt_sizeof_UINT_array(pStrides, NumBuffers);
+@@ -1931,8 +1931,8 @@ npt_sizeof_ID3D11DeviceContext_GSSetConstantBuffers(const UINT StartSlot,const U
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumBuffers, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumBuffers);
+-    cmd_size += sizeof(uint64_t) * NumBuffers;
++    cmd_size += npt_sizeof_array_count(ppConstantBuffers ? NumBuffers : 0);
++    cmd_size += sizeof(uint64_t) * (ppConstantBuffers ? (size_t)NumBuffers : 0);
+     return cmd_size;
+ }
+ 
+@@ -2055,8 +2055,8 @@ npt_sizeof_ID3D11DeviceContext_GSSetShader(const ID3D11GeometryShader * pShader,
+     (void)max_mode;  /* unused when the command has no struct/union inputs */
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += sizeof(uint64_t);
+-    cmd_size += npt_sizeof_array_count(NumClassInstances);
+-    cmd_size += sizeof(uint64_t) * NumClassInstances;
++    cmd_size += npt_sizeof_array_count(ppClassInstances ? NumClassInstances : 0);
++    cmd_size += sizeof(uint64_t) * (ppClassInstances ? (size_t)NumClassInstances : 0);
+     cmd_size += npt_sizeof_UINT(&NumClassInstances, max_mode);
+     return cmd_size;
+ }
+@@ -2283,8 +2283,8 @@ npt_sizeof_ID3D11DeviceContext_VSSetShaderResources(const UINT StartSlot,const U
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumViews, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumViews);
+-    cmd_size += sizeof(uint64_t) * NumViews;
++    cmd_size += npt_sizeof_array_count(ppShaderResourceViews ? NumViews : 0);
++    cmd_size += sizeof(uint64_t) * (ppShaderResourceViews ? (size_t)NumViews : 0);
+     return cmd_size;
+ }
+ 
+@@ -2408,8 +2408,8 @@ npt_sizeof_ID3D11DeviceContext_VSSetSamplers(const UINT StartSlot,const UINT Num
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumSamplers, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumSamplers);
+-    cmd_size += sizeof(uint64_t) * NumSamplers;
++    cmd_size += npt_sizeof_array_count(ppSamplers ? NumSamplers : 0);
++    cmd_size += sizeof(uint64_t) * (ppSamplers ? (size_t)NumSamplers : 0);
+     return cmd_size;
+ }
+ 
+@@ -3017,8 +3017,8 @@ npt_sizeof_ID3D11DeviceContext_GSSetShaderResources(const UINT StartSlot,const U
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumViews, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumViews);
+-    cmd_size += sizeof(uint64_t) * NumViews;
++    cmd_size += npt_sizeof_array_count(ppShaderResourceViews ? NumViews : 0);
++    cmd_size += sizeof(uint64_t) * (ppShaderResourceViews ? (size_t)NumViews : 0);
+     return cmd_size;
+ }
+ 
+@@ -3142,8 +3142,8 @@ npt_sizeof_ID3D11DeviceContext_GSSetSamplers(const UINT StartSlot,const UINT Num
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumSamplers, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumSamplers);
+-    cmd_size += sizeof(uint64_t) * NumSamplers;
++    cmd_size += npt_sizeof_array_count(ppSamplers ? NumSamplers : 0);
++    cmd_size += sizeof(uint64_t) * (ppSamplers ? (size_t)NumSamplers : 0);
+     return cmd_size;
+ }
+ 
+@@ -3266,8 +3266,8 @@ npt_sizeof_ID3D11DeviceContext_OMSetRenderTargets(const UINT NumViews,ID3D11Rend
+     (void)max_mode;  /* unused when the command has no struct/union inputs */
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&NumViews, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumViews);
+-    cmd_size += sizeof(uint64_t) * NumViews;
++    cmd_size += npt_sizeof_array_count(ppRenderTargetViews ? NumViews : 0);
++    cmd_size += sizeof(uint64_t) * (ppRenderTargetViews ? (size_t)NumViews : 0);
+     cmd_size += sizeof(uint64_t);
+     return cmd_size;
+ }
+@@ -3395,13 +3395,13 @@ npt_sizeof_ID3D11DeviceContext_OMSetRenderTargetsAndUnorderedAccessViews(const U
+     (void)max_mode;  /* unused when the command has no struct/union inputs */
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&NumRTVs, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumRTVs);
+-    cmd_size += sizeof(uint64_t) * NumRTVs;
++    cmd_size += npt_sizeof_array_count(ppRenderTargetViews ? NumRTVs : 0);
++    cmd_size += sizeof(uint64_t) * (ppRenderTargetViews ? (size_t)NumRTVs : 0);
+     cmd_size += sizeof(uint64_t);
+     cmd_size += npt_sizeof_UINT(&UAVStartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumUAVs, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumUAVs);
+-    cmd_size += sizeof(uint64_t) * NumUAVs;
++    cmd_size += npt_sizeof_array_count(ppUnorderedAccessViews ? NumUAVs : 0);
++    cmd_size += sizeof(uint64_t) * (ppUnorderedAccessViews ? (size_t)NumUAVs : 0);
+     cmd_size += npt_sizeof_array_count(pUAVInitialCounts ? NumUAVs : 0);
+     if (pUAVInitialCounts)
+         cmd_size += npt_sizeof_UINT_array(pUAVInitialCounts, NumUAVs);
+@@ -3797,8 +3797,8 @@ npt_sizeof_ID3D11DeviceContext_SOSetTargets(const UINT NumBuffers,ID3D11Buffer *
+     (void)max_mode;  /* unused when the command has no struct/union inputs */
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&NumBuffers, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumBuffers);
+-    cmd_size += sizeof(uint64_t) * NumBuffers;
++    cmd_size += npt_sizeof_array_count(ppSOTargets ? NumBuffers : 0);
++    cmd_size += sizeof(uint64_t) * (ppSOTargets ? (size_t)NumBuffers : 0);
+     cmd_size += npt_sizeof_array_count(pOffsets ? NumBuffers : 0);
+     if (pOffsets)
+         cmd_size += npt_sizeof_UINT_array(pOffsets, NumBuffers);
+@@ -6397,8 +6397,8 @@ npt_sizeof_ID3D11DeviceContext_HSSetShaderResources(const UINT StartSlot,const U
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumViews, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumViews);
+-    cmd_size += sizeof(uint64_t) * NumViews;
++    cmd_size += npt_sizeof_array_count(ppShaderResourceViews ? NumViews : 0);
++    cmd_size += sizeof(uint64_t) * (ppShaderResourceViews ? (size_t)NumViews : 0);
+     return cmd_size;
+ }
+ 
+@@ -6521,8 +6521,8 @@ npt_sizeof_ID3D11DeviceContext_HSSetShader(const ID3D11HullShader * pHullShader,
+     (void)max_mode;  /* unused when the command has no struct/union inputs */
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += sizeof(uint64_t);
+-    cmd_size += npt_sizeof_array_count(NumClassInstances);
+-    cmd_size += sizeof(uint64_t) * NumClassInstances;
++    cmd_size += npt_sizeof_array_count(ppClassInstances ? NumClassInstances : 0);
++    cmd_size += sizeof(uint64_t) * (ppClassInstances ? (size_t)NumClassInstances : 0);
+     cmd_size += npt_sizeof_UINT(&NumClassInstances, max_mode);
+     return cmd_size;
+ }
+@@ -6647,8 +6647,8 @@ npt_sizeof_ID3D11DeviceContext_HSSetSamplers(const UINT StartSlot,const UINT Num
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumSamplers, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumSamplers);
+-    cmd_size += sizeof(uint64_t) * NumSamplers;
++    cmd_size += npt_sizeof_array_count(ppSamplers ? NumSamplers : 0);
++    cmd_size += sizeof(uint64_t) * (ppSamplers ? (size_t)NumSamplers : 0);
+     return cmd_size;
+ }
+ 
+@@ -6772,8 +6772,8 @@ npt_sizeof_ID3D11DeviceContext_HSSetConstantBuffers(const UINT StartSlot,const U
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumBuffers, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumBuffers);
+-    cmd_size += sizeof(uint64_t) * NumBuffers;
++    cmd_size += npt_sizeof_array_count(ppConstantBuffers ? NumBuffers : 0);
++    cmd_size += sizeof(uint64_t) * (ppConstantBuffers ? (size_t)NumBuffers : 0);
+     return cmd_size;
+ }
+ 
+@@ -6897,8 +6897,8 @@ npt_sizeof_ID3D11DeviceContext_DSSetShaderResources(const UINT StartSlot,const U
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumViews, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumViews);
+-    cmd_size += sizeof(uint64_t) * NumViews;
++    cmd_size += npt_sizeof_array_count(ppShaderResourceViews ? NumViews : 0);
++    cmd_size += sizeof(uint64_t) * (ppShaderResourceViews ? (size_t)NumViews : 0);
+     return cmd_size;
+ }
+ 
+@@ -7021,8 +7021,8 @@ npt_sizeof_ID3D11DeviceContext_DSSetShader(const ID3D11DomainShader * pDomainSha
+     (void)max_mode;  /* unused when the command has no struct/union inputs */
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += sizeof(uint64_t);
+-    cmd_size += npt_sizeof_array_count(NumClassInstances);
+-    cmd_size += sizeof(uint64_t) * NumClassInstances;
++    cmd_size += npt_sizeof_array_count(ppClassInstances ? NumClassInstances : 0);
++    cmd_size += sizeof(uint64_t) * (ppClassInstances ? (size_t)NumClassInstances : 0);
+     cmd_size += npt_sizeof_UINT(&NumClassInstances, max_mode);
+     return cmd_size;
+ }
+@@ -7147,8 +7147,8 @@ npt_sizeof_ID3D11DeviceContext_DSSetSamplers(const UINT StartSlot,const UINT Num
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumSamplers, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumSamplers);
+-    cmd_size += sizeof(uint64_t) * NumSamplers;
++    cmd_size += npt_sizeof_array_count(ppSamplers ? NumSamplers : 0);
++    cmd_size += sizeof(uint64_t) * (ppSamplers ? (size_t)NumSamplers : 0);
+     return cmd_size;
+ }
+ 
+@@ -7272,8 +7272,8 @@ npt_sizeof_ID3D11DeviceContext_DSSetConstantBuffers(const UINT StartSlot,const U
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumBuffers, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumBuffers);
+-    cmd_size += sizeof(uint64_t) * NumBuffers;
++    cmd_size += npt_sizeof_array_count(ppConstantBuffers ? NumBuffers : 0);
++    cmd_size += sizeof(uint64_t) * (ppConstantBuffers ? (size_t)NumBuffers : 0);
+     return cmd_size;
+ }
+ 
+@@ -7397,8 +7397,8 @@ npt_sizeof_ID3D11DeviceContext_CSSetShaderResources(const UINT StartSlot,const U
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumViews, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumViews);
+-    cmd_size += sizeof(uint64_t) * NumViews;
++    cmd_size += npt_sizeof_array_count(ppShaderResourceViews ? NumViews : 0);
++    cmd_size += sizeof(uint64_t) * (ppShaderResourceViews ? (size_t)NumViews : 0);
+     return cmd_size;
+ }
+ 
+@@ -7523,8 +7523,8 @@ npt_sizeof_ID3D11DeviceContext_CSSetUnorderedAccessViews(const UINT StartSlot,co
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumUAVs, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumUAVs);
+-    cmd_size += sizeof(uint64_t) * NumUAVs;
++    cmd_size += npt_sizeof_array_count(ppUnorderedAccessViews ? NumUAVs : 0);
++    cmd_size += sizeof(uint64_t) * (ppUnorderedAccessViews ? (size_t)NumUAVs : 0);
+     cmd_size += npt_sizeof_array_count(pUAVInitialCounts ? NumUAVs : 0);
+     if (pUAVInitialCounts)
+         cmd_size += npt_sizeof_UINT_array(pUAVInitialCounts, NumUAVs);
+@@ -7661,8 +7661,8 @@ npt_sizeof_ID3D11DeviceContext_CSSetShader(const ID3D11ComputeShader * pComputeS
+     (void)max_mode;  /* unused when the command has no struct/union inputs */
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += sizeof(uint64_t);
+-    cmd_size += npt_sizeof_array_count(NumClassInstances);
+-    cmd_size += sizeof(uint64_t) * NumClassInstances;
++    cmd_size += npt_sizeof_array_count(ppClassInstances ? NumClassInstances : 0);
++    cmd_size += sizeof(uint64_t) * (ppClassInstances ? (size_t)NumClassInstances : 0);
+     cmd_size += npt_sizeof_UINT(&NumClassInstances, max_mode);
+     return cmd_size;
+ }
+@@ -7787,8 +7787,8 @@ npt_sizeof_ID3D11DeviceContext_CSSetSamplers(const UINT StartSlot,const UINT Num
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumSamplers, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumSamplers);
+-    cmd_size += sizeof(uint64_t) * NumSamplers;
++    cmd_size += npt_sizeof_array_count(ppSamplers ? NumSamplers : 0);
++    cmd_size += sizeof(uint64_t) * (ppSamplers ? (size_t)NumSamplers : 0);
+     return cmd_size;
+ }
+ 
+@@ -7912,8 +7912,8 @@ npt_sizeof_ID3D11DeviceContext_CSSetConstantBuffers(const UINT StartSlot,const U
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumBuffers, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumBuffers);
+-    cmd_size += sizeof(uint64_t) * NumBuffers;
++    cmd_size += npt_sizeof_array_count(ppConstantBuffers ? NumBuffers : 0);
++    cmd_size += sizeof(uint64_t) * (ppConstantBuffers ? (size_t)NumBuffers : 0);
+     return cmd_size;
+ }
+ 
+@@ -15339,8 +15339,8 @@ npt_sizeof_ID3D11DeviceContext1_VSSetConstantBuffers1(const UINT StartSlot,const
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumBuffers, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumBuffers);
+-    cmd_size += sizeof(uint64_t) * NumBuffers;
++    cmd_size += npt_sizeof_array_count(ppConstantBuffers ? NumBuffers : 0);
++    cmd_size += sizeof(uint64_t) * (ppConstantBuffers ? (size_t)NumBuffers : 0);
+     cmd_size += npt_sizeof_array_count(pFirstConstant ? NumBuffers : 0);
+     if (pFirstConstant)
+         cmd_size += npt_sizeof_UINT_array(pFirstConstant, NumBuffers);
+@@ -15494,8 +15494,8 @@ npt_sizeof_ID3D11DeviceContext1_HSSetConstantBuffers1(const UINT StartSlot,const
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumBuffers, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumBuffers);
+-    cmd_size += sizeof(uint64_t) * NumBuffers;
++    cmd_size += npt_sizeof_array_count(ppConstantBuffers ? NumBuffers : 0);
++    cmd_size += sizeof(uint64_t) * (ppConstantBuffers ? (size_t)NumBuffers : 0);
+     cmd_size += npt_sizeof_array_count(pFirstConstant ? NumBuffers : 0);
+     if (pFirstConstant)
+         cmd_size += npt_sizeof_UINT_array(pFirstConstant, NumBuffers);
+@@ -15649,8 +15649,8 @@ npt_sizeof_ID3D11DeviceContext1_DSSetConstantBuffers1(const UINT StartSlot,const
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumBuffers, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumBuffers);
+-    cmd_size += sizeof(uint64_t) * NumBuffers;
++    cmd_size += npt_sizeof_array_count(ppConstantBuffers ? NumBuffers : 0);
++    cmd_size += sizeof(uint64_t) * (ppConstantBuffers ? (size_t)NumBuffers : 0);
+     cmd_size += npt_sizeof_array_count(pFirstConstant ? NumBuffers : 0);
+     if (pFirstConstant)
+         cmd_size += npt_sizeof_UINT_array(pFirstConstant, NumBuffers);
+@@ -15804,8 +15804,8 @@ npt_sizeof_ID3D11DeviceContext1_GSSetConstantBuffers1(const UINT StartSlot,const
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumBuffers, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumBuffers);
+-    cmd_size += sizeof(uint64_t) * NumBuffers;
++    cmd_size += npt_sizeof_array_count(ppConstantBuffers ? NumBuffers : 0);
++    cmd_size += sizeof(uint64_t) * (ppConstantBuffers ? (size_t)NumBuffers : 0);
+     cmd_size += npt_sizeof_array_count(pFirstConstant ? NumBuffers : 0);
+     if (pFirstConstant)
+         cmd_size += npt_sizeof_UINT_array(pFirstConstant, NumBuffers);
+@@ -15959,8 +15959,8 @@ npt_sizeof_ID3D11DeviceContext1_PSSetConstantBuffers1(const UINT StartSlot,const
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumBuffers, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumBuffers);
+-    cmd_size += sizeof(uint64_t) * NumBuffers;
++    cmd_size += npt_sizeof_array_count(ppConstantBuffers ? NumBuffers : 0);
++    cmd_size += sizeof(uint64_t) * (ppConstantBuffers ? (size_t)NumBuffers : 0);
+     cmd_size += npt_sizeof_array_count(pFirstConstant ? NumBuffers : 0);
+     if (pFirstConstant)
+         cmd_size += npt_sizeof_UINT_array(pFirstConstant, NumBuffers);
+@@ -16114,8 +16114,8 @@ npt_sizeof_ID3D11DeviceContext1_CSSetConstantBuffers1(const UINT StartSlot,const
+     size_t cmd_size = sizeof(struct npt_command_header);
+     cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
+     cmd_size += npt_sizeof_UINT(&NumBuffers, max_mode);
+-    cmd_size += npt_sizeof_array_count(NumBuffers);
+-    cmd_size += sizeof(uint64_t) * NumBuffers;
++    cmd_size += npt_sizeof_array_count(ppConstantBuffers ? NumBuffers : 0);
++    cmd_size += sizeof(uint64_t) * (ppConstantBuffers ? (size_t)NumBuffers : 0);
+     cmd_size += npt_sizeof_array_count(pFirstConstant ? NumBuffers : 0);
+     if (pFirstConstant)
+         cmd_size += npt_sizeof_UINT_array(pFirstConstant, NumBuffers);
