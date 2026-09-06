@@ -1,0 +1,133 @@
+diff --git a/src/virtio/neptune/npt_com.c b/src/virtio/neptune/npt_com.c
+index a7691246ea7..29f2c516c36 100644
+--- a/src/virtio/neptune/npt_com.c
++++ b/src/virtio/neptune/npt_com.c
+@@ -207,15 +207,15 @@ npt_com_default_addref(void *self)
+    struct npt_com_base *com = self;
+    uint32_t prev = atomic_fetch_add(&com->base.pub_ref, 1);
+    if (prev == 0) {
+-      /* 0->1: take a priv hold on self and parent. */
++      /* 0->1: take the matching private hold on self.  The parent
++       * hold lasts for the wrapper's entire lifetime. */
+       atomic_fetch_add(&com->base.priv_ref, 1);
+-      if (com->base.parent)
+-         atomic_fetch_add(&com->base.parent->base.priv_ref, 1);
+    }
+    return prev + 1;
+ }
+ 
+ static void npt_com_destroy(struct npt_com_base *com);
++static void npt_com_destroy_cascade(struct npt_com_base *com);
+ static struct npt_ring *npt_com_acquire_dc_sc_ring(struct npt_device *dev);
+ static void npt_com_release_dc_sc_ring(struct npt_device *dev);
+ 
+@@ -227,21 +227,14 @@ npt_com_default_release(void *self)
+    const uint32_t cur = prev - 1;
+    if (cur == 0) {
+       /* Drop the QI memo's wrapper holds while our own 0->1 priv hold
+-       * is still in place: each memoized wrapper's release decrements
+-       * our priv_ref (parent coupling), and that hold keeps the count
+-       * above zero so the cascade cannot destroy us mid-flush. */
++       * is still in place: a memoized child reaching final destruction
++       * may drop its wrapper-lifetime parent hold on us, and this hold
++       * keeps the count above zero during the flush. */
+       npt_com_qi_memo_flush(com);
+-      /* 1->0: drop the matching priv holds taken on 0->1. */
+-      struct npt_com_base *parent = com->base.parent;
++      /* 1->0: drop the matching private hold on self. */
+       uint32_t priv = atomic_fetch_sub(&com->base.priv_ref, 1) - 1;
+       if (priv == 0)
+-         npt_com_destroy(com);
+-      if (parent) {
+-         uint32_t parent_priv =
+-            atomic_fetch_sub(&parent->base.priv_ref, 1) - 1;
+-         if (parent_priv == 0 && atomic_load(&parent->base.pub_ref) == 0)
+-            npt_com_destroy(parent);
+-      }
++         npt_com_destroy_cascade(com);
+    }
+    return cur;
+ }
+@@ -273,10 +266,9 @@ npt_com_destroy(struct npt_com_base *com)
+ {
+    /* Re-entry guard: aux_destroy may release cached child wrappers
+     * (swapchain backbuffer cache, device immediate-context cache).  A
+-    * child's default_release decrements its parent's priv_ref via the
+-    * 0->1 AddRef matching pattern, and when the last cached child
+-    * drops the parent's priv_ref to 0 with pub_ref already 0,
+-    * default_release would recurse into npt_com_destroy on the same
++    * child's final destruction drops its wrapper-lifetime parent hold,
++    * and when the last cached child drops our priv_ref to 0 with
++    * pub_ref already 0, that could recurse into destruction of the same
+     * parent -- freeing aux/com while the outer call is still running.
+     * Bumping priv_ref here keeps every in-aux_destroy decrement >=1,
+     * so the cascade gate inside default_release stays shut. */
+@@ -317,6 +309,25 @@ npt_com_destroy(struct npt_com_base *com)
+       npt_device_release();
+ }
+ 
++/* A child keeps its parent alive for the child's whole wrapper lifetime,
++ * including periods where pub_ref is zero but descendants still hold
++ * priv_refs on it.  Drop that hold only after the child is actually
++ * destroyed, then propagate final destruction up the parent chain. */
++static void
++npt_com_destroy_cascade(struct npt_com_base *com)
++{
++   struct npt_com_base *parent = com->base.parent;
++   npt_com_destroy(com);
++
++   if (!parent)
++      return;
++
++   uint32_t parent_priv =
++      atomic_fetch_sub(&parent->base.priv_ref, 1) - 1;
++   if (parent_priv == 0 && atomic_load(&parent->base.pub_ref) == 0)
++      npt_com_destroy_cascade(parent);
++}
++
+ /*
+  * Pin DC* / SC* IIDs (single-threaded-per-instance by D3D11/DXGI
+  * contract) onto the shared DC/SC ring so host dispatch stays serial.
+diff --git a/src/virtio/neptune/npt_com.h b/src/virtio/neptune/npt_com.h
+index b56acb9640e..043d9e0ec79 100644
+--- a/src/virtio/neptune/npt_com.h
++++ b/src/virtio/neptune/npt_com.h
+@@ -139,17 +139,18 @@ npt_com_self_device(void *self)
+ }
+ 
+ /*
+- * Default IUnknown::AddRef: bump pub_ref; on 0->1, bump priv_ref and
+- * AddRef the parent wrapper (parent coupling, see npt_object.h).
++ * Default IUnknown::AddRef: bump pub_ref; on 0->1, bump the matching
++ * self priv_ref.  Parent coupling lasts for the wrapper's entire lifetime
++ * and is independent of temporary pub_ref==0 periods.
+  * Returns the new public refcount.
+  */
+ uint32_t NPT_STDMETHODCALLTYPE
+ npt_com_default_addref(void *self);
+ 
+ /*
+- * Default IUnknown::Release: dec pub_ref; on 1->0, dec the matching
+- * priv_ref pair (and parent's).  Final priv_ref==0 evicts from cache,
+- * sends COM_RELEASE, and frees the wrapper.
++ * Default IUnknown::Release: dec pub_ref; on 1->0, dec the matching self
++ * priv_ref.  Final priv_ref==0 evicts from cache, sends COM_RELEASE, frees
++ * the wrapper, and drops its wrapper-lifetime parent hold.
+  */
+ uint32_t NPT_STDMETHODCALLTYPE
+ npt_com_default_release(void *self);
+diff --git a/src/virtio/neptune/npt_object.h b/src/virtio/neptune/npt_object.h
+index b32f2d2ec17..1b9d67b7b91 100644
+--- a/src/virtio/neptune/npt_object.h
++++ b/src/virtio/neptune/npt_object.h
+@@ -21,8 +21,8 @@ struct npt_ring;
+  * Dual refcount: pub_ref is what AddRef/Release expose to the app;
+  * priv_ref is the runtime's internal hold (in-flight RPCs, parent
+  * coupling).  Destruction only happens when both reach zero.  A child
+- * wrapper holds a priv_ref on its parent for the duration of its own
+- * pub_ref>0 lifetime, mirroring the D3D11DeviceChild contract.
++ * wrapper holds a priv_ref on its parent for the child's entire wrapper
++ * lifetime, including while pub_ref is zero but private holds keep it alive.
+  */
+ struct npt_object {
+    uint64_t id;
