@@ -16,7 +16,7 @@ capture_repo() {
     latest="$ROOT/patches/wip/latest-${name}.patch"
     tmp="${out}.tmp"
 
-    ssh "$TARGET" \
+    ssh -n "$TARGET" \
         "git -C \"\$HOME/$repo_rel\" diff --binary '$commit'" > "$tmp"
 
     if [ ! -s "$tmp" ]; then

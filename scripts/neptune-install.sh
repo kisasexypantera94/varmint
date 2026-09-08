@@ -16,7 +16,7 @@ EXE_REL="${2:-}"
 scp -q "$ROOT/guest/neptune/install.sh" "$TARGET:$REMOTE"
 
 if [ -n "$EXE_REL" ]; then
-    ssh "$TARGET" "chmod +x '$REMOTE' && '$REMOTE' '$APPID' '$EXE_REL'"
+    ssh -n "$TARGET" "chmod +x '$REMOTE' && '$REMOTE' '$APPID' '$EXE_REL'"
 else
-    ssh "$TARGET" "chmod +x '$REMOTE' && '$REMOTE' '$APPID'"
+    ssh -n "$TARGET" "chmod +x '$REMOTE' && '$REMOTE' '$APPID'"
 fi

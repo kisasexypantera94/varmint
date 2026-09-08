@@ -83,6 +83,23 @@ install -m 0644 "$D3D11" "$TARGET_DIR/d3d11.dll"
 install -m 0644 "$DXGI"  "$TARGET_DIR/dxgi.dll"
 install -m 0644 "$NPTDLL" "$TARGET_DIR/nptunix.dll"
 
+cmp -s "$D3D11" "$TARGET_DIR/d3d11.dll" || {
+    echo "d3d11.dll copy verification failed" >&2
+    exit 1
+}
+cmp -s "$DXGI" "$TARGET_DIR/dxgi.dll" || {
+    echo "dxgi.dll copy verification failed" >&2
+    exit 1
+}
+cmp -s "$NPTDLL" "$TARGET_DIR/nptunix.dll" || {
+    echo "nptunix.dll copy verification failed" >&2
+    exit 1
+}
+cmp -s "$NPTSO" "$RUNTIME/x86_64-unix/nptunix.so" || {
+    echo "nptunix.so copy verification failed" >&2
+    exit 1
+}
+
 echo "=== installed ==="
 echo "game:       $GAME"
 echo "target dir: $TARGET_DIR"

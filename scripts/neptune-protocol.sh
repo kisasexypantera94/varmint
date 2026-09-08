@@ -38,7 +38,7 @@ host_wt="$tmp/virglrenderer"
 cleanup() {
     git -C "$HOST_REPO" worktree remove --force "$host_wt" >/dev/null 2>&1 || true
     rm -rf "$tmp"
-    ssh "$TARGET" "rm -rf '$remote_stage'" >/dev/null 2>&1 || true
+    ssh -n "$TARGET" "rm -rf '$remote_stage'" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
