@@ -27,3 +27,22 @@ run: bundle
 
 clean:
 	rm -rf "$(CURDIR)/build" "$(CURDIR)/dist"
+
+.PHONY: neptune-sync neptune-build neptune-install
+
+neptune-sync:
+	./scripts/neptune-sync.sh --force
+
+neptune-build:
+	./scripts/neptune-build.sh
+
+neptune-install:
+	@test -n "$(APPID)" || (echo "usage: make neptune-install APPID=<steam-appid> [EXE='path/to/game.exe']" >&2; exit 2)
+	./scripts/neptune-install.sh "$(APPID)" "$(EXE)"
+
+.PHONY: neptune-capture
+
+neptune-capture:
+	./scripts/neptune-capture.sh
+
+

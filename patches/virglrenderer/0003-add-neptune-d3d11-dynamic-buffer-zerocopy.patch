@@ -1,5 +1,5 @@
 diff --git a/src/neptune/npt_context.c b/src/neptune/npt_context.c
-index 90dbb6e9..c2923a80 100644
+index b7aba5df..f3a30bb9 100644
 --- a/src/neptune/npt_context.c
 +++ b/src/neptune/npt_context.c
 @@ -22,6 +22,7 @@
@@ -10,7 +10,7 @@ index 90dbb6e9..c2923a80 100644
  #include "npt_ring.h"
  #include "npt_shared.h"
  #include "neptune-protocol/npt_protocol_host_dispatch.h"
-@@ -353,6 +354,29 @@ npt_context_lookup_object(struct npt_context *ctx,
+@@ -434,6 +435,29 @@ npt_context_lookup_object(struct npt_context *ctx,
     return obj;
  }
  
@@ -40,9 +40,9 @@ index 90dbb6e9..c2923a80 100644
  void
  npt_context_release_object(struct npt_context *ctx, uint64_t guest_id)
  {
-@@ -588,6 +612,10 @@ npt_context_destroy(struct npt_context *ctx)
-    npt_event_drain_parked_fences(ctx);
-    npt_event_fini(ctx);
+@@ -789,6 +813,10 @@ npt_context_destroy(struct npt_context *ctx)
+    free(ctx->destroyed_ring_ids);
+    mtx_destroy(&ctx->deferred_mutex);
  
 +   /* Close real DXMT Maps while their pinned COM objects are still alive.
 +    * Ring threads are already stopped, so sync-map state is quiescent. */
@@ -52,7 +52,7 @@ index 90dbb6e9..c2923a80 100644
      * teardown.  Free any straggler entries to plug a guest leak. */
     hash_table_foreach(ctx->object_table, entry) {
 diff --git a/src/neptune/npt_context.h b/src/neptune/npt_context.h
-index 0e36cfb9..8a1fb7ff 100644
+index b334af70..9c1190fb 100644
 --- a/src/neptune/npt_context.h
 +++ b/src/neptune/npt_context.h
 @@ -43,6 +43,9 @@ struct npt_sync_map_entry {
@@ -65,7 +65,7 @@ index 0e36cfb9..8a1fb7ff 100644
  };
  
  struct npt_resource {
-@@ -367,6 +370,12 @@ npt_context_lookup_object(struct npt_context *ctx,
+@@ -418,6 +421,12 @@ npt_context_lookup_object(struct npt_context *ctx,
                            uint64_t id,
                            npt_object_type expected);
  
@@ -79,7 +79,7 @@ index 0e36cfb9..8a1fb7ff 100644
   * the object_table entry, then drop the host-library ref via
   * IUnknown::Release.  Stray RELEASE on an unregistered id is silent. */
 diff --git a/src/neptune/npt_dispatch.c b/src/neptune/npt_dispatch.c
-index ce807fa3..e21503e7 100644
+index 30787164..f74f84b0 100644
 --- a/src/neptune/npt_dispatch.c
 +++ b/src/neptune/npt_dispatch.c
 @@ -31,6 +31,35 @@ npt_dispatch_is_ring_dispatch(const struct npt_context *ctx,
@@ -118,7 +118,7 @@ index ce807fa3..e21503e7 100644
  static void
  npt_dispatch_set_reply_stream(struct npt_context *ctx,
                                struct npt_cs_decoder *dec,
-@@ -339,7 +368,8 @@ npt_dispatch_map_resource(struct npt_context *ctx,
+@@ -355,7 +384,8 @@ npt_dispatch_map_resource(struct npt_context *ctx,
        cmd.read_range_begin, cmd.read_range_end,
        cmd.byte_size, cmd.mip_height, cmd.mip_depth,
        cmd.shmem_offset,
@@ -128,7 +128,7 @@ index ce807fa3..e21503e7 100644
  
     if (header->cmd_flags & NPT_CMD_FLAG_REPLY) {
        if (npt_cs_encoder_acquire(enc)) {
-@@ -630,6 +660,9 @@ npt_dispatch_subgroup_resource(struct npt_context *ctx,
+@@ -679,6 +709,9 @@ npt_dispatch_subgroup_resource(struct npt_context *ctx,
     case NPT_TRANSPORT_RESOURCE_CREATE_HEAP_FROM_SHMEM:
        npt_dispatch_create_heap_from_shmem(ctx, dec, enc, header);
        return true;
@@ -427,10 +427,10 @@ index 6f55b724..efe02501 100644
  /* RESOURCE_UNMAP.  written_range_{begin,end} are accepted for the
   * D3D12 path (pWrittenRange) and ignored on D3D11. */
 diff --git a/src/neptune/npt_transport_defs.h b/src/neptune/npt_transport_defs.h
-index b4f42c39..5870559c 100644
+index f448f2fa..0a348ee5 100644
 --- a/src/neptune/npt_transport_defs.h
 +++ b/src/neptune/npt_transport_defs.h
-@@ -191,6 +191,11 @@ struct npt_cmd_com_query_interface_reply {
+@@ -221,6 +221,11 @@ struct npt_cmd_com_query_interface_reply {
  #define NPT_TRANSPORT_RESOURCE_UNMAP                 2u
  #define NPT_TRANSPORT_RESOURCE_EXECUTE_CMD_STREAM    3u
  #define NPT_TRANSPORT_RESOURCE_CREATE_HEAP_FROM_SHMEM 4u
@@ -442,7 +442,7 @@ index b4f42c39..5870559c 100644
  
  /* UpdateSubresource(1) wire path; also serves D3D11_SUBRESOURCE_DATA
   * pSysMem.  D3D12 WriteToSubresource has identical shape (same box
-@@ -276,7 +281,8 @@ struct npt_cmd_map_resource_reply {
+@@ -306,7 +311,8 @@ struct npt_cmd_map_resource_reply {
     uint32_t row_pitch;
     uint32_t depth_pitch;
     uint32_t mapped_size;      /* 0 for persistent */
@@ -452,7 +452,7 @@ index b4f42c39..5870559c 100644
  };
  
  /* Synchronous: guest must not submit Draws reading this resource until
-@@ -336,6 +342,24 @@ struct npt_cmd_create_heap_from_shmem_reply {
+@@ -366,6 +372,24 @@ struct npt_cmd_create_heap_from_shmem_reply {
     struct npt_reply_header header; /* header.cmd_return = HRESULT */
  };
  

@@ -155,15 +155,27 @@ prepare_python() {
     --disable-pip-version-check --quiet --upgrade pip pyyaml
 }
 
+virgl_patch_files() {
+  local patch_name
+
+  while IFS= read -r patch_name; do
+    [ -n "$patch_name" ] || continue
+    printf '%s\n' "$ROOT/patches/virglrenderer/$patch_name"
+  done < "$VIRGL_PATCH_SERIES"
+}
+
 build_virglrenderer() {
   local source="$DEPS_SRC/virglrenderer"
   local patch
 
   log "virglrenderer"
   checkout_repo "$VIRGL_REPOSITORY" "$VIRGL_COMMIT" "$source"
-  for patch in "${VIRGL_PATCHES[@]}"; do
+
+  apply_dependency_patch "$source" "$VIRGL_GENERATED_PATCH"
+
+  while IFS= read -r patch; do
     apply_dependency_patch "$source" "$patch"
-  done
+  done < <(virgl_patch_files)
   prepare_python
   (
     export PATH="$DEPS_VENV/bin:$PATH"
@@ -221,13 +233,23 @@ verify_dependency_prefix() {
 }
 
 dependency_recipe_hash() {
+  local patch
+
   cat \
     "$MANIFEST" \
     "${MOLTENVK_PATCHES[@]}" \
-    "${VIRGL_PATCHES[@]}" \
+    "$VIRGL_GENERATED_PATCH" \
+    "$VIRGL_PATCH_SERIES"
+
+  while IFS= read -r patch; do
+    cat "$patch"
+  done < <(virgl_patch_files)
+
+  cat \
     "${DXMT_PATCHES[@]}" \
     "$COMMON_SCRIPT" \
     "$DEPENDENCIES_SCRIPT"
+
   printf '%s\n' "$SDK" "$ARCH" "$CONFIGURATION"
 }
 
@@ -237,11 +259,16 @@ build_dependencies() {
 
   for patch in \
     "${MOLTENVK_PATCHES[@]}" \
-    "${VIRGL_PATCHES[@]}" \
+    "$VIRGL_GENERATED_PATCH" \
+    "$VIRGL_PATCH_SERIES" \
     "${DXMT_PATCHES[@]}"
   do
     need_file "$patch"
   done
+
+  while IFS= read -r patch; do
+    need_file "$patch"
+  done < <(virgl_patch_files)
   require_commands git xcodebuild meson ninja pkg-config rsync \
     install_name_tool codesign lipo shasum
 

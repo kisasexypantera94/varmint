@@ -4,17 +4,16 @@ set -euo pipefail
 SOURCE_IMAGE="${1:-}"
 OUTPUT_DIR=/output
 SCRIPT_DIR=/opt/varmint
-PUBLISH_DIR="$OUTPUT_DIR/.partial.$$"
+PUBLISH_DIR=""
 
 [ -n "$SOURCE_IMAGE" ] || { echo "error: source image path is required" >&2; exit 1; }
 [ -f "$SOURCE_IMAGE" ] || { echo "error: missing source image: $SOURCE_IMAGE" >&2; exit 1; }
 
 work_dir="$(mktemp -d /tmp/varmint-guest.XXXXXX)"
-trap 'rm -rf "$work_dir" "$PUBLISH_DIR"' EXIT
+trap 'rm -rf "$work_dir"; [ -z "$PUBLISH_DIR" ] || rm -rf "$PUBLISH_DIR"' EXIT
 work_image="$work_dir/varmint-debian.raw"
 stage="$work_dir/stage"
-rm -rf "$PUBLISH_DIR"
-mkdir -p "$OUTPUT_DIR" "$PUBLISH_DIR" "$stage"
+mkdir -p "$OUTPUT_DIR" "$stage"
 
 qemu-img convert -p -O raw "$SOURCE_IMAGE" "$work_image"
 
@@ -68,6 +67,8 @@ printf '%s\n' "$boot_files" | grep -Fx "$initrd_name" >/dev/null \
 
 virt-copy-out -a "$work_image" "/boot/$kernel_name" "$stage"
 virt-copy-out -a "$work_image" "/boot/$initrd_name" "$stage"
+
+PUBLISH_DIR="$(mktemp -d "$OUTPUT_DIR/.partial.XXXXXX")"
 install -m 0644 "$stage/$kernel_name" "$PUBLISH_DIR/Image"
 install -m 0644 "$stage/$initrd_name" "$PUBLISH_DIR/initrd"
 

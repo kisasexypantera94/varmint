@@ -18,11 +18,8 @@ MOLTENVK_PATCHES=(
   "$ROOT/patches/moltenvk/0002-fix-query-device-available-range.patch"
   "$ROOT/patches/moltenvk/0003-fix-query-copy-availability-offset.patch"
 )
-VIRGL_PATCHES=(
-  "$ROOT/patches/virglrenderer/0001-revert-neptune-oob-event-fence-channel.patch"
-  "$ROOT/patches/virglrenderer/0002-fix-neptune-renderer-lifecycle.patch"
-  "$ROOT/patches/virglrenderer/0003-add-neptune-d3d11-dynamic-buffer-zerocopy.patch"
-)
+VIRGL_GENERATED_PATCH="$ROOT/patches/neptune-generated/virglrenderer.patch"
+VIRGL_PATCH_SERIES="$ROOT/patches/virglrenderer/series"
 DXMT_PATCHES=(
   "$ROOT/patches/dxmt/0001-neptune-d3d11-correctness-and-zerocopy.patch"
 )

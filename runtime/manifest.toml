@@ -27,7 +27,7 @@ version = "1.4.2-utm-geometry"
 
 [dependencies.virglrenderer]
 repository = "https://github.com/utmapp/virglrenderer.git"
-commit = "482f9d8b8c2d2288efa10a027116216909d2c226"
+commit = "a2c0dbada964e2f2fa3cdf26f2fa736b6e32ec0e"
 
 [dependencies.dxmt]
 repository = "https://github.com/utmapp/dxmt.git"
