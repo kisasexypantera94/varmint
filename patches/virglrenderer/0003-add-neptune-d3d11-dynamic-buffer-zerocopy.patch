@@ -1,5 +1,5 @@
 diff --git a/src/neptune/npt_context.c b/src/neptune/npt_context.c
-index b7aba5df..f3a30bb9 100644
+index b7aba5df..f65359e7 100644
 --- a/src/neptune/npt_context.c
 +++ b/src/neptune/npt_context.c
 @@ -22,6 +22,7 @@
@@ -10,10 +10,54 @@ index b7aba5df..f3a30bb9 100644
  #include "npt_ring.h"
  #include "npt_shared.h"
  #include "neptune-protocol/npt_protocol_host_dispatch.h"
-@@ -434,6 +435,29 @@ npt_context_lookup_object(struct npt_context *ctx,
+@@ -93,6 +94,43 @@ npt_context_free_detached_resource(struct npt_resource *res)
+    npt_resource_free(res);
+ }
+
++struct npt_resource *
++npt_context_pin_resource(struct npt_context *ctx, uint32_t res_id)
++{
++   if (!ctx || !ctx->resource_table)
++      return NULL;
++
++   mtx_lock(&ctx->resource_mutex);
++   const struct hash_entry *entry =
++      _mesa_hash_table_search(ctx->resource_table, &res_id);
++   struct npt_resource *res = entry ? entry->data : NULL;
++   if (res)
++      res->pin_count++;
++   mtx_unlock(&ctx->resource_mutex);
++
++   return res;
++}
++
++void
++npt_context_unpin_resource(struct npt_context *ctx,
++                           struct npt_resource *res)
++{
++   if (!ctx || !res)
++      return;
++
++   mtx_lock(&ctx->resource_mutex);
++   assert(res->pin_count > 0);
++   res->pin_count--;
++   const bool free_now =
++      res->zombie &&
++      res->pin_count == 0 &&
++      res->heap_import_count == 0;
++   mtx_unlock(&ctx->resource_mutex);
++
++   if (free_now)
++      npt_context_free_detached_resource(res);
++}
++
+ /* Overrides are set only where the default dispatcher cannot cope:
+  * top-level functions (no _self for dlsym to bind against),
+  * shared-HANDLE rejection, and feedback lifecycle hooks.  All other
+@@ -434,6 +472,29 @@ npt_context_lookup_object(struct npt_context *ctx,
     return obj;
  }
- 
+
 +void *
 +npt_context_lookup_object_addref(struct npt_context *ctx,
 +                                 uint64_t id,
@@ -40,10 +84,10 @@ index b7aba5df..f3a30bb9 100644
  void
  npt_context_release_object(struct npt_context *ctx, uint64_t guest_id)
  {
-@@ -789,6 +813,10 @@ npt_context_destroy(struct npt_context *ctx)
+@@ -789,6 +850,10 @@ npt_context_destroy(struct npt_context *ctx)
     free(ctx->destroyed_ring_ids);
     mtx_destroy(&ctx->deferred_mutex);
- 
+
 +   /* Close real DXMT Maps while their pinned COM objects are still alive.
 +    * Ring threads are already stopped, so sync-map state is quiescent. */
 +   npt_resource_drain_external_maps(ctx);
@@ -51,8 +95,37 @@ index b7aba5df..f3a30bb9 100644
     /* Guests are expected to release every COM object before context
      * teardown.  Free any straggler entries to plug a guest leak. */
     hash_table_foreach(ctx->object_table, entry) {
+@@ -1436,19 +1501,20 @@ npt_context_destroy_resource(struct npt_context *ctx, uint32_t res_id)
+       npt_ring_destroy(ring);
+    }
+
+-   /* A live ID3D12Heap import still aliases this mapping, so munmapping
+-    * it now is undefined under the host graphics driver.  Park the
+-    * detached entry as a zombie for the last import to free. */
++   /* The resource is already detached from resource_table.  Existing
++    * users may still hold either a long-lived heap import or a transient
++    * command pin; in either case the backing mapping/fd must remain live. */
+    mtx_lock(&ctx->resource_mutex);
+    const uint32_t imports = res->heap_import_count;
+-   if (imports > 0)
++   const uint32_t pins = res->pin_count;
++   if (imports > 0 || pins > 0)
+       res->zombie = true;
+    mtx_unlock(&ctx->resource_mutex);
+
+-   if (imports > 0) {
+-      npt_log("destroy_resource: res %u still imported by %u D3D12 heap(s); "
+-              "DEFERRING munmap until heap release (zombie)",
+-              res_id, imports);
++   if (imports > 0 || pins > 0) {
++      npt_log("destroy_resource: res %u still pinned "
++              "(heap_imports=%u transient=%u); DEFERRING free (zombie)",
++              res_id, imports, pins);
+       return;
+    }
+
 diff --git a/src/neptune/npt_context.h b/src/neptune/npt_context.h
-index b334af70..9c1190fb 100644
+index b334af70..a690d65b 100644
 --- a/src/neptune/npt_context.h
 +++ b/src/neptune/npt_context.h
 @@ -43,6 +43,9 @@ struct npt_sync_map_entry {
@@ -63,12 +136,40 @@ index b334af70..9c1190fb 100644
 +   void    *external_ctx;  /* owned COM ref while guest CPU map is live */
 +   void    *external_resource; /* owned COM ref while guest CPU map is live */
  };
- 
+
  struct npt_resource {
-@@ -418,6 +421,12 @@ npt_context_lookup_object(struct npt_context *ctx,
+@@ -68,6 +71,10 @@ struct npt_resource {
+     * marks the entry `zombie` instead and the last import released
+     * completes the free.  Both fields are guarded by resource_mutex. */
+    uint32_t heap_import_count;
++   /* Short-lived users of this npt_resource outside resource_mutex.
++    * destroy_resource detaches immediately but defers munmap/free until
++    * both import and transient pins have drained. */
++   uint32_t pin_count;
+    bool zombie;
+ };
+
+@@ -282,6 +289,16 @@ npt_context_import_resource(struct npt_context *ctx,
+ void
+ npt_context_destroy_resource(struct npt_context *ctx, uint32_t res_id);
+
++/* Atomically look up a resource and hold its backing mapping/fd alive
++ * after resource_mutex is dropped.  A detached zombie is freed by the
++ * last transient/import pin. */
++struct npt_resource *
++npt_context_pin_resource(struct npt_context *ctx, uint32_t res_id);
++
++void
++npt_context_unpin_resource(struct npt_context *ctx,
++                           struct npt_resource *res);
++
+ /* Free a resource already detached from resource_table, completing a
+  * munmap that was deferred while it was pinned. */
+ void
+@@ -418,6 +435,12 @@ npt_context_lookup_object(struct npt_context *ctx,
                            uint64_t id,
                            npt_object_type expected);
- 
+
 +/* Lookup and AddRef atomically with respect to object-table removal. */
 +void *
 +npt_context_lookup_object_addref(struct npt_context *ctx,
@@ -85,7 +186,7 @@ index 30787164..f74f84b0 100644
 @@ -31,6 +31,35 @@ npt_dispatch_is_ring_dispatch(const struct npt_context *ctx,
     return dispatch->decoder != &ctx->decoder;
  }
- 
+
 +static void
 +npt_dispatch_bind_d3d11_buffer_shmem(struct npt_context *ctx,
 +                                     struct npt_cs_decoder *dec,
@@ -125,7 +226,7 @@ index 30787164..f74f84b0 100644
 -      &reply.row_pitch, &reply.depth_pitch, &reply.mapped_size);
 +      &reply.row_pitch, &reply.depth_pitch, &reply.mapped_size,
 +      &reply.external_cookie);
- 
+
     if (header->cmd_flags & NPT_CMD_FLAG_REPLY) {
        if (npt_cs_encoder_acquire(enc)) {
 @@ -679,6 +709,9 @@ npt_dispatch_subgroup_resource(struct npt_context *ctx,
@@ -138,6 +239,21 @@ index 30787164..f74f84b0 100644
     default:
        return false;
     }
+diff --git a/src/neptune/npt_heap12.c b/src/neptune/npt_heap12.c
+index e5271764..367e89bd 100644
+--- a/src/neptune/npt_heap12.c
++++ b/src/neptune/npt_heap12.c
+@@ -64,7 +64,9 @@ npt_heap12_unpin(struct npt_context *ctx, struct npt_resource *res)
+    mtx_lock(&ctx->resource_mutex);
+    assert(res->heap_import_count > 0);
+    res->heap_import_count--;
+-   const bool free_now = res->zombie && res->heap_import_count == 0;
++   const bool free_now = res->zombie &&
++                         res->heap_import_count == 0 &&
++                         res->pin_count == 0;
+    const uint32_t res_id = res->res_id;
+    mtx_unlock(&ctx->resource_mutex);
+
 diff --git a/src/neptune/npt_library.c b/src/neptune/npt_library.c
 index acba38b4..d74f531a 100644
 --- a/src/neptune/npt_library.c
@@ -174,7 +290,7 @@ index 250d57f2..af185902 100644
 @@ -71,6 +71,13 @@ typedef HRESULT (*PFN_npt_lib_darwin_open_existing_heap_from_fd)(
     void *device, int fd, uint64_t offset, uint64_t size,
     uint32_t heap_type, uint32_t heap_flags, const GUID *iid, void **heap);
- 
+
 +typedef int32_t (*PFN_npt_lib_dxmt_d3d11_buffer_bind_external_fd)(
 +   void *buffer, int fd, uint64_t backing_length,
 +   uint32_t cookie, uint32_t flags);
@@ -196,24 +312,24 @@ index 250d57f2..af185902 100644
 +   PFN_npt_lib_dxmt_d3d11_buffer_external_cookie
 +      pfn_dxmt_d3d11_buffer_external_cookie;
     enum npt_backend_kind backend;
- 
+
     /* NPT_WA_* bits describing the workarounds the loaded backend needs, set in
 diff --git a/src/neptune/npt_resource.c b/src/neptune/npt_resource.c
-index 279bc4de..01b3d3c5 100644
+index 279bc4de..70ffc8c1 100644
 --- a/src/neptune/npt_resource.c
 +++ b/src/neptune/npt_resource.c
 @@ -16,6 +16,7 @@
- 
+
  #include "npt_com.h"
  #include "npt_context.h"
 +#include "npt_library.h"
  #include "npt_transport_defs.h"
- 
+
  #include "neptune-protocol/npt_protocol_host_dispatch_types.h"
-@@ -213,6 +214,72 @@ npt_sync_map_remove(struct npt_context *ctx, struct npt_sync_map_entry *e)
+@@ -213,6 +214,76 @@ npt_sync_map_remove(struct npt_context *ctx, struct npt_sync_map_entry *e)
        ctx->sync_maps.entries[--ctx->sync_maps.count];
  }
- 
+
 +static void
 +npt_external_map_close(struct npt_sync_map_entry *entry)
 +{
@@ -267,15 +383,19 @@ index 279bc4de..01b3d3c5 100644
 +   if (!buffer)
 +      return NPT_E_INVALIDARG;
 +
-+   struct npt_resource *shmem = npt_context_get_resource(ctx, shmem_res_id);
++   struct npt_resource *shmem =
++      npt_context_pin_resource(ctx, shmem_res_id);
 +   if (!shmem || shmem->fd_type != VIRGL_RESOURCE_FD_SHM ||
 +       shmem->u.fd < 0 || !byte_size || byte_size > shmem->size) {
++      if (shmem)
++         npt_context_unpin_resource(ctx, shmem);
 +      npt_com_release(buffer);
 +      return NPT_E_INVALIDARG;
 +   }
 +
 +   HRESULT hr = (HRESULT)lib->pfn_dxmt_d3d11_buffer_bind_external_fd(
 +      buffer, shmem->u.fd, shmem->size, cookie, flags);
++   npt_context_unpin_resource(ctx, shmem);
 +   npt_com_release(buffer);
 +   return hr;
 +}
@@ -283,7 +403,7 @@ index 279bc4de..01b3d3c5 100644
  HRESULT
  npt_resource_map(struct npt_context *ctx,
                   uint64_t context_id, uint64_t resource_id,
-@@ -224,11 +291,99 @@ npt_resource_map(struct npt_context *ctx,
+@@ -224,11 +295,99 @@ npt_resource_map(struct npt_context *ctx,
                   uint32_t mip_height, uint32_t mip_depth,
                   uint32_t shmem_offset,
                   uint32_t *out_row_pitch, uint32_t *out_depth_pitch,
@@ -381,10 +501,93 @@ index 279bc4de..01b3d3c5 100644
 +            npt_com_release(external_resource);
 +      }
 +   }
- 
+
     void *resource = npt_context_lookup_object(ctx, NULL, resource_id,
                                                NPT_OBJECT_TYPE_IUNKNOWN);
-@@ -370,6 +525,16 @@ npt_resource_unmap(struct npt_context *ctx,
+@@ -240,17 +399,24 @@ npt_resource_map(struct npt_context *ctx,
+                                     "map_resource"))
+       return NPT_E_INVALIDARG;
+
++   /* CTX_DETACH_RESOURCE is not ordered against ring commands.
++    * Keep the SHM backing alive until this MAP_RESOURCE command has
++    * finished reading/writing the transport slot. */
+    struct npt_resource *shmem_res =
+-      npt_context_get_resource(ctx, shmem_res_id);
++      npt_context_pin_resource(ctx, shmem_res_id);
+    if (!shmem_res || shmem_res->fd_type != VIRGL_RESOURCE_FD_SHM ||
+        !shmem_res->u.data) {
++      if (shmem_res)
++         npt_context_unpin_resource(ctx, shmem_res);
+       npt_log("map_resource: invalid SHM resource %u", shmem_res_id);
+       return NPT_E_FAIL;
+    }
+
+    if ((uint64_t)shmem_offset >= shmem_res->size) {
++      const size_t shmem_size = shmem_res->size;
++      npt_context_unpin_resource(ctx, shmem_res);
+       npt_log("map_resource: shmem_offset %u exceeds shmem size %zu",
+-              shmem_offset, shmem_res->size);
++              shmem_offset, shmem_size);
+       return NPT_E_FAIL;
+    }
+
+@@ -275,13 +441,17 @@ npt_resource_map(struct npt_context *ctx,
+                            npt_com_vtable(resource),
+                            NPT_VTBL_ID3D12Resource_Map);
+       if (!map12) {
++         npt_context_unpin_resource(ctx, shmem_res);
+          npt_log("map_resource: no D3D12 Map");
+          return NPT_E_FAIL;
+       }
+       hr = map12(resource, subresource, rr, &pData);
+-      if (NPT_FAILED(hr))
++      if (NPT_FAILED(hr)) {
++         npt_context_unpin_resource(ctx, shmem_res);
+          return hr;
++      }
+       if (!pData) {
++         npt_context_unpin_resource(ctx, shmem_res);
+          npt_log("map_resource: D3D12 Map returned NULL data");
+          return NPT_E_FAIL;
+       }
+@@ -290,6 +460,7 @@ npt_resource_map(struct npt_context *ctx,
+       void *imm_ctx = npt_context_lookup_object(ctx, NULL, context_id,
+                                                 NPT_OBJECT_TYPE_ID3D11DEVICECONTEXT);
+       if (!imm_ctx) {
++         npt_context_unpin_resource(ctx, shmem_res);
+          npt_log("map_resource: NULL immediate context");
+          return NPT_E_FAIL;
+       }
+@@ -305,8 +476,10 @@ npt_resource_map(struct npt_context *ctx,
+       hr = map_fn(imm_ctx, resource, subresource,
+                   d3d11_map_type, api_map_flags, &mapped);
+
+-      if (NPT_FAILED(hr))
++      if (NPT_FAILED(hr)) {
++         npt_context_unpin_resource(ctx, shmem_res);
+          return hr;
++      }
+    }
+
+    /* Memcpy bound for READ (and matching WRITE on the Unmap path):
+@@ -342,6 +515,7 @@ npt_resource_map(struct npt_context *ctx,
+    } else {
+       entry = npt_sync_map_add(ctx);
+       if (!entry) {
++         npt_context_unpin_resource(ctx, shmem_res);
+          npt_log("map_resource: sync map table OOM");
+          return NPT_E_OUTOFMEMORY;
+       }
+@@ -358,6 +532,8 @@ npt_resource_map(struct npt_context *ctx,
+    *out_row_pitch = mapped.RowPitch;
+    *out_depth_pitch = mapped.DepthPitch;
+    *out_mapped_size = mapped_size;
++
++   npt_context_unpin_resource(ctx, shmem_res);
+    return hr;
+ }
+
+@@ -370,6 +546,16 @@ npt_resource_unmap(struct npt_context *ctx,
                     uint64_t written_range_begin,
                     uint64_t written_range_end)
  {
@@ -401,6 +604,107 @@ index 279bc4de..01b3d3c5 100644
     void *resource = npt_context_lookup_object(ctx, NULL, resource_id,
                                                NPT_OBJECT_TYPE_IUNKNOWN);
     if (!resource) {
+@@ -380,36 +566,43 @@ npt_resource_unmap(struct npt_context *ctx,
+                                     "unmap_resource"))
+       return NPT_E_INVALIDARG;
+
++   /* CTX_DETACH_RESOURCE is a virtio control command and is not ordered
++    * against ring commands.  Hold the SHM backing alive until this
++    * UNMAP_RESOURCE command has finished consuming its slot. */
+    struct npt_resource *shmem_res =
+-      npt_context_get_resource(ctx, shmem_res_id);
++      npt_context_pin_resource(ctx, shmem_res_id);
++
+    if (!shmem_res || shmem_res->fd_type != VIRGL_RESOURCE_FD_SHM ||
+        !shmem_res->u.data) {
++      if (shmem_res)
++         npt_context_unpin_resource(ctx, shmem_res);
+       npt_log("unmap_resource: invalid SHM resource %u", shmem_res_id);
+       return NPT_E_FAIL;
+    }
+
+-   /* Bounds check the slot window. */
+    if ((uint64_t)shmem_offset + byte_size > shmem_res->size) {
++      const size_t shmem_size = shmem_res->size;
++      npt_context_unpin_resource(ctx, shmem_res);
+       npt_log("unmap_resource: slot window [%u, %u+%" PRIu64 ") "
+               "exceeds shmem size %zu",
+-              shmem_offset, shmem_offset, byte_size,
+-              shmem_res->size);
++              shmem_offset, shmem_offset, byte_size, shmem_size);
+       return NPT_E_FAIL;
+    }
++
+    const uint8_t *slot_src =
+       (const uint8_t *)shmem_res->u.data + shmem_offset;
+
+    if (access_flags) {
+-      /* Rename-ring path: no prior MAP_RESOURCE; replay the full
+-       * Map + memcpy + Unmap cycle here. */
+       if (!context_id) {
++         npt_context_unpin_resource(ctx, shmem_res);
+          npt_log("unmap_resource: access_flags path requires context_id");
+          return NPT_E_FAIL;
+       }
+
+-      void *imm_ctx = npt_context_lookup_object(ctx, NULL, context_id,
+-                                                 NPT_OBJECT_TYPE_ID3D11DEVICECONTEXT);
++      void *imm_ctx = npt_context_lookup_object(
++         ctx, NULL, context_id, NPT_OBJECT_TYPE_ID3D11DEVICECONTEXT);
+       if (!imm_ctx) {
++         npt_context_unpin_resource(ctx, shmem_res);
+          npt_log("unmap_resource: NULL immediate context");
+          return NPT_E_FAIL;
+       }
+@@ -431,6 +624,7 @@ npt_resource_unmap(struct npt_context *ctx,
+       HRESULT hr = map_fn(imm_ctx, resource, subresource,
+                           d3d11_map_type, 0, &mapped);
+       if (NPT_FAILED(hr)) {
++         npt_context_unpin_resource(ctx, shmem_res);
+          npt_log("unmap_resource: rename-ring Map failed 0x%08x", hr);
+          return NPT_E_FAIL;
+       }
+@@ -442,35 +636,36 @@ npt_resource_unmap(struct npt_context *ctx,
+          memcpy(mapped.pData, slot_src, (size_t)bound);
+       }
+
++      npt_context_unpin_resource(ctx, shmem_res);
+       unmap_fn(imm_ctx, resource, subresource);
+       return NPT_S_OK;
+    }
+
+-   /* Paired with a prior MAP_RESOURCE. */
+    struct npt_sync_map_entry *entry =
+       npt_sync_map_find(ctx, resource_id, subresource);
+    if (!entry) {
++      npt_context_unpin_resource(ctx, shmem_res);
+       npt_log("unmap_resource: resource 0x%" PRIx64 " sub %u not mapped",
+               resource_id, subresource);
+       return NPT_E_FAIL;
+    }
+
+    if (entry->persistent) {
++      npt_context_unpin_resource(ctx, shmem_res);
+       npt_log("unmap_resource: resource 0x%" PRIx64 " is persistent, "
+               "ignoring unmap", resource_id);
+       return NPT_E_FAIL;
+    }
+
+    if (entry->access_flags & NPT_MAP_ACCESS_WRITE) {
+-      /* MIN(guest byte_size, recorded mapped_size) so we don't
+-       * overrun the D3D region with stale/padded SHM bytes.  0 means
+-       * "use the full mapped_size". */
+       uint64_t bound = byte_size ? byte_size : entry->mapped_size;
+       if (bound > entry->mapped_size)
+          bound = entry->mapped_size;
+       memcpy(entry->mapped_data, slot_src, (size_t)bound);
+    }
+
++   npt_context_unpin_resource(ctx, shmem_res);
++
+    if (!context_id) {
+       D3D12_RANGE written_range;
+       const D3D12_RANGE *wr = NULL;
 diff --git a/src/neptune/npt_resource.h b/src/neptune/npt_resource.h
 index 6f55b724..efe02501 100644
 --- a/src/neptune/npt_resource.h
@@ -423,7 +727,7 @@ index 6f55b724..efe02501 100644
 +
 +/* Context teardown helper; leaves ordinary D3D11/D3D12 sync maps alone. */
 +void npt_resource_drain_external_maps(struct npt_context *ctx);
- 
+
  /* RESOURCE_UNMAP.  written_range_{begin,end} are accepted for the
   * D3D12 path (pWrittenRange) and ignored on D3D11. */
 diff --git a/src/neptune/npt_transport_defs.h b/src/neptune/npt_transport_defs.h
@@ -439,7 +743,7 @@ index f448f2fa..0a348ee5 100644
 +#define NPT_D3D11_EXTERNAL_BIND_INITIAL 0x1u
 +#define NPT_EXTERNAL_COOKIE_NONE 0xffffffffu
 +#define NPT_E_NEED_EXTERNAL_BUFFER_ALLOCATION ((HRESULT)0x8004d101u)
- 
+
  /* UpdateSubresource(1) wire path; also serves D3D11_SUBRESOURCE_DATA
   * pSysMem.  D3D12 WriteToSubresource has identical shape (same box
 @@ -306,7 +311,8 @@ struct npt_cmd_map_resource_reply {
@@ -450,12 +754,12 @@ index f448f2fa..0a348ee5 100644
 +   /* D3D11 external-buffer path: guest-visible backing index. */
 +   uint32_t external_cookie;
  };
- 
+
  /* Synchronous: guest must not submit Draws reading this resource until
 @@ -366,6 +372,24 @@ struct npt_cmd_create_heap_from_shmem_reply {
     struct npt_reply_header header; /* header.cmd_return = HRESULT */
  };
- 
+
 +/* Synchronous.  Attach one guest SHM blob as a physical allocation in
 + * a DXMT dynamic ID3D11Buffer.  The backend duplicates the fd before
 + * this command replies, so the virtio resource can subsequently die

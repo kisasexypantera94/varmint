@@ -112,13 +112,14 @@ install -m 0644 "$ART/nptunix/nptunix.dll" \
 install -m 0755 "$ART/nptunix/nptunix.so" \
     "$RUNTIME/x86_64-unix/nptunix.so"
 
-# Builddir contains absolute /opt/varmint/neptune/src paths. The source trees
-# are retained, but firstboot recreates the builddir after moving them into
-# the user's home.
-rm -rf "$BUILD"
+# This is a builder-only checkout and is not copied into the final guest.
+# varmint-neptune-dev-setup remains the optional path for creating user-owned
+# development checkouts inside a running VM.
+rm -rf "$SRC"
 
 test -f "$RUNTIME/x86_64-windows/d3d11.dll"
 test -f "$RUNTIME/x86_64-windows/dxgi.dll"
+test -f "$RUNTIME/x86_64-windows/d3d12.dll"
 test -f "$RUNTIME/x86_64-windows/nptunix.dll"
 test -f "$RUNTIME/x86_64-unix/nptunix.so"
 

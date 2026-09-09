@@ -43,6 +43,31 @@ fn choose_config() -> Option<PathBuf> {
     (!path.is_empty()).then_some(PathBuf::from(path))
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum NeptuneBackend {
+    #[default]
+    Dxmt,
+    D3dmetal,
+}
+
+impl NeptuneBackend {
+    pub fn as_env(self) -> &'static str {
+        match self {
+            Self::Dxmt => "dxmt",
+            Self::D3dmetal => "d3dmetal",
+        }
+    }
+
+    pub fn from_env(value: &str) -> Option<Self> {
+        match value {
+            "dxmt" => Some(Self::Dxmt),
+            "d3dmetal" => Some(Self::D3dmetal),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct VmConfig {
     pub memory_size: usize,
@@ -53,6 +78,7 @@ pub struct VmConfig {
     pub kernel: PathBuf,
     pub initrd: Option<PathBuf>,
     pub kernel_args: String,
+    pub neptune_backend: NeptuneBackend,
 }
 
 #[derive(Debug, Deserialize)]
@@ -69,6 +95,8 @@ struct VmConfigFile {
     kernel: Option<PathBuf>,
     initrd: Option<PathBuf>,
     kernel_args: Option<Vec<String>>,
+    #[serde(default)]
+    neptune_backend: NeptuneBackend,
 }
 
 impl VmConfig {
@@ -155,6 +183,7 @@ impl VmConfig {
             kernel,
             initrd,
             kernel_args,
+            neptune_backend: config.neptune_backend,
         }
     }
 }

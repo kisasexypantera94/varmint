@@ -1,6 +1,6 @@
 use crate::{
     app, audio, clipboard,
-    config::VmConfig,
+    config::{NeptuneBackend, VmConfig},
     devices::{HostBackends, Runtime, RuntimeEvent},
     display::{DisplayBuffer, DisplayEvent},
     machine::*,
@@ -157,6 +157,57 @@ fn validate_boot_layout(memory_size: usize, image_size: usize, initrd: Option<&[
 
 pub fn run(config_path: &Path) -> Result<()> {
     let config = VmConfig::load(config_path);
+
+    let neptune_backend = match std::env::var("NPT_BACKEND") {
+        Ok(value) => NeptuneBackend::from_env(&value)
+            .unwrap_or_else(|| panic!("invalid NPT_BACKEND={value:?}; expected dxmt or d3dmetal")),
+        Err(std::env::VarError::NotPresent) => config.neptune_backend,
+        Err(error) => panic!("invalid NPT_BACKEND: {error}"),
+    };
+
+    unsafe {
+        std::env::set_var("NPT_BACKEND", neptune_backend.as_env());
+    }
+
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(contents) = executable.parent().and_then(|path| path.parent()) {
+            if std::env::var_os("RENDER_SERVER_EXEC_PATH").is_none() {
+                let render_server = contents.join("Helpers/virgl_render_server");
+                if render_server.is_file() {
+                    unsafe {
+                        std::env::set_var("RENDER_SERVER_EXEC_PATH", render_server);
+                    }
+                }
+            }
+
+            if matches!(neptune_backend, NeptuneBackend::D3dmetal) {
+                let d3dmetal = contents.join("Frameworks/libd3dmetal-native.dylib");
+                if d3dmetal.is_file() {
+                    if std::env::var_os("D3DMETAL_FRAMEWORK_PATH").is_none() {
+                        eprintln!(
+                            "warning: experimental d3dmetal backend selected but D3DMETAL_FRAMEWORK_PATH is not set"
+                        );
+                    }
+
+                    unsafe {
+                        if std::env::var_os("NPT_D3D11_LIBRARY_PATH").is_none() {
+                            std::env::set_var("NPT_D3D11_LIBRARY_PATH", &d3dmetal);
+                        }
+                        if std::env::var_os("NPT_DXGI_LIBRARY_PATH").is_none() {
+                            std::env::set_var("NPT_DXGI_LIBRARY_PATH", &d3dmetal);
+                        }
+                        if std::env::var_os("NPT_D3D12_LIBRARY_PATH").is_none() {
+                            std::env::set_var("NPT_D3D12_LIBRARY_PATH", &d3dmetal);
+                        }
+                        if std::env::var_os("NPT_CAPSET_D3D12").is_none() {
+                            std::env::set_var("NPT_CAPSET_D3D12", "1");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     prepare_disk(&config).unwrap_or_else(|error| {
         panic!(
             "failed to create VM disk {} from {}: {error}",

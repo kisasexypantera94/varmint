@@ -32,3 +32,7 @@ commit = "a2c0dbada964e2f2fa3cdf26f2fa736b6e32ec0e"
 [dependencies.dxmt]
 repository = "https://github.com/utmapp/dxmt.git"
 commit = "bcdcf6da89af6c9fedeb2fc92b4367b23d5d6ed6"
+
+[dependencies.d3dmetal]
+repository = "https://github.com/utmapp/d3dmetal-native.git"
+commit = "f0dd1fafded509c9a949535c773fdc4e3ab07a71"

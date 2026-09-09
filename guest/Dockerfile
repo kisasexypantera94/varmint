@@ -113,7 +113,7 @@ RUN install -Dm0755 /opt/varmint/source/build-image-container.sh /usr/local/bin/
     install -Dm0755 /opt/varmint/source/varmint-gpu-check /opt/varmint/rootfs/usr/local/bin/varmint-gpu-check && \
     install -Dm0755 /opt/varmint/source/varmint-steam /opt/varmint/rootfs/usr/local/bin/varmint-steam && \
     install -Dm0755 /opt/varmint/source/neptune/build.sh /opt/varmint/rootfs/usr/local/bin/varmint-neptune-build && \
-    install -Dm0755 /opt/varmint/source/neptune/install.sh /opt/varmint/rootfs/usr/local/bin/varmint-neptune-install && \
+    install -Dm0755 /opt/varmint/source/neptune/game-graphics.sh /opt/varmint/rootfs/usr/local/bin/varmint-game-graphics && \
     install -Dm0755 /opt/varmint/source/neptune/dev-setup.sh /opt/varmint/rootfs/usr/local/bin/varmint-neptune-dev-setup && \
     install -Dm0755 /opt/varmint/source/varmint-clipboard-agent /opt/varmint/rootfs/usr/local/libexec/varmint-clipboard-agent && \
     install -Dm0755 /opt/varmint/source/varmint-firstboot /opt/varmint/rootfs/usr/local/libexec/varmint-firstboot && \
