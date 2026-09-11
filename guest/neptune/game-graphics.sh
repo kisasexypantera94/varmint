@@ -28,7 +28,7 @@ REPO="${VARMINT_NEPTUNE_REPO:-$HOME/virtio-win-mesa-neptune}"
 BUILD="${VARMINT_NEPTUNE_BUILD:-$REPO/builddir-win64-x86unix/src/virtio/neptune}"
 PREBUILT="${VARMINT_NEPTUNE_PREBUILT:-/usr/local/lib/varmint/neptune}"
 STEAM="${VARMINT_STEAM_ROOT:-$HOME/.local/share/Steam}"
-RUNTIME="${VARMINT_NEPTUNE_RUNTIME:-$HOME/.local/share/varmint/neptune}"
+PROTON="${VARMINT_PROTON_ROOT:-$STEAM/steamapps/common/Proton 10.0}"
 STATE_DIR="${VARMINT_GAME_GRAPHICS_STATE:-$HOME/.local/share/varmint/game-graphics}"
 STATE="$STATE_DIR/$APPID"
 
@@ -182,16 +182,32 @@ ensure_target_is_safe() {
     done
 }
 
+install_proton_bridge() {
+    local wine_root="$PROTON/files/lib/wine"
+    local windows_dir="$wine_root/x86_64-windows"
+    local unix_dir="$wine_root/x86_64-unix"
+
+    test -d "$PROTON" || {
+        echo "missing Proton runtime: $PROTON" >&2
+        echo "set VARMINT_PROTON_ROOT to the Proton installation used by this game" >&2
+        exit 1
+    }
+
+    install -d "$windows_dir" "$unix_dir"
+    install -m 0644 "$NPTDLL" "$windows_dir/nptunix.dll"
+    install -m 0755 "$NPTSO" "$unix_dir/nptunix.so"
+}
+
 print_launch_options() {
     case "$1" in
         venus)
             echo "%command%"
             ;;
         neptune)
-            printf "WINEDLLPATH='%s' WINEDLLOVERRIDES='d3d11,dxgi=n,b;nptunix=b;d3d12,d3d12core=;nvapi,nvapi64=' %%command%%\n" "$RUNTIME"
+            echo "WINEDLLOVERRIDES='d3d11,dxgi=n,b;nptunix=b;d3d12,d3d12core=;nvapi,nvapi64=' %command%"
             ;;
         neptune-dx12)
-            printf "WINEDLLPATH='%s' WINEDLLOVERRIDES='dxgi=n,b;nptunix=b;d3d12=n,b;d3d12core=;nvapi,nvapi64=' %%command%%\n" "$RUNTIME"
+            echo "WINEDLLOVERRIDES='dxgi=n,b;nptunix=b;d3d12=n,b;d3d12core=;nvapi,nvapi64=' %command%"
             ;;
     esac
 }
@@ -260,9 +276,8 @@ done
 ensure_target_is_safe "$TARGET_DIR" "${REQUIRED[@]}"
 remove_managed_files
 
-install -d "$RUNTIME/x86_64-windows" "$RUNTIME/x86_64-unix" "$STATE_DIR"
-install -m 0644 "$NPTDLL" "$RUNTIME/x86_64-windows/nptunix.dll"
-install -m 0755 "$NPTSO" "$RUNTIME/x86_64-unix/nptunix.so"
+install -d "$STATE_DIR"
+install_proton_bridge
 
 for i in "${!REQUIRED[@]}"; do
     install -m 0644 "${SOURCES[i]}" "$TARGET_DIR/${REQUIRED[i]}"
@@ -279,8 +294,12 @@ done
 echo "game: $GAME"
 echo "mode: $MODE"
 echo "target dir: $TARGET_DIR"
+echo "proton: $PROTON"
 echo
-sha256sum "${REQUIRED[@]/#/$TARGET_DIR/}" "$RUNTIME/x86_64-unix/nptunix.so"
+sha256sum \
+    "${REQUIRED[@]/#/$TARGET_DIR/}" \
+    "$PROTON/files/lib/wine/x86_64-windows/nptunix.dll" \
+    "$PROTON/files/lib/wine/x86_64-unix/nptunix.so"
 echo
 echo "Steam launch options:"
 print_launch_options "$MODE"

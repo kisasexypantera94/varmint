@@ -52,6 +52,7 @@ apt-get install -y --no-install-recommends \
     libxxhash0 \
     mesa-utils \
     openssh-server \
+    avahi-daemon \
     pavucontrol \
     pulseaudio \
     pulseaudio-utils \
@@ -148,6 +149,7 @@ ExecStartPre=/usr/sbin/sshd -t
 EOF_SSH
 
 systemctl enable openssh-server.service >/dev/null 2>&1 || true
+systemctl enable avahi-daemon.service >/dev/null 2>&1 || true
 systemctl enable systemd-timesyncd.service >/dev/null 2>&1 || true
 systemctl disable lightdm.service >/dev/null 2>&1 || true
 systemctl set-default multi-user.target
