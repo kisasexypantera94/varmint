@@ -1,0 +1,373 @@
+diff --git a/server/render_context.c b/server/render_context.c
+index 91f187c2..27980f92 100644
+--- a/server/render_context.c
++++ b/server/render_context.c
+@@ -5,9 +5,7 @@
+ 
+ #include "render_context.h"
+ 
+-#include <errno.h>
+ #include <sys/mman.h>
+-#include <sys/socket.h>
+ #include <unistd.h>
+ 
+ #include "util/u_thread.h"
+@@ -46,88 +44,6 @@ render_context_dispatch_submit_fence(struct render_context *ctx,
+    return true;
+ }
+ 
+-/* Read exactly `size` bytes off a SOCK_STREAM fd.  Returns false on EOF or
+- * error (EOF mid-record included: a torn record means the peer died). */
+-static bool
+-render_context_fence_read_full(int fd, void *data, size_t size)
+-{
+-   uint8_t *cur = data;
+-   while (size) {
+-      const ssize_t r = read(fd, cur, size);
+-      if (r < 0) {
+-         if (errno == EINTR || errno == EAGAIN)
+-            continue;
+-         return false;
+-      }
+-      if (r == 0)
+-         return false;
+-      cur += r;
+-      size -= (size_t)r;
+-   }
+-   return true;
+-}
+-
+-/* Out-of-band fence channel (see render_protocol.h): registers submit_fence
+- * records the moment they arrive, independent of the dispatch thread's
+- * backlog.  Only arrival-order-tolerant fences travel here. */
+-static int
+-render_context_fence_thread(void *arg)
+-{
+-   struct render_context *ctx = arg;
+-
+-   u_thread_setname("virgl-fence");
+-
+-   for (;;) {
+-      struct render_context_op_submit_fence_request req;
+-      if (!render_context_fence_read_full(ctx->fence_socket_fd, &req,
+-                                          sizeof(req)))
+-         break;
+-
+-      if (req.header.op != RENDER_CONTEXT_OP_SUBMIT_FENCE ||
+-          req.ring_index >= (uint32_t)ctx->timeline_count) {
+-         render_log("fence channel: bad record (op %u ring %u); closing",
+-                    req.header.op, req.ring_index);
+-         break;
+-      }
+-
+-      if (!render_state_submit_fence(ctx->ctx_id,
+-                                     VIRGL_RENDERER_FENCE_FLAG_MERGEABLE,
+-                                     req.ring_index, req.seqno))
+-         render_log("fence channel: submit_fence(ring %u) failed",
+-                    req.ring_index);
+-   }
+-
+-   return 0;
+-}
+-
+-static bool
+-render_context_dispatch_attach_fence_socket(struct render_context *ctx,
+-                                            UNUSED const union render_context_op_request *request,
+-                                            const int *fds,
+-                                            int fd_count)
+-{
+-   if (fd_count != 1) {
+-      render_log("attach_fence_socket: expected 1 fd, got %d", fd_count);
+-      return false;
+-   }
+-   if (ctx->fence_thread_created) {
+-      render_log("attach_fence_socket: already attached");
+-      close(fds[0]);
+-      return false;
+-   }
+-
+-   ctx->fence_socket_fd = fds[0];
+-   if (thrd_create(&ctx->fence_thread, render_context_fence_thread, ctx) !=
+-       thrd_success) {
+-      render_log("attach_fence_socket: thrd_create failed");
+-      close(ctx->fence_socket_fd);
+-      ctx->fence_socket_fd = -1;
+-      return false;
+-   }
+-   ctx->fence_thread_created = true;
+-
+-   return true;
+-}
+ 
+ static bool
+ render_context_dispatch_submit_cmd(struct render_context *ctx,
+@@ -284,7 +200,6 @@ static const struct render_context_dispatch_entry
+       RENDER_CONTEXT_DISPATCH(DESTROY_RESOURCE, destroy_resource, 0),
+       RENDER_CONTEXT_DISPATCH(SUBMIT_CMD, submit_cmd, 0),
+       RENDER_CONTEXT_DISPATCH(SUBMIT_FENCE, submit_fence, 0),
+-      RENDER_CONTEXT_DISPATCH(ATTACH_FENCE_SOCKET, attach_fence_socket, 1),
+ #undef RENDER_CONTEXT_DISPATCH
+    };
+ 
+@@ -343,16 +258,6 @@ render_context_run(struct render_context *ctx)
+ static void
+ render_context_fini(struct render_context *ctx)
+ {
+-   /* stop the fence channel before the backend context goes away: its
+-    * thread calls into render_state and must be joined first */
+-   if (ctx->fence_thread_created) {
+-      shutdown(ctx->fence_socket_fd, SHUT_RDWR);
+-      thrd_join(ctx->fence_thread, NULL);
+-      ctx->fence_thread_created = false;
+-   }
+-   if (ctx->fence_socket_fd >= 0)
+-      close(ctx->fence_socket_fd);
+-
+    /* destroy the context first to join its sync threads and ring threads */
+    render_state_destroy_context(ctx->ctx_id);
+ 
+@@ -446,7 +351,6 @@ render_context_init(struct render_context *ctx, const struct render_context_args
+    render_socket_init(&ctx->socket, args->ctx_fd);
+    ctx->shmem_fd = -1;
+    ctx->fence_eventfd = -1;
+-   ctx->fence_socket_fd = -1;
+ 
+    if (!render_context_init_name(ctx, args->ctx_id, args->ctx_name))
+       return false;
+diff --git a/server/render_context.h b/server/render_context.h
+index c6c563f4..ca1befc5 100644
+--- a/server/render_context.h
++++ b/server/render_context.h
+@@ -10,8 +10,6 @@
+ 
+ #include <stdatomic.h>
+ 
+-#include "c11/threads.h"
+-
+ enum render_backend_type {
+    RENDER_BACKEND_NONE = 0,
+    RENDER_BACKEND_VENUS,
+@@ -37,13 +35,6 @@ struct render_context {
+ 
+    /* optional */
+    int fence_eventfd;
+-
+-   /* optional out-of-band fence channel (RENDER_CONTEXT_OP_ATTACH_FENCE_SOCKET):
+-    * a dedicated thread reads submit_fence records off fence_socket_fd and
+-    * registers them without queueing behind the dispatch thread. */
+-   int fence_socket_fd;
+-   thrd_t fence_thread;
+-   bool fence_thread_created;
+ };
+ 
+ struct render_context_args {
+diff --git a/server/render_protocol.h b/server/render_protocol.h
+index c3bd2d09..15aa1a37 100644
+--- a/server/render_protocol.h
++++ b/server/render_protocol.h
+@@ -39,7 +39,6 @@ enum render_context_op {
+    RENDER_CONTEXT_OP_DESTROY_RESOURCE,
+    RENDER_CONTEXT_OP_SUBMIT_CMD,
+    RENDER_CONTEXT_OP_SUBMIT_FENCE,
+-   RENDER_CONTEXT_OP_ATTACH_FENCE_SOCKET,
+ 
+    RENDER_CONTEXT_OP_COUNT,
+ };
+@@ -220,24 +219,6 @@ struct render_context_op_submit_fence_request {
+    uint32_t seqno;
+ };
+ 
+-/* Attach a side channel dedicated to fence submission.
+- *
+- * One fd follows via SCM_RIGHTS: a SOCK_STREAM socket whose payload is a
+- * stream of fixed-size render_context_op_submit_fence_request records.  A
+- * dedicated server thread reads and registers them immediately, so a fence
+- * never queues behind the dispatch thread's in-flight submits (whose
+- * processing can take milliseconds, or park outright in a ring wait).
+- *
+- * Only fences whose retirement is arrival-order-tolerant may travel this
+- * channel.  For Neptune those are the event-ring fences (upper half of the
+- * timeline range): the host pairs them with ARM commands and explicitly
+- * parks whichever side arrives first.  Low rings retire in dispatch order
+- * ("everything before me was consumed") and must stay on the main socket.
+- */
+-struct render_context_op_attach_fence_socket_request {
+-   struct render_context_op_header header;
+-};
+-
+ union render_context_op_request {
+    struct render_context_op_header header;
+    struct render_context_op_nop_request nop;
+@@ -247,7 +228,6 @@ union render_context_op_request {
+    struct render_context_op_destroy_resource_request destroy_resource;
+    struct render_context_op_submit_cmd_request submit_cmd;
+    struct render_context_op_submit_fence_request submit_fence;
+-   struct render_context_op_attach_fence_socket_request attach_fence_socket;
+ };
+ 
+ #ifdef __APPLE__
+diff --git a/src/proxy/proxy_context.c b/src/proxy/proxy_context.c
+index c5417db2..987d8920 100644
+--- a/src/proxy/proxy_context.c
++++ b/src/proxy/proxy_context.c
+@@ -8,12 +8,9 @@
+ #include <fcntl.h>
+ #include <poll.h>
+ #include <sys/mman.h>
+-#include <sys/socket.h>
+ #include <sys/stat.h>
+ #include <unistd.h>
+ 
+-#include "virtgpu_drm.h"
+-
+ #include "server/render_protocol.h"
+ #include "util/anon_file.h"
+ #include "util/bitscan.h"
+@@ -204,90 +201,6 @@ proxy_context_sync_thread(void *arg)
+    return 0;
+ }
+ 
+-/* Out-of-band fence routing.  Only Neptune event-ring fences qualify:
+- * their retirement pairs with an ARM that travels independently (the host
+- * parks whichever side arrives first), so registering them ahead of queued
+- * submits is legal -- and registering them promptly is the point, since on
+- * the main socket a fence queues behind the dispatch thread's in-flight
+- * submits and every present-gate wake lags that backlog.  Low rings retire
+- * in dispatch order ("everything before me was consumed") and have to stay
+- * on the ordered main socket.  The ring split mirrors the host's
+- * NPT_EVENT_RING_BASE convention: the upper half of the timeline range. */
+-static bool
+-proxy_context_fence_ring_is_oob(const struct proxy_context *ctx,
+-                                uint32_t ring_idx)
+-{
+-   return ctx->capset_id == VIRTGPU_DRM_CAPSET_NEPTUNE &&
+-          ring_idx >= PROXY_CONTEXT_TIMELINE_COUNT / 2;
+-}
+-
+-static bool
+-proxy_context_fence_socket_attach(struct proxy_context *ctx)
+-{
+-   int fds[2];
+-   if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds)) {
+-      proxy_log("fence channel: socketpair failed");
+-      return false;
+-   }
+-   for (int i = 0; i < 2; i++) {
+-      const int flags = fcntl(fds[i], F_GETFD);
+-      if (flags >= 0)
+-         fcntl(fds[i], F_SETFD, flags | FD_CLOEXEC);
+-   }
+-
+-   const struct render_context_op_attach_fence_socket_request req = {
+-      .header.op = RENDER_CONTEXT_OP_ATTACH_FENCE_SOCKET,
+-   };
+-   if (!proxy_socket_send_request_with_fds(&ctx->socket, &req, sizeof(req),
+-                                           &fds[1], 1)) {
+-      proxy_log("fence channel: attach failed");
+-      close(fds[0]);
+-      close(fds[1]);
+-      return false;
+-   }
+-   close(fds[1]);
+-   ctx->fence_socket_fd = fds[0];
+-   proxy_log("fence channel attached for ctx %d (event-ring fences "
+-             "out-of-band)", ctx->base.ctx_id);
+-   return true;
+-}
+-
+-static bool
+-proxy_context_fence_oob_submit(struct proxy_context *ctx,
+-                               uint32_t flags,
+-                               uint32_t ring_idx,
+-                               uint32_t seqno)
+-{
+-   if (ctx->fence_socket_fd == -1 && !proxy_context_fence_socket_attach(ctx))
+-      ctx->fence_socket_fd = -2;
+-   if (ctx->fence_socket_fd < 0)
+-      return false;
+-
+-   const struct render_context_op_submit_fence_request req = {
+-      .header.op = RENDER_CONTEXT_OP_SUBMIT_FENCE,
+-      .flags = flags,
+-      .ring_index = ring_idx,
+-      .seqno = seqno,
+-   };
+-   const uint8_t *cur = (const uint8_t *)&req;
+-   size_t left = sizeof(req);
+-   while (left) {
+-      const ssize_t s = send(ctx->fence_socket_fd, cur, left, MSG_NOSIGNAL);
+-      if (s < 0) {
+-         if (errno == EINTR || errno == EAGAIN)
+-            continue;
+-         proxy_log("fence channel: send failed (errno %d); falling back to "
+-                   "the main socket", errno);
+-         close(ctx->fence_socket_fd);
+-         ctx->fence_socket_fd = -2;
+-         return false;
+-      }
+-      cur += s;
+-      left -= (size_t)s;
+-   }
+-   return true;
+-}
+-
+ static int
+ proxy_context_submit_fence(struct virgl_context *base,
+                            uint32_t flags,
+@@ -318,15 +231,6 @@ proxy_context_submit_fence(struct virgl_context *base,
+    if (proxy_renderer.flags & VIRGL_RENDERER_ASYNC_FENCE_CB)
+       mtx_unlock(&ctx->timeline_mutex);
+ 
+-   /* Event-ring fences take the out-of-band channel: registered by the
+-    * server's dedicated fence thread instead of queueing behind the
+-    * dispatch thread's in-flight submits, and the QEMU virtio thread
+-    * pays no reply round trip.  Any channel failure falls through to
+-    * the ordered synchronous path below. */
+-   if (proxy_context_fence_ring_is_oob(ctx, ring_idx) &&
+-       proxy_context_fence_oob_submit(ctx, flags, ring_idx, fence->seqno))
+-      return 0;
+-
+    const struct render_context_op_submit_fence_request req = {
+       .header.op = RENDER_CONTEXT_OP_SUBMIT_FENCE,
+       .flags = flags,
+@@ -620,9 +524,6 @@ proxy_context_destroy(struct virgl_context *base)
+    if (!proxy_client_destroy_context(ctx->client, ctx->base.ctx_id))
+       proxy_log("failed to destroy ctx %d", ctx->base.ctx_id);
+ 
+-   if (ctx->fence_socket_fd >= 0)
+-      close(ctx->fence_socket_fd);
+-
+    if (ctx->sync_thread.fence_eventfd >= 0) {
+       if (ctx->sync_thread.created) {
+          ctx->sync_thread.stop = true;
+@@ -819,8 +720,6 @@ proxy_context_create(uint32_t ctx_id,
+    proxy_context_init_base(ctx);
+    ctx->client = client;
+    proxy_socket_init(&ctx->socket, ctx_fd);
+-   ctx->capset_id = capset_id;
+-   ctx->fence_socket_fd = -1;
+    ctx->shmem.fd = -1;
+    mtx_init(&ctx->timeline_mutex, mtx_plain);
+    mtx_init(&ctx->free_fences_mutex, mtx_plain);
+diff --git a/src/proxy/proxy_context.h b/src/proxy/proxy_context.h
+index d018b7fb..f7ed5db0 100644
+--- a/src/proxy/proxy_context.h
++++ b/src/proxy/proxy_context.h
+@@ -30,17 +30,6 @@ struct proxy_context {
+    struct proxy_client *client;
+    struct proxy_socket socket;
+ 
+-   uint32_t capset_id;
+-
+-   /* Out-of-band fence channel (RENDER_CONTEXT_OP_ATTACH_FENCE_SOCKET):
+-    * write end of a socketpair whose read end a dedicated server thread
+-    * drains, so arrival-order-tolerant fences (Neptune event rings)
+-    * register without queueing behind the worker's dispatch backlog.
+-    * -1 = not attached yet, -2 = attach failed / channel dead (all
+-    * fences then take the synchronous main-socket path).  Written only
+-    * from the submit_fence caller thread. */
+-   int fence_socket_fd;
+-
+    /* this tracks resources early attached in get_blob */
+    struct hash_table *resource_table;
+ 

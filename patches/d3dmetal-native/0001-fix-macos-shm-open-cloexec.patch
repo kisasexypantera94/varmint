@@ -1,0 +1,22 @@
+diff --git a/src/dmn_share_metal.mm b/src/dmn_share_metal.mm
+index ab7894b..2c32618 100644
+--- a/src/dmn_share_metal.mm
++++ b/src/dmn_share_metal.mm
+@@ -188,8 +188,16 @@ int dmn_anon_file(off_t size) {
+             snprintf(name, sizeof(name), "/dmn-shm-%d-%x-%x", getpid(), nonce,
+                      i);
+         }
+-        fd = shm_open(name, O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
++        fd = shm_open(name, O_CREAT | O_EXCL | O_RDWR, 0600);
+         if (fd >= 0) {
++            if (fcntl(fd, F_SETFD, FD_CLOEXEC) < 0) {
++                const int saved_errno = errno;
++                close(fd);
++                shm_unlink(name);
++                errno = saved_errno;
++                fd = -1;
++                break;
++            }
+             shm_unlink(name); /* anonymous from here on */
+             break;
+         }

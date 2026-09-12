@@ -11,7 +11,12 @@ DEBIAN_IMAGE_NAME="${DEBIAN_IMAGE_NAME:-debian-13-nocloud-arm64.qcow2}"
 SOURCE_IMAGE="$CACHE_DIR/$DEBIAN_IMAGE_NAME"
 STAMP="$OUTPUT_DIR/.build-stamp"
 
-INPUTS=("$SCRIPT_DIR")
+INPUTS=(
+  "$SCRIPT_DIR"
+  "$ROOT/patches/neptune-protocol"
+  "$ROOT/patches/neptune-generated/virtio-win-mesa.patch"
+  "$ROOT/patches/virtio-win-mesa"
+)
 OUTPUTS=(
   "$OUTPUT_DIR/Image"
   "$OUTPUT_DIR/initrd"
@@ -25,7 +30,7 @@ command -v shasum >/dev/null 2>&1 || { echo "error: shasum is required" >&2; exi
 fingerprint="$({
   printf '%s\n' "$DEBIAN_BASE_URL" "$DEBIAN_IMAGE_NAME"
   find "${INPUTS[@]}" -type f | LC_ALL=C sort | while IFS= read -r input; do
-    printf '%s\0' "${input#$SCRIPT_DIR/}"
+    printf '%s\0' "${input#$ROOT/}"
     cat "$input"
     printf '\0'
   done
@@ -100,7 +105,7 @@ docker build \
   --platform linux/arm64 \
   --tag "$BUILDER_IMAGE" \
   --file "$SCRIPT_DIR/Dockerfile" \
-  "$SCRIPT_DIR"
+  "$ROOT"
 
 printf '\n== build guest runtime ==\n'
 docker run --rm \

@@ -88,6 +88,8 @@ assemble_app() {
     need_file "$file"
   done
   helper="$(find_vmnet_helper)"
+  need_file "$PREFIX/libexec/virgl_render_server"
+  need_file "$PREFIX/lib/x86_64/libd3dmetal-native.dylib"
 
   rm -rf "$APP_BUNDLE"
   mkdir -p \
@@ -98,6 +100,9 @@ assemble_app() {
     "$contents/Resources/runtime"
   install -m 755 "$BINARY" "$contents/MacOS/varmint"
   install -m 755 "$helper" "$contents/Helpers/vmnet-helper"
+  install -m 755 "$PREFIX/libexec/virgl_render_server" "$contents/Helpers/virgl_render_server"
+  install -m 755 "$PREFIX/lib/x86_64/libd3dmetal-native.dylib" \
+    "$contents/Frameworks/libd3dmetal-native.dylib"
   install -m 644 "$KERNEL" "$contents/Resources/kernel/Image"
   install -m 644 "$INITRD" "$contents/Resources/kernel/initrd"
   install -m 644 "$BASE_IMAGE" "$contents/Resources/runtime/base.raw.zst"
@@ -163,8 +168,26 @@ list_rpaths() {
 normalize_rpath() {
   local file="$1"
   local wanted="$2"
-  local rpath found=0
+  local archs arch thin tmp
+  local rpath found
 
+  archs="$(lipo -archs "$file" 2>/dev/null || true)"
+  if [ "$(printf '%s\n' "$archs" | wc -w | tr -d ' ')" -gt 1 ]; then
+    tmp="$(mktemp -d "${TMPDIR:-/tmp}/varmint-rpath.XXXXXX")"
+    for arch in $archs; do
+      thin="$tmp/$(basename "$file").$arch"
+      lipo "$file" -thin "$arch" -output "$thin"
+      normalize_rpath "$thin" "$wanted"
+    done
+
+    # shellcheck disable=SC2086
+    lipo -create "$tmp"/"$(basename "$file")".* -output "$tmp/universal"
+    mv "$tmp/universal" "$file"
+    rm -rf "$tmp"
+    return
+  fi
+
+  found=0
   while IFS= read -r rpath; do
     [ -n "$rpath" ] || continue
     if [ "$rpath" = "$wanted" ]; then
@@ -172,7 +195,8 @@ normalize_rpath() {
     else
       install_name_tool -delete_rpath "$rpath" "$file"
     fi
-  done < <(list_rpaths "$file")
+  done < <(list_rpaths "$file" | awk '!seen[$0]++')
+
   [ "$found" = 1 ] || install_name_tool -add_rpath "$wanted" "$file"
 }
 
@@ -218,13 +242,35 @@ process_macho() {
     basename="$(basename "$source")"
     copy_runtime_library "$source"
     install_name_tool -change "$dependency" "@rpath/$basename" "$file"
-  done < <(otool -L "$file" | tail -n +2 | sed -E 's/^[[:space:]]*//; s/[[:space:]]+\(compatibility version.*$//')
+  done < <(
+    otool -L "$file" |
+      sed -nE 's/^[[:space:]]+(.+)[[:space:]]+\(compatibility version.*$/\1/p'
+  )
 
   if [ "$file" = "$executable" ]; then
     normalize_rpath "$file" '@executable_path/../Frameworks'
   else
     normalize_rpath "$file" '@loader_path'
   fi
+}
+
+process_runtime_executable() {
+  local file="$1"
+  local dependency source basename
+
+  while IFS= read -r dependency; do
+    [ -n "$dependency" ] || continue
+    is_system_dependency "$dependency" && continue
+    source="$(resolve_dependency "$dependency")"
+    basename="$(basename "$source")"
+    copy_runtime_library "$source"
+    install_name_tool -change "$dependency" "@rpath/$basename" "$file"
+  done < <(
+    otool -L "$file" |
+      sed -nE 's/^[[:space:]]+(.+)[[:space:]]+\(compatibility version.*$/\1/p'
+  )
+
+  normalize_rpath "$file" '@executable_path/../Frameworks'
 }
 
 write_framework_plist() {
@@ -273,14 +319,24 @@ create_angle_frameworks() {
 fix_rpaths() {
   log "bundle runtime libraries"
   local executable="$APP_BUNDLE/Contents/MacOS/varmint"
+  local render_server="$APP_BUNDLE/Contents/Helpers/virgl_render_server"
+  local d3dmetal="$APP_BUNDLE/Contents/Frameworks/libd3dmetal-native.dylib"
   local dylib index=0
 
   require_commands otool install_name_tool
   need_file "$executable"
+  need_file "$render_server"
+  need_file "$d3dmetal"
   MACHO_QUEUE=("$executable")
   for dylib in "${RUNTIME_DYLIBS[@]}"; do
     copy_runtime_library "$PREFIX/lib/$dylib"
   done
+
+  process_runtime_executable "$render_server"
+
+  # x86_64-only payload loaded by the Rosetta render-server worker.
+  install_name_tool -id '@rpath/libd3dmetal-native.dylib' "$d3dmetal"
+  normalize_rpath "$d3dmetal" '@loader_path'
 
   while [ "$index" -lt "${#MACHO_QUEUE[@]}" ]; do
     process_macho "${MACHO_QUEUE[$index]}" "$executable"
@@ -300,6 +356,7 @@ sign_app() {
   need_file "$VMNET_HELPER_ENTITLEMENTS"
   codesign --force --sign - --timestamp=none \
     --entitlements "$VMNET_HELPER_ENTITLEMENTS" "$APP_BUNDLE/Contents/Helpers/vmnet-helper"
+  codesign_file "$APP_BUNDLE/Contents/Helpers/virgl_render_server"
   while IFS= read -r -d '' dylib; do
     codesign_file "$dylib"
   done < <(find "$frameworks" -maxdepth 1 -type f -name '*.dylib' -print0)
@@ -333,14 +390,18 @@ verify_bundle_macho() {
   local file="$1"
   local executable="$2"
   local frameworks="$3"
+  local expected_arch="${4:-$ARCH}"
   local dependency rpath id expected_id
 
-  lipo -archs "$file" | tr ' ' '\n' | grep -qx "$ARCH" \
-    || die "$file does not contain $ARCH"
+  lipo -archs "$file" | tr ' ' '\n' | grep -qx "$expected_arch" \
+    || die "$file does not contain $expected_arch"
   while IFS= read -r dependency; do
     [ -n "$dependency" ] && verify_bundle_dependency \
       "$file" "$dependency" "$executable" "$frameworks"
-  done < <(otool -L "$file" | tail -n +2 | sed -E 's/^[[:space:]]*//; s/[[:space:]]+\(compatibility version.*$//')
+  done < <(
+    otool -L "$file" |
+      sed -nE 's/^[[:space:]]+(.+)[[:space:]]+\(compatibility version.*$/\1/p'
+  )
   while IFS= read -r rpath; do
     case "$rpath" in
       '@executable_path/../Frameworks'|'@loader_path') ;;
@@ -362,6 +423,7 @@ verify_app() {
   local contents="$APP_BUNDLE/Contents"
   local executable="$contents/MacOS/varmint"
   local helper="$contents/Helpers/vmnet-helper"
+  local render_server="$contents/Helpers/virgl_render_server"
   local frameworks="$contents/Frameworks"
   local resources="$contents/Resources"
   local bundled_manifest="$resources/runtime-manifest.toml"
@@ -372,6 +434,7 @@ verify_app() {
     "$contents/Info.plist" \
     "$executable" \
     "$helper" \
+    "$render_server" \
     "$resources/kernel/Image" \
     "$resources/kernel/initrd" \
     "$resources/runtime/base.raw.zst" \
@@ -423,8 +486,17 @@ for link in Path(sys.argv[1]).rglob("*"):
 PY
 
   verify_bundle_macho "$executable" "$executable" "$frameworks"
+  verify_bundle_macho "$render_server" "$render_server" "$frameworks"
+  lipo -archs "$render_server" | grep -qw arm64 \
+    || die "virgl_render_server is missing arm64 slice"
+  lipo -archs "$render_server" | grep -qw x86_64 \
+    || die "virgl_render_server is missing x86_64 slice"
   while IFS= read -r -d '' dylib; do
-    verify_bundle_macho "$dylib" "$executable" "$frameworks"
+    if [ "$(basename "$dylib")" = "libd3dmetal-native.dylib" ]; then
+      verify_bundle_macho "$dylib" "$executable" "$frameworks" x86_64
+    else
+      verify_bundle_macho "$dylib" "$executable" "$frameworks"
+    fi
   done < <(find "$frameworks" -maxdepth 1 -type f -name '*.dylib' -print0)
   for stem in EGL GLESv2; do
     verify_bundle_macho "$frameworks/${stem}.framework/Versions/A/$stem" "$executable" "$frameworks"
@@ -436,6 +508,7 @@ PY
   for stem in EGL GLESv2; do
     codesign --verify --strict --verbose=2 "$frameworks/${stem}.framework"
   done
+  codesign --verify --strict --verbose=2 "$render_server"
   codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
   signed_entitlements="$(codesign -d --entitlements :- "$helper" 2>&1)"
   printf '%s\n' "$signed_entitlements" | grep -q '<key>com.apple.security.virtualization</key>' \

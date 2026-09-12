@@ -65,6 +65,25 @@ RUN cmake \
     test -f /opt/fex-install/usr/lib/aarch64-linux-gnu/fex-emu/HostThunks/libvulkan-host.so && \
     test -f /opt/fex-install/usr/lib/aarch64-linux-gnu/fex-emu/HostThunks_32/libvulkan-host.so
 
+FROM debian:trixie-slim AS neptune-builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+COPY guest/neptune/provision.sh /usr/local/bin/varmint-neptune-provision
+COPY guest/neptune/versions.env /opt/varmint/neptune/versions.env
+COPY guest/neptune/deps.txt /opt/varmint/neptune/deps.txt
+COPY patches/neptune-protocol /opt/varmint/neptune/patches/neptune-protocol
+COPY patches/neptune-generated /opt/varmint/neptune/patches/neptune-generated
+COPY patches/virtio-win-mesa /opt/varmint/neptune/patches/virtio-win-mesa
+
+RUN /usr/local/bin/varmint-neptune-provision && \
+    test -f /usr/local/lib/varmint/neptune/x86_64-windows/d3d11.dll && \
+    test -f /usr/local/lib/varmint/neptune/x86_64-windows/dxgi.dll && \
+    test -f /usr/local/lib/varmint/neptune/x86_64-windows/d3d12.dll && \
+    test -f /usr/local/lib/varmint/neptune/x86_64-windows/nptunix.dll && \
+    test -f /usr/local/lib/varmint/neptune/x86_64-unix/nptunix.so
+
+
 FROM debian:trixie-slim
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -82,11 +101,20 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=fex-builder /opt/fex-install /opt/varmint/fex-install
-COPY . /opt/varmint/source
+COPY --from=neptune-builder /usr/local/lib/varmint/neptune /opt/varmint/rootfs/usr/local/lib/varmint/neptune
+COPY guest /opt/varmint/source
+COPY guest/neptune/versions.env /opt/varmint/rootfs/usr/local/share/varmint/neptune/versions.env
+COPY guest/neptune/deps.txt /opt/varmint/rootfs/usr/local/share/varmint/neptune/deps.txt
+COPY patches/neptune-protocol /opt/varmint/rootfs/usr/local/share/varmint/neptune/patches/neptune-protocol
+COPY patches/neptune-generated /opt/varmint/rootfs/usr/local/share/varmint/neptune/patches/neptune-generated
+COPY patches/virtio-win-mesa /opt/varmint/rootfs/usr/local/share/varmint/neptune/patches/virtio-win-mesa
 
 RUN install -Dm0755 /opt/varmint/source/build-image-container.sh /usr/local/bin/build-varmint-guest && \
     install -Dm0755 /opt/varmint/source/varmint-gpu-check /opt/varmint/rootfs/usr/local/bin/varmint-gpu-check && \
     install -Dm0755 /opt/varmint/source/varmint-steam /opt/varmint/rootfs/usr/local/bin/varmint-steam && \
+    install -Dm0755 /opt/varmint/source/neptune/build.sh /opt/varmint/rootfs/usr/local/bin/varmint-neptune-build && \
+    install -Dm0755 /opt/varmint/source/neptune/game-graphics.sh /opt/varmint/rootfs/usr/local/bin/varmint-game-graphics && \
+    install -Dm0755 /opt/varmint/source/neptune/dev-setup.sh /opt/varmint/rootfs/usr/local/bin/varmint-neptune-dev-setup && \
     install -Dm0755 /opt/varmint/source/varmint-clipboard-agent /opt/varmint/rootfs/usr/local/libexec/varmint-clipboard-agent && \
     install -Dm0755 /opt/varmint/source/varmint-firstboot /opt/varmint/rootfs/usr/local/libexec/varmint-firstboot && \
     install -Dm0755 /opt/varmint/source/varmint-grow-root /opt/varmint/rootfs/usr/local/libexec/varmint-grow-root && \

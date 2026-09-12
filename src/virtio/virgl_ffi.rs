@@ -174,14 +174,17 @@ struct VirglRendererCallbacks {
 pub const CAPSET_VIRGL: u32 = 1;
 pub const CAPSET_VIRGL2: u32 = 2;
 pub const CAPSET_VENUS: u32 = 4;
+pub const CAPSET_NEPTUNE: u32 = 7;
 
 const VIRGL_RENDERER_THREAD_SYNC: c_int = 1 << 1;
 const VIRGL_RENDERER_USE_SURFACELESS: c_int = 1 << 3;
 const VIRGL_RENDERER_USE_GLES: c_int = 1 << 4;
 const VIRGL_RENDERER_USE_EXTERNAL_BLOB: c_int = 1 << 5;
 const VIRGL_RENDERER_VENUS: c_int = 1 << 6;
+const VIRGL_RENDERER_RENDER_SERVER: c_int = 1 << 9;
 const VIRGL_RENDERER_NATIVE_SHARE_TEXTURE: c_int = 1 << 12;
 const VIRGL_RENDERER_ASYNC_FENCE_CB: c_int = 1 << 8;
+const VIRGL_RENDERER_NEPTUNE: c_int = 1 << 15;
 
 const BASE_INIT_FLAGS: c_int = VIRGL_RENDERER_THREAD_SYNC
     | VIRGL_RENDERER_USE_SURFACELESS
@@ -189,7 +192,9 @@ const BASE_INIT_FLAGS: c_int = VIRGL_RENDERER_THREAD_SYNC
     | VIRGL_RENDERER_USE_EXTERNAL_BLOB
     | VIRGL_RENDERER_VENUS
     | VIRGL_RENDERER_ASYNC_FENCE_CB
-    | VIRGL_RENDERER_NATIVE_SHARE_TEXTURE;
+    | VIRGL_RENDERER_NATIVE_SHARE_TEXTURE
+    | VIRGL_RENDERER_RENDER_SERVER
+    | VIRGL_RENDERER_NEPTUNE;
 
 #[link(name = "virglrenderer")]
 unsafe extern "C" {
@@ -640,7 +645,7 @@ impl VirglRenderer {
 
         let mut capsets = Vec::new();
 
-        for id in [CAPSET_VENUS, CAPSET_VIRGL, CAPSET_VIRGL2] {
+        for id in [CAPSET_VENUS, CAPSET_VIRGL, CAPSET_VIRGL2, CAPSET_NEPTUNE] {
             let mut version = 0u32;
             let mut size = 0u32;
             unsafe { virgl_renderer_get_cap_set(id, &mut version, &mut size) };

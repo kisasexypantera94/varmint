@@ -18,6 +18,14 @@ MOLTENVK_PATCHES=(
   "$ROOT/patches/moltenvk/0002-fix-query-device-available-range.patch"
   "$ROOT/patches/moltenvk/0003-fix-query-copy-availability-offset.patch"
 )
+VIRGL_GENERATED_PATCH="$ROOT/patches/neptune-generated/virglrenderer.patch"
+VIRGL_PATCH_SERIES="$ROOT/patches/virglrenderer/series"
+DXMT_PATCHES=(
+  "$ROOT/patches/dxmt/0001-neptune-d3d11-correctness-and-zerocopy.patch"
+)
+D3DMETAL_PATCHES=(
+  "$ROOT/patches/d3dmetal-native/0001-fix-macos-shm-open-cloexec.patch"
+)
 ENTITLEMENTS="$ROOT/runtime/entitlements.plist"
 VMNET_HELPER_ENTITLEMENTS="$ROOT/runtime/vmnet-helper-entitlements.plist"
 ICON_SOURCE="$ROOT/assets/icon.icon"

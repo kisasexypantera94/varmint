@@ -110,3 +110,17 @@ Before restarting the entire VM:
 4. Restart Varmint only if the guest desktop, Steam or the graphics device remains unusable.
 
 A game crash does not usually require restarting the whole VM.
+
+## Switching the graphics backend for a game
+
+Neptune can be enabled or disabled per Steam game from a terminal inside the guest. The normal/default path is Venus.
+
+```bash
+varmint-game-graphics <steam-appid> status
+varmint-game-graphics <steam-appid> venus
+varmint-game-graphics <steam-appid> neptune 'relative/path/to/Game.exe'
+```
+
+The executable path is only needed when the game executable is below the Steam install root. The command installs or removes the required Neptune DLLs and prints the Steam launch options for the selected mode.
+
+Backend switching intentionally does not add debugging or game-specific options such as `PROTON_LOG` or `FEX_X87REDUCEDPRECISION`. Keep those on the individual game page or add them alongside the printed backend options when a game needs them.

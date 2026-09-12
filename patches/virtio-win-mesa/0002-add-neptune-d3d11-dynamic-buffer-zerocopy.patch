@@ -1,0 +1,566 @@
+diff --git a/src/virtio/neptune/npt_dispatch.c b/src/virtio/neptune/npt_dispatch.c
+index 09edbf42345..96dcba5bc01 100644
+--- a/src/virtio/neptune/npt_dispatch.c
++++ b/src/virtio/neptune/npt_dispatch.c
+@@ -63,6 +63,117 @@ npt_dispatch_com_query_interface(struct npt_ring *ring, uint64_t src_id,
+  * RESOURCE
+  * ========================================================================== */
+ 
++HRESULT
++npt_dispatch_bind_d3d11_buffer_shmem(struct npt_ring *ring,
++                                     uint64_t buffer_id,
++                                     uint32_t shmem_res_id,
++                                     uint32_t cookie,
++                                     uint64_t byte_size,
++                                     uint32_t flags)
++{
++   if (!ring || !buffer_id || !shmem_res_id || !byte_size)
++      return NPT_E_INVALIDARG;
++
++   struct npt_cmd_bind_d3d11_buffer_shmem cmd;
++   memset(&cmd, 0, sizeof(cmd));
++   cmd.header.cmd_type =
++      NPT_TRANSPORT_CMD_TYPE(NPT_TRANSPORT_SUBGROUP_RESOURCE,
++                             NPT_TRANSPORT_RESOURCE_BIND_D3D11_BUFFER_SHMEM);
++   cmd.header.cmd_flags = NPT_CMD_FLAG_REPLY;
++   cmd.header.cmd_size = sizeof(cmd);
++   cmd.header.object_id = buffer_id;
++   cmd.shmem_res_id = shmem_res_id;
++   cmd.cookie = cookie;
++   cmd.byte_size = byte_size;
++   cmd.flags = flags;
++
++   struct npt_ring_submit_command submit;
++   memset(&submit, 0, sizeof(submit));
++   struct npt_cs_encoder *enc = npt_ring_submit_command_init(
++      ring, &submit, &cmd, sizeof(cmd),
++      sizeof(struct npt_cmd_bind_d3d11_buffer_shmem_reply));
++   if (enc)
++      enc->cur = (uint8_t *)&cmd + sizeof(cmd);
++   npt_ring_submit_command(ring, &submit);
++
++   struct npt_cs_decoder *dec = npt_ring_get_command_reply(ring, &submit);
++   HRESULT hr = NPT_E_FAIL;
++   if (dec && dec->cur && dec->end &&
++       (size_t)(dec->end - dec->cur) >=
++          sizeof(struct npt_cmd_bind_d3d11_buffer_shmem_reply)) {
++      const struct npt_cmd_bind_d3d11_buffer_shmem_reply *reply =
++         (const struct npt_cmd_bind_d3d11_buffer_shmem_reply *)dec->cur;
++      hr = (HRESULT)reply->header.cmd_return;
++   }
++   if (dec)
++      npt_ring_free_command_reply(ring, &submit);
++
++   return hr;
++}
++
++HRESULT
++npt_dispatch_resource_map_external(struct npt_ring *ring,
++                                   uint64_t context_id,
++                                   uint64_t resource_id,
++                                   uint32_t subresource,
++                                   uint32_t access_flags,
++                                   uint32_t api_map_flags,
++                                   uint64_t byte_size,
++                                   uint32_t *out_row_pitch,
++                                   uint32_t *out_depth_pitch,
++                                   uint32_t *out_external_cookie)
++{
++   struct npt_cmd_map_resource cmd;
++   memset(&cmd, 0, sizeof(cmd));
++   cmd.header.cmd_type =
++      NPT_TRANSPORT_CMD_TYPE(NPT_TRANSPORT_SUBGROUP_RESOURCE,
++                             NPT_TRANSPORT_RESOURCE_MAP);
++   cmd.header.cmd_flags = NPT_CMD_FLAG_REPLY;
++   cmd.header.cmd_size = sizeof(cmd);
++   cmd.context_id = context_id;
++   cmd.resource_id = resource_id;
++   cmd.subresource = subresource;
++   cmd.access_flags = access_flags;
++   cmd.api_map_flags = api_map_flags;
++   cmd.shmem_res_id = 0;
++   cmd.byte_size = byte_size;
++
++   struct npt_ring_submit_command submit;
++   memset(&submit, 0, sizeof(submit));
++   struct npt_cs_encoder *enc = npt_ring_submit_command_init(
++      ring, &submit, &cmd, sizeof(cmd),
++      sizeof(struct npt_cmd_map_resource_reply));
++   if (enc)
++      enc->cur = (uint8_t *)&cmd + sizeof(cmd);
++   npt_ring_submit_command(ring, &submit);
++
++   struct npt_cs_decoder *dec = npt_ring_get_command_reply(ring, &submit);
++   HRESULT hr = NPT_E_FAIL;
++   if (out_external_cookie)
++      *out_external_cookie = NPT_EXTERNAL_COOKIE_NONE;
++
++   if (dec && dec->cur && dec->end &&
++       (size_t)(dec->end - dec->cur) >=
++          sizeof(struct npt_cmd_map_resource_reply)) {
++      const struct npt_cmd_map_resource_reply *reply =
++         (const struct npt_cmd_map_resource_reply *)dec->cur;
++      hr = (HRESULT)reply->header.cmd_return;
++      if (NPT_SUCCEEDED(hr)) {
++         if (out_row_pitch)
++            *out_row_pitch = reply->row_pitch;
++         if (out_depth_pitch)
++            *out_depth_pitch = reply->depth_pitch;
++         if (out_external_cookie)
++            *out_external_cookie = reply->external_cookie;
++      }
++   }
++
++   if (dec)
++      npt_ring_free_command_reply(ring, &submit);
++
++   return hr;
++}
++
+ HRESULT
+ npt_dispatch_resource_map(struct npt_ring *ring, uint64_t context_id,
+                           uint64_t resource_id, uint32_t subresource,
+diff --git a/src/virtio/neptune/npt_dispatch.h b/src/virtio/neptune/npt_dispatch.h
+index 6f798520d0e..b5667a4415e 100644
+--- a/src/virtio/neptune/npt_dispatch.h
++++ b/src/virtio/neptune/npt_dispatch.h
+@@ -44,6 +44,24 @@ HRESULT npt_dispatch_com_query_interface(struct npt_ring *ring,
+  * RESOURCE
+  * ========================================================================== */
+ 
++HRESULT npt_dispatch_bind_d3d11_buffer_shmem(struct npt_ring *ring,
++                                                   uint64_t buffer_id,
++                                                   uint32_t shmem_res_id,
++                                                   uint32_t cookie,
++                                                   uint64_t byte_size,
++                                                   uint32_t flags);
++
++HRESULT npt_dispatch_resource_map_external(struct npt_ring *ring,
++                                           uint64_t context_id,
++                                           uint64_t resource_id,
++                                           uint32_t subresource,
++                                           uint32_t access_flags,
++                                           uint32_t api_map_flags,
++                                           uint64_t byte_size,
++                                           uint32_t *out_row_pitch,
++                                           uint32_t *out_depth_pitch,
++                                           uint32_t *out_external_cookie);
++
+ HRESULT npt_dispatch_resource_map(struct npt_ring *ring,
+                                   uint64_t context_id,
+                                   uint64_t resource_id,
+diff --git a/src/virtio/neptune/npt_overrides_d3d11_context.c b/src/virtio/neptune/npt_overrides_d3d11_context.c
+index ba34cd044b0..9478050b31d 100644
+--- a/src/virtio/neptune/npt_overrides_d3d11_context.c
++++ b/src/virtio/neptune/npt_overrides_d3d11_context.c
+@@ -58,6 +58,62 @@ npt_d3d11_map_to_access_flags(D3D11_MAP map_type)
+ }
+ 
+ 
++static HRESULT
++ctx_Map_buffer_external(void *self, struct npt_d3d11_buffer *b,
++                        UINT Subresource, D3D11_MAP MapType, UINT MapFlags,
++                        D3D11_MAPPED_SUBRESOURCE *pMappedResource)
++{
++   struct npt_ring *ring = npt_com_self_ring(self);
++   const uint64_t context_id = ((struct npt_com_base *)self)->base.id;
++   const uint64_t buffer_id = ((struct npt_com_base *)b)->base.id;
++   const uint32_t byte_width = npt_d3d11_buffer_get_byte_width(b);
++
++   for (;;) {
++      uint32_t row_pitch = 0;
++      uint32_t depth_pitch = 0;
++      uint32_t cookie = NPT_EXTERNAL_COOKIE_NONE;
++
++      HRESULT hr = npt_dispatch_resource_map_external(
++         ring, context_id, buffer_id, Subresource,
++         npt_d3d11_map_to_access_flags(MapType), MapFlags,
++         byte_width, &row_pitch, &depth_pitch, &cookie);
++
++      if (hr == NPT_E_NEED_EXTERNAL_BUFFER_ALLOCATION) {
++         /*
++          * DXMT's DynamicBuffer rename pool has no free/fresh backing.
++          * Add one, but leave allocation selection entirely to DXMT.
++          */
++         if (!npt_d3d11_buffer_add_external_slot(b, ring, false))
++            return NPT_E_OUTOFMEMORY;
++         continue;
++      }
++
++      if (NPT_FAILED(hr))
++         return hr;
++
++      void *ptr = npt_d3d11_buffer_external_slot_ptr(b, cookie);
++      if (!ptr) {
++         /*
++          * Host Map already succeeded.  Close that native Map before
++          * reporting the protocol/cookie mismatch to the application.
++          */
++         npt_dispatch_resource_unmap(
++            ring, context_id, buffer_id, Subresource,
++            /*shmem_res_id=*/0,
++            /*byte_size=*/0,
++            /*shmem_offset=*/0,
++            /*access_flags=*/0);
++         return NPT_E_FAIL;
++      }
++
++      pMappedResource->pData = ptr;
++      pMappedResource->RowPitch = row_pitch;
++      pMappedResource->DepthPitch = depth_pitch;
++      npt_d3d11_buffer_set_is_mapped(b, true);
++      return NPT_S_OK;
++   }
++}
++
+ /*
+  * WRITE_DISCARD / WRITE_NO_OVERWRITE take the rename-ring fast path
+  * (no round-trip; Unmap replays Map+memcpy+Unmap on the host).
+@@ -68,6 +124,10 @@ ctx_Map_buffer(void *self, struct npt_d3d11_buffer *b, UINT Subresource,
+                D3D11_MAP MapType, UINT MapFlags,
+                D3D11_MAPPED_SUBRESOURCE *pMappedResource)
+ {
++   if (npt_d3d11_buffer_is_external(b))
++      return ctx_Map_buffer_external(self, b, Subresource,
++                                     MapType, MapFlags, pMappedResource);
++
+    if (!npt_d3d11_buffer_ensure_map_shmem(b))
+       return NPT_E_OUTOFMEMORY;
+ 
+@@ -208,6 +268,22 @@ static void
+ ctx_Unmap_buffer(void *self, struct npt_d3d11_buffer *b, UINT Subresource)
+ {
+    struct npt_ring *ring = npt_com_self_ring(self);
++
++   if (npt_d3d11_buffer_is_external(b)) {
++      atomic_thread_fence(memory_order_release);
++      npt_dispatch_resource_unmap(
++         ring,
++         ((struct npt_com_base *)self)->base.id,
++         ((struct npt_com_base *)b)->base.id,
++         Subresource,
++         /*shmem_res_id=*/0,
++         /*byte_size=*/0,
++         /*shmem_offset=*/0,
++         /*access_flags=*/0);
++      npt_d3d11_buffer_set_is_mapped(b, false);
++      return;
++   }
++
+    const uint32_t slot = npt_d3d11_buffer_get_current_slot(b);
+    const uint32_t access_flags =
+       npt_d3d11_buffer_get_last_map_access_flags(b);
+diff --git a/src/virtio/neptune/npt_overrides_d3d11_device.c b/src/virtio/neptune/npt_overrides_d3d11_device.c
+index 458d8582d20..5ec60f5cae9 100644
+--- a/src/virtio/neptune/npt_overrides_d3d11_device.c
++++ b/src/virtio/neptune/npt_overrides_d3d11_device.c
+@@ -71,6 +71,15 @@ dev_aux(void *self)
+    return ((struct npt_com_base *)self)->aux;
+ }
+ 
++static bool
++npt_d3d11_buffer_external_eligible(const D3D11_BUFFER_DESC *desc)
++{
++   return desc &&
++          desc->Usage == D3D11_USAGE_DYNAMIC &&
++          (desc->CPUAccessFlags & D3D11_CPU_ACCESS_WRITE) &&
++          desc->ByteWidth >= (1u << 20);
++}
++
+ static HRESULT NPT_STDMETHODCALLTYPE
+ dev_CreateBuffer_override(void *self,
+                           const D3D11_BUFFER_DESC *pDesc,
+@@ -78,6 +87,7 @@ dev_CreateBuffer_override(void *self,
+                           ID3D11Buffer **ppBuffer)
+ {
+    struct npt_device *dev = npt_com_self_device(self);
++   struct npt_ring *ring = npt_device_method_ring(dev);
+    uint64_t self_id = npt_com_self_id(self);
+ 
+    /* Sync under multi-ring (cross-ring Create->Use race), async on
+@@ -86,42 +96,84 @@ dev_CreateBuffer_override(void *self,
+    HRESULT hr;
+    if (dev->multi_ring_enabled) {
+       hr = npt_call_ID3D11Device_CreateBuffer(
+-         npt_device_method_ring(dev), self_id, pDesc, NULL, &raw);
++         ring, self_id, pDesc, NULL, &raw);
+    } else {
+       npt_async_ID3D11Device_CreateBuffer(
+-         npt_device_method_ring(dev), self_id, pDesc, NULL, &raw);
++         ring, self_id, pDesc, NULL, &raw);
+       hr = (HRESULT)0;  /* deferred-fatal: assume S_OK */
+    }
+ 
+-   if (NPT_SUCCEEDED(hr) && raw && pInitialData && pInitialData->pSysMem &&
+-       pDesc && pDesc->ByteWidth > 0) {
+-      /* MSDN: SysMemPitch / SysMemSlicePitch ignored for buffers. */
+-      npt_dispatch_resource_update(npt_device_method_ring(dev),
+-                                   (uint64_t)(uintptr_t)raw,
+-                                   /*subresource=*/0,
+-                                   /*row_pitch=*/0,
+-                                   /*depth_pitch=*/0,
+-                                   /*box=*/NULL,
+-                                   pInitialData->pSysMem,
+-                                   pDesc->ByteWidth, pDesc->ByteWidth);
++   if (!NPT_SUCCEEDED(hr) || !raw) {
++      if (ppBuffer)
++         *ppBuffer = NULL;
++      return hr;
+    }
+ 
+-   if (NPT_SUCCEEDED(hr) && raw) {
+-      struct npt_d3d11_buffer *b = (struct npt_d3d11_buffer *)
+-         npt_com_get_or_wrap_or_release(dev, &NPT_IID_ID3D11Buffer,
+-                                        (uint64_t)(uintptr_t)raw,
+-                                        (struct npt_com_base *)self);
+-      if (b && pDesc)
+-         npt_d3d11_buffer_set_desc(b, pDesc);
+-      if (ppBuffer) {
+-         *ppBuffer = (ID3D11Buffer *)b;
+-      } else if (b) {
+-         /* Validation-only call: drop the caller-owned pub_ref. */
+-         npt_com_default_release(b);
++   const uint64_t raw_id = (uint64_t)(uintptr_t)raw;
++
++   struct npt_d3d11_buffer *b = (struct npt_d3d11_buffer *)
++      npt_com_get_or_wrap_or_release(dev, &NPT_IID_ID3D11Buffer,
++                                     raw_id,
++                                     (struct npt_com_base *)self);
++   if (b && pDesc)
++      npt_d3d11_buffer_set_desc(b, pDesc);
++
++   /*
++    * Only create an external representation for a real returned object.
++    * A validation-only CreateBuffer has no useful lifetime in which to
++    * amortize the external bind.
++    */
++   bool external = false;
++   if (b && ppBuffer && npt_d3d11_buffer_external_eligible(pDesc))
++      external = npt_d3d11_buffer_add_external_slot(b, ring, true);
++
++   if (pInitialData && pInitialData->pSysMem && pDesc &&
++       pDesc->ByteWidth > 0) {
++      if (external) {
++         /*
++          * Initial bind makes cookie 0 DXMT's current DynamicBuffer
++          * allocation.  Seed it directly: no RESOURCE_UPDATE memcpy is
++          * needed before the first app Map.
++          */
++         void *dst = npt_d3d11_buffer_external_slot_ptr(b, 0);
++         if (!dst) {
++            /*
++             * Successful initial bind without a guest mapping violates
++             * the external-backing invariant.  Do not fall back to
++             * RESOURCE_UPDATE: the host buffer is already external.
++             */
++            npt_log("CreateBuffer: external slot 0 has no guest mapping");
++            if (b)
++               npt_com_default_release(b);
++            if (ppBuffer)
++               *ppBuffer = NULL;
++            return NPT_E_FAIL;
++         }
++
++         memcpy(dst, pInitialData->pSysMem, pDesc->ByteWidth);
++         atomic_thread_fence(memory_order_release);
++      }
++
++      if (!external) {
++         /* Existing copy-backed fallback. */
++         npt_dispatch_resource_update(ring, raw_id,
++                                      /*subresource=*/0,
++                                      /*row_pitch=*/0,
++                                      /*depth_pitch=*/0,
++                                      /*box=*/NULL,
++                                      pInitialData->pSysMem,
++                                      pDesc->ByteWidth,
++                                      pDesc->ByteWidth);
+       }
+-   } else if (ppBuffer) {
+-      *ppBuffer = NULL;
+    }
++
++   if (ppBuffer) {
++      *ppBuffer = (ID3D11Buffer *)b;
++   } else if (b) {
++      /* Validation-only call: drop the caller-owned pub_ref. */
++      npt_com_default_release(b);
++   }
++
+    return hr;
+ }
+ 
+diff --git a/src/virtio/neptune/npt_resource.c b/src/virtio/neptune/npt_resource.c
+index 305cb4be15a..0129b9be266 100644
+--- a/src/virtio/neptune/npt_resource.c
++++ b/src/virtio/neptune/npt_resource.c
+@@ -5,6 +5,7 @@
+ 
+ #include "npt_com.h"
+ #include "npt_device.h"
++#include "npt_dispatch.h"
+ #include "npt_renderer.h"
+ #include "npt_resource.h"
+ #include "npt_ring.h"
+@@ -280,6 +281,16 @@ static void
+ npt_d3d11_buffer_aux_destroy(void *aux_raw)
+ {
+    struct npt_d3d11_buffer_aux *aux = aux_raw;
++
++   if (aux->external_slots) {
++      struct npt_renderer *renderer = aux->com->base.device->renderer;
++      for (uint32_t i = 0; i < aux->external_count; i++) {
++         if (aux->external_slots[i])
++            npt_renderer_shmem_unref_async(renderer, aux->external_slots[i]);
++      }
++      free(aux->external_slots);
++   }
++
+    npt_d3d_map_ring_fini(&aux->map_ring);
+    free(aux);
+ }
+@@ -331,6 +342,73 @@ npt_d3d11_buffer_get_byte_width(struct npt_d3d11_buffer *b)
+    return aux ? aux->byte_width : 0;
+ }
+ 
++bool
++npt_d3d11_buffer_is_external(const struct npt_d3d11_buffer *b)
++{
++   const struct npt_d3d11_buffer_aux *aux = buf_aux(b);
++   return aux && aux->external_enabled;
++}
++
++uint32_t
++npt_d3d11_buffer_external_count(const struct npt_d3d11_buffer *b)
++{
++   const struct npt_d3d11_buffer_aux *aux = buf_aux(b);
++   return aux ? aux->external_count : 0;
++}
++
++void *
++npt_d3d11_buffer_external_slot_ptr(const struct npt_d3d11_buffer *b,
++                                   uint32_t cookie)
++{
++   const struct npt_d3d11_buffer_aux *aux = buf_aux(b);
++   if (!aux || cookie >= aux->external_count || !aux->external_slots[cookie])
++      return NULL;
++   return aux->external_slots[cookie]->mmap_ptr;
++}
++
++bool
++npt_d3d11_buffer_add_external_slot(struct npt_d3d11_buffer *b,
++                                   struct npt_ring *ring,
++                                   bool initial)
++{
++   struct npt_d3d11_buffer_aux *aux = buf_aux(b);
++   if (!aux || !ring || !aux->byte_width)
++      return false;
++
++   if (aux->external_count == aux->external_cap) {
++      uint32_t new_cap = aux->external_cap ? aux->external_cap * 2u : 4u;
++      struct npt_renderer_shmem **new_slots =
++         realloc(aux->external_slots, sizeof(*new_slots) * new_cap);
++      if (!new_slots)
++         return false;
++      aux->external_slots = new_slots;
++      aux->external_cap = new_cap;
++   }
++
++   struct npt_renderer *renderer = aux->com->base.device->renderer;
++   struct npt_renderer_shmem *shmem =
++      renderer->shmem_ops.create(renderer, aux->byte_width);
++   if (!shmem)
++      return false;
++
++   npt_ring_force_roundtrip(ring);
++
++   const uint32_t cookie = aux->external_count;
++   const uint32_t flags = initial ? NPT_D3D11_EXTERNAL_BIND_INITIAL : 0u;
++   HRESULT hr = npt_dispatch_bind_d3d11_buffer_shmem(
++      ring, aux->com->base.id, shmem->res_id, cookie,
++      aux->byte_width, flags);
++   if (NPT_FAILED(hr)) {
++      npt_renderer_shmem_unref_async(renderer, shmem);
++      return false;
++   }
++
++   aux->external_slots[cookie] = shmem;
++   aux->external_count++;
++   aux->external_enabled = true;
++   return true;
++}
++
+ bool
+ npt_d3d11_buffer_ensure_map_shmem(struct npt_d3d11_buffer *b)
+ {
+diff --git a/src/virtio/neptune/npt_resource.h b/src/virtio/neptune/npt_resource.h
+index 35c39add9d4..fcc8adc1b74 100644
+--- a/src/virtio/neptune/npt_resource.h
++++ b/src/virtio/neptune/npt_resource.h
+@@ -117,6 +117,14 @@ bool npt_d3d11_buffer_fill_desc(struct npt_d3d11_buffer *b,
+ uint32_t npt_d3d11_buffer_get_byte_width(struct npt_d3d11_buffer *b);
+ 
+ bool npt_d3d11_buffer_ensure_map_shmem(struct npt_d3d11_buffer *b);
++
++bool npt_d3d11_buffer_is_external(const struct npt_d3d11_buffer *b);
++bool npt_d3d11_buffer_add_external_slot(struct npt_d3d11_buffer *b,
++                                        struct npt_ring *ring,
++                                        bool initial);
++void *npt_d3d11_buffer_external_slot_ptr(const struct npt_d3d11_buffer *b,
++                                         uint32_t cookie);
++uint32_t npt_d3d11_buffer_external_count(const struct npt_d3d11_buffer *b);
+ /* Slot 0's res_id (sync MAP_RESOURCE always lands on slot 0). */
+ uint32_t npt_d3d11_buffer_get_map_shmem_res_id(struct npt_d3d11_buffer *b);
+ /* Per-slot res_id for async Unmap on the rename ring. */
+@@ -293,6 +301,11 @@ struct npt_d3d11_buffer_aux {
+    D3D11_BUFFER_DESC desc;
+    bool has_desc;
+    struct npt_d3d_map_ring map_ring;
++
++   struct npt_renderer_shmem **external_slots;
++   uint32_t external_count;
++   uint32_t external_cap;
++   bool external_enabled;
+ };
+ 
+ void npt_d3d11_buffer_aux_init(struct npt_com_base *com,
+diff --git a/src/virtio/neptune/npt_transport_defs.h b/src/virtio/neptune/npt_transport_defs.h
+index 6bc24342b6b..95e2a769e6e 100644
+--- a/src/virtio/neptune/npt_transport_defs.h
++++ b/src/virtio/neptune/npt_transport_defs.h
+@@ -179,6 +179,25 @@ struct npt_cmd_com_query_interface_reply {
+ #define NPT_TRANSPORT_RESOURCE_UNMAP                 2u
+ #define NPT_TRANSPORT_RESOURCE_EXECUTE_CMD_STREAM    3u
+ #define NPT_TRANSPORT_RESOURCE_CREATE_HEAP_FROM_SHMEM 4u
++#define NPT_TRANSPORT_RESOURCE_BIND_D3D11_BUFFER_SHMEM 5u
++
++#define NPT_D3D11_EXTERNAL_BIND_INITIAL 0x1u
++#define NPT_EXTERNAL_COOKIE_NONE 0xffffffffu
++#define NPT_E_NEED_EXTERNAL_BUFFER_ALLOCATION ((HRESULT)0x8004d101u)
++
++struct npt_cmd_bind_d3d11_buffer_shmem {
++   struct npt_command_header header;
++   uint32_t shmem_res_id;
++   uint32_t cookie;
++   uint64_t byte_size;
++   uint32_t flags;
++   uint32_t pad;
++};
++
++struct npt_cmd_bind_d3d11_buffer_shmem_reply {
++   struct npt_reply_header header;
++};
++
+ 
+ /* UpdateSubresource(1) wire path; also serves D3D11_SUBRESOURCE_DATA
+  * pSysMem.  D3D12 WriteToSubresource has identical shape (same box
+@@ -264,7 +283,8 @@ struct npt_cmd_map_resource_reply {
+    uint32_t row_pitch;
+    uint32_t depth_pitch;
+    uint32_t mapped_size;      /* 0 for persistent */
+-   uint32_t pad;
++   /* NPT_EXTERNAL_COOKIE_NONE for ordinary staging maps. */
++   uint32_t external_cookie;
+ };
+ 
+ /* Synchronous: guest must not submit Draws reading this resource until

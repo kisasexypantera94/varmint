@@ -43,6 +43,31 @@ fn choose_config() -> Option<PathBuf> {
     (!path.is_empty()).then_some(PathBuf::from(path))
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum NeptuneBackend {
+    #[default]
+    Dxmt,
+    D3dmetal,
+}
+
+impl NeptuneBackend {
+    pub fn as_env(self) -> &'static str {
+        match self {
+            Self::Dxmt => "dxmt",
+            Self::D3dmetal => "d3dmetal",
+        }
+    }
+
+    pub fn from_env(value: &str) -> Option<Self> {
+        match value {
+            "dxmt" => Some(Self::Dxmt),
+            "d3dmetal" => Some(Self::D3dmetal),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct VmConfig {
     pub memory_size: usize,
@@ -53,6 +78,7 @@ pub struct VmConfig {
     pub kernel: PathBuf,
     pub initrd: Option<PathBuf>,
     pub kernel_args: String,
+    pub neptune_backend: NeptuneBackend,
 }
 
 #[derive(Debug, Deserialize)]
@@ -69,6 +95,8 @@ struct VmConfigFile {
     kernel: Option<PathBuf>,
     initrd: Option<PathBuf>,
     kernel_args: Option<Vec<String>>,
+    #[serde(default)]
+    neptune_backend: NeptuneBackend,
 }
 
 impl VmConfig {
@@ -122,14 +150,23 @@ impl VmConfig {
                 resolve_path(base, kernel),
                 config.initrd.map(|initrd| resolve_path(base, initrd)),
             ),
-            None => (
-                resource_path(resources.as_deref(), "kernel/Image", "build/guest/Image"),
-                Some(resource_path(
-                    resources.as_deref(),
-                    "kernel/initrd",
-                    "build/guest/initrd",
-                )),
-            ),
+            None => {
+                let source_kernel = resource_path(resources.as_deref(), "kernel/Image", "build/guest/Image");
+                let source_initrd = resource_path(resources.as_deref(), "kernel/initrd", "build/guest/initrd");
+
+                let disk_name = disk.file_name().and_then(|name| name.to_str()).unwrap_or("disk");
+                let boot_dir = disk
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .join(format!("{disk_name}.boot"));
+                let kernel = boot_dir.join("Image");
+                let initrd = boot_dir.join("initrd");
+
+                snapshot_file(&source_kernel, &kernel, "kernel");
+                snapshot_file(&source_initrd, &initrd, "initrd");
+
+                (kernel, Some(initrd))
+            }
         };
 
         let kernel_args = config
@@ -146,6 +183,7 @@ impl VmConfig {
             kernel,
             initrd,
             kernel_args,
+            neptune_backend: config.neptune_backend,
         }
     }
 }
@@ -175,6 +213,48 @@ fn absolute_path(path: &Path) -> PathBuf {
 
 fn resolve_path(base: &Path, path: PathBuf) -> PathBuf {
     if path.is_absolute() { path } else { base.join(path) }
+}
+
+fn snapshot_file(source: &Path, destination: &Path, name: &str) {
+    if destination.exists() {
+        return;
+    }
+
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)
+        .unwrap_or_else(|error| panic!("failed to create per-VM boot directory {}: {error}", parent.display()));
+
+    let temporary = parent.join(format!(
+        ".{}.partial.{}",
+        destination.file_name().and_then(|name| name.to_str()).unwrap_or(name),
+        std::process::id()
+    ));
+
+    let _ = fs::remove_file(&temporary);
+    fs::copy(source, &temporary).unwrap_or_else(|error| {
+        panic!(
+            "failed to snapshot {name} {} to {}: {error}",
+            source.display(),
+            temporary.display()
+        )
+    });
+
+    match fs::rename(&temporary, destination) {
+        Ok(()) => {
+            eprintln!(
+                "snapshotted VM {name} {} from {}",
+                destination.display(),
+                source.display()
+            );
+        }
+        Err(error) if destination.exists() => {
+            let _ = fs::remove_file(&temporary);
+        }
+        Err(error) => {
+            let _ = fs::remove_file(&temporary);
+            panic!("failed to install per-VM {name} {}: {error}", destination.display());
+        }
+    }
 }
 
 fn bundle_resources() -> Option<PathBuf> {
