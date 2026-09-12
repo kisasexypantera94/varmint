@@ -1,0 +1,16 @@
+diff --git a/src/virtio/neptune/nptunix/meson.build b/src/virtio/neptune/nptunix/meson.build
+index 8d5a8ae22af..36813c7627c 100644
+--- a/src/virtio/neptune/nptunix/meson.build
++++ b/src/virtio/neptune/nptunix/meson.build
+@@ -48,7 +48,10 @@
+ npt_dep_xcb_dri3_new = dependency('xcb-dri3',
+                                    version : '>= 1.16', native : true,
+                                    required : false)
+-npt_have_explicit_sync = npt_dep_xcb_dri3_new.found()
++# The Varmint runtime uses an Ubuntu 24.04 FEX RootFS with libxcb 1.15.
++# Do not link nptunix.so against the newer DRI3 syncobj API even when the
++# build environment provides libxcb >= 1.16.
++npt_have_explicit_sync = false
+ 
+ if npt_have_explicit_sync
+   npt_dep_xcb_dri3    = npt_dep_xcb_dri3_new
