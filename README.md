@@ -7,6 +7,8 @@ Varmint is a lightweight virtual machine for Macs, built on top of Hypervisor.fr
 
 The current focus is gaming and hardware-accelerated graphics. It boots a Debian arm64 guest with FEX, Steam and Proton, making it possible to run Windows and Linux games on Mac.
 
+Windows games can use the Vulkan-based Venus graphics path or the experimental Neptune path for DirectX.
+
 ## How to use
 1. Download the [latest release](https://github.com/kisasexypantera94/varmint/releases), extract it and move `Varmint.app` to Applications.
 
@@ -37,6 +39,7 @@ The current focus is gaming and hardware-accelerated graphics. It boots a Debian
 ## Features
 
 * hardware-accelerated Vulkan and OpenGL
+* experimental DirectX 11 support through Neptune
 * x86-64 support through FEX
 * Windows games through Proton
 * audio, networking and input
@@ -44,23 +47,37 @@ The current focus is gaming and hardware-accelerated graphics. It boots a Debian
 * Retina and high-refresh display modes
 
 ## Games
-Compatibility varies between games. DirectX 9, 10 and 11 titles currently have the best chance of working through DXVK.
+
+Compatibility varies between games and graphics paths.
+
+DirectX 9 games, along with some early DirectX 11 games, currently have the best chance of working through DXVK and Venus.
+
+Newer DirectX 11 games can run either through Venus or Neptune, but compatibility is less predictable.
+
+DirectX 12 support is experimental and has not been tested extensively yet.
 
 See [Running games in Varmint](docs/games/common.md) for general setup and troubleshooting.
 
-| Game                                                                                       | Status | Setup Difficulty |
-| ------------------------------------------------------------------------------------------ | -----: | ----: |
-| [The Witcher 3: Wild Hunt](docs/games/the-witcher-3.md)                                    |      ✅ |    🟢 |
-| [The Witcher: Enhanced Edition](docs/games/the-witcher-enhanced-edition.md)                |      ✅ |    🟢 |
-| [Dragon's Dogma: Dark Arisen](docs/games/dragons-dogma-dark-arisen.md)                     |      ✅ |    🟡 |
-| [Fallout: New Vegas](docs/games/fallout-new-vegas.md)                                      |      ✅ |    🟢 |
-| [Fallout 3](docs/games/fallout-3.md)                                                       |      ✅ |    🟢 |
-| [Subnautica](docs/games/subnautica.md)                                                     |      ✅ |    🟢 |
-| [Portal 1-2](docs/games/portal.md)                                                         |      ✅ |    🟢 |
-| [Team Fortress 2](docs/games/team-fortress-2.md)                                           |      ✅ |    🟢 |
-| [Half-Life 2](docs/games/half-life-2.md)                                                   |      ✅ |    🟢 |
-| [Dishonored](docs/games/dishonored.md)                                                     |      ✅ |    🟢 |
-| [Deus Ex: Human Revolution](docs/games/deus-ex-human-revolution.md)                         |      ✅ |    🟢 |
+| Game                                                                                    | Status | Setup Difficulty |
+| --------------------------------------------------------------------------------------- | -----: | ---------------: |
+| [The Witcher 3: Wild Hunt](docs/games/the-witcher-3.md)                                 |      ✅ |               🟢 |
+| [The Witcher: Enhanced Edition](docs/games/the-witcher-enhanced-edition.md)             |      ✅ |               🟢 |
+| [Dragon's Dogma: Dark Arisen](docs/games/dragons-dogma-dark-arisen.md)                  |      ✅ |               🟡 |
+| [Fallout: New Vegas](docs/games/fallout-new-vegas.md)                                   |      ✅ |               🟢 |
+| [Fallout 3](docs/games/fallout-3.md)                                                    |      ✅ |               🟢 |
+| [Subnautica](docs/games/subnautica.md)                                                  |      ✅ |               🟢 |
+| [Portal 1-2](docs/games/portal.md)                                                      |      ✅ |               🟢 |
+| [Team Fortress 2](docs/games/team-fortress-2.md)                                        |      ✅ |               🟢 |
+| [Half-Life 2](docs/games/half-life-2.md)                                                |      ✅ |               🟢 |
+| [Dishonored](docs/games/dishonored.md)                                                  |      ✅ |               🟢 |
+| [Deus Ex: Human Revolution](docs/games/deus-ex-human-revolution.md)                     |      ✅ |               🟢 |
+| [SCP – Containment Breach](docs/games/scp-containment-breach.md)                        |      ✅ |               🟢 |
+| [L.A. Noire](docs/games/la-noire.md)                                                    |      ✅ |               🟠 |
+| [Vampire: The Masquerade - Bloodlines](docs/games/vampire-the-masquerade-bloodlines.md) |      ✅ |               🟡 |
+| [A Plague Tale: Innocence](docs/games/a-plague-tale-innocence.md)                       |      ✅ |               🟢 |
+| [Garry's Mod](docs/games/garrys-mod.md)                                                 |      ✅ |               🟢 |
+| [Red Comrades 2: For the Great Justice. Reloaded](docs/games/red-comrades-reloaded.md) |      ✅ |               🟢 |
+| [Red Comrades Save the Galaxy: Reloaded](docs/games/red-comrades-reloaded.md)           |      ✅ |               🟢 |
 
 <!-- | [Subnautica: Below Zero](docs/games/subnautica-below-zero.md)                              |      ✅ |    🟢 | -->
 <!-- | [Age of Empires II: Definitive Edition](docs/games/age-of-empires-2-definitive-edition.md) |      ✅ |    🟠 | -->
@@ -75,13 +92,26 @@ See [Running games in Varmint](docs/games/common.md) for general setup and troub
 | [![Fallout: New Vegas](https://img.youtube.com/vi/fEr_Hq2IWoA/maxresdefault.jpg)](https://www.youtube.com/watch?v=fEr_Hq2IWoA) | [![Subnautica](https://img.youtube.com/vi/l5Vk417vImU/maxresdefault.jpg)](https://www.youtube.com/watch?v=l5Vk417vImU) |
 
 ## Graphics
+
+DirectX 11 through Neptune:
+
+```text
+guest DirectX 11 => Mesa Neptune => virglrenderer => DXMT => Metal
+```
+
 Vulkan:
-`guest Vulkan => Mesa Venus => virglrenderer => MoltenVK => Metal`
+
+```text
+guest Vulkan => Mesa Venus => virglrenderer => MoltenVK => Metal
+```
 
 OpenGL:
-`guest OpenGL => Mesa VirGL => virglrenderer => ANGLE => Metal`
 
-The Vulkan path is currently the main focus.
+```text
+guest OpenGL => Mesa VirGL => virglrenderer => ANGLE => Metal
+```
+
+Neptune is currently the preferred path for supported DirectX 11 games. Venus remains the general-purpose Vulkan path and is used by DXVK and other Vulkan applications.
 
 ## Building from source
 Requires macOS 26 or later, Xcode, Rust and Docker.
