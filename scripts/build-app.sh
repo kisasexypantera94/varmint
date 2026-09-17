@@ -17,6 +17,7 @@ MOLTENVK_PATCHES=(
   "$ROOT/patches/moltenvk/0001-guard-null-multisample-state-in-mesh-pipeline.patch"
   "$ROOT/patches/moltenvk/0002-fix-query-device-available-range.patch"
   "$ROOT/patches/moltenvk/0003-fix-query-copy-availability-offset.patch"
+  "$ROOT/patches/moltenvk/0004-handle-null-descriptor-sets.patch"
 )
 VIRGL_GENERATED_PATCH="$ROOT/patches/neptune-generated/virglrenderer.patch"
 VIRGL_PATCH_SERIES="$ROOT/patches/virglrenderer/series"
