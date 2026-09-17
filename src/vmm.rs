@@ -158,6 +158,14 @@ fn validate_boot_layout(memory_size: usize, image_size: usize, initrd: Option<&[
 pub fn run(config_path: &Path) -> Result<()> {
     let config = VmConfig::load(config_path);
 
+    for (name, value) in &config.host_environment {
+        if std::env::var_os(name).is_none() {
+            unsafe {
+                std::env::set_var(name, value);
+            }
+        }
+    }
+
     let neptune_backend = match std::env::var("NPT_BACKEND") {
         Ok(value) => NeptuneBackend::from_env(&value)
             .unwrap_or_else(|| panic!("invalid NPT_BACKEND={value:?}; expected dxmt or d3dmetal")),

@@ -1,5 +1,6 @@
 use serde::Deserialize;
 use std::{
+    collections::BTreeMap,
     env,
     ffi::OsStr,
     fs,
@@ -79,6 +80,7 @@ pub struct VmConfig {
     pub initrd: Option<PathBuf>,
     pub kernel_args: String,
     pub neptune_backend: NeptuneBackend,
+    pub host_environment: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,6 +99,8 @@ struct VmConfigFile {
     kernel_args: Option<Vec<String>>,
     #[serde(default)]
     neptune_backend: NeptuneBackend,
+    #[serde(default)]
+    host_environment: BTreeMap<String, String>,
 }
 
 impl VmConfig {
@@ -184,6 +188,7 @@ impl VmConfig {
             initrd,
             kernel_args,
             neptune_backend: config.neptune_backend,
+            host_environment: config.host_environment,
         }
     }
 }
