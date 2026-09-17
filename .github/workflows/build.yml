@@ -140,6 +140,17 @@ jobs:
           name: guest-runtime
           path: build/guest
 
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            build/cargo
+          key: cargo-macos26-arm64-${{ hashFiles('Cargo.lock', 'Cargo.toml') }}
+          restore-keys: |
+            cargo-macos26-arm64-
+
       - name: Build Varmint.app
         run: make bundle
 
