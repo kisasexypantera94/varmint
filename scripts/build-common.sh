@@ -92,6 +92,43 @@ checkout_repo() {
   git -C "$destination" checkout --detach "$commit"
 }
 
+checkout_repo_sparse() {
+  local repository="$1"
+  local commit="$2"
+  local destination="$3"
+  shift 3
+
+  mkdir -p "$(dirname "$destination")"
+
+  # Replace an old full clone with a partial clone once.
+  if [ -d "$destination/.git" ] &&
+     [ "$(git -C "$destination" config --get remote.origin.promisor 2>/dev/null || true)" != "true" ]; then
+    rm -rf "$destination"
+  fi
+
+  if [ ! -d "$destination/.git" ]; then
+    rm -rf "$destination"
+    git init -q "$destination"
+    git -C "$destination" remote add origin "$repository"
+    git -C "$destination" config remote.origin.promisor true
+    git -C "$destination" config remote.origin.partialclonefilter blob:none
+  fi
+
+  git -C "$destination" reset --hard HEAD >/dev/null 2>&1 || true
+
+  git -C "$destination" sparse-checkout init --cone
+  git -C "$destination" sparse-checkout set "$@"
+
+  if ! git -C "$destination" cat-file -e "$commit^{commit}" 2>/dev/null; then
+    git -C "$destination" fetch \
+      --depth=1 \
+      --filter=blob:none \
+      origin "$commit"
+  fi
+
+  git -C "$destination" checkout --detach "$commit"
+}
+
 apply_dependency_patch() {
   local source="$1"
   local patch="$2"
