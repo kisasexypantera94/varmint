@@ -99,6 +99,7 @@ jobs:
           brew install meson pkg-config
           brew install --force-bottle llvm@15
           brew tap nirs/vmnet-helper
+          brew trust nirs/vmnet-helper
           brew install vmnet-helper
 
       - name: Ensure Metal toolchain is available
