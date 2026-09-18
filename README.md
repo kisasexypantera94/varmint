@@ -76,8 +76,13 @@ See [Running games in Varmint](docs/games/common.md) for general setup and troub
 | [Vampire: The Masquerade - Bloodlines](docs/games/vampire-the-masquerade-bloodlines.md) |      ✅ |               🟡 |
 | [A Plague Tale: Innocence](docs/games/a-plague-tale-innocence.md)                       |      ✅ |               🟢 |
 | [Garry's Mod](docs/games/garrys-mod.md)                                                 |      ✅ |               🟢 |
-| [Red Comrades 2: For the Great Justice. Reloaded](docs/games/red-comrades-reloaded.md) |      ✅ |               🟢 |
+| [Red Comrades 2: For the Great Justice. Reloaded](docs/games/red-comrades-reloaded.md)  |      ✅ |               🟢 |
 | [Red Comrades Save the Galaxy: Reloaded](docs/games/red-comrades-reloaded.md)           |      ✅ |               🟢 |
+| [Counter-Strike 2](docs/games/counter-strike-2.md)                                      |      ✅ |               🟡 |
+| [Stoneshard](docs/games/stoneshard.md)                                                  |      ✅ |               🟢 |
+| [Assassin's Creed II](docs/games/assassins-creed-2.md)                                  |      ✅ |               🟢 |
+| [SnowRunner](docs/games/snowrunner.md)                                                  |      ✅ |               🟢 |
+| [Grand Theft Auto IV](docs/games/grand-theft-auto-iv.md)                              |      ✅ |               🟢 |
 
 <!-- | [Subnautica: Below Zero](docs/games/subnautica-below-zero.md)                              |      ✅ |    🟢 | -->
 <!-- | [Age of Empires II: Definitive Edition](docs/games/age-of-empires-2-definitive-edition.md) |      ✅ |    🟠 | -->
