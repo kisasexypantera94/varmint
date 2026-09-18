@@ -65,7 +65,7 @@ RUN cmake \
     test -f /opt/fex-install/usr/lib/aarch64-linux-gnu/fex-emu/HostThunks/libvulkan-host.so && \
     test -f /opt/fex-install/usr/lib/aarch64-linux-gnu/fex-emu/HostThunks_32/libvulkan-host.so
 
-FROM debian:trixie-slim AS neptune-builder
+FROM --platform=linux/amd64 debian:trixie-slim AS neptune-builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 

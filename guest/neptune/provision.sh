@@ -9,7 +9,9 @@ RUNTIME=/usr/local/lib/varmint/neptune
 
 . "$STATE/versions.env"
 
-dpkg --add-architecture amd64
+if [ "$(dpkg --print-architecture)" != "amd64" ]; then
+    dpkg --add-architecture amd64
+fi
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $(cat /opt/varmint/neptune/deps.txt)
 

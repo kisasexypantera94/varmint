@@ -1,0 +1,172 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust formatting
+        run: cargo fmt --check
+
+      - name: Shell syntax
+        run: |
+          find scripts guest -type f -name '*.sh' -print0 |
+            xargs -0 -n1 bash -n
+
+  guest:
+    needs: lint
+    runs-on: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable x86-64 emulation
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: amd64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Verify x86-64 emulation
+        run: |
+          docker run --rm --platform linux/amd64 alpine uname -m
+
+      - name: Cache guest runtime
+        uses: actions/cache@v4
+        with:
+          path: build/guest
+          key: guest-arm64-${{ hashFiles(
+            'guest/**',
+            'patches/neptune-protocol/**',
+            'patches/neptune-generated/virtio-win-mesa.patch',
+            'patches/virtio-win-mesa/**'
+            ) }}
+
+      - name: Build guest runtime
+        run: make guest-image
+
+      - name: Upload guest runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: guest-runtime
+          path: build/guest
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: 1
+
+  app:
+    needs:
+      - lint
+      - guest
+
+    runs-on: macos-26
+
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26.5
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.5.app/Contents/Developer
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
+
+      - name: Install Rosetta
+        run: |
+          if ! /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null; then
+            sudo /usr/sbin/softwareupdate --install-rosetta --agree-to-license
+          fi
+
+      - name: Install build dependencies
+        run: |
+          brew install meson pkg-config
+          brew install --force-bottle llvm@15
+          brew tap nirs/vmnet-helper
+          brew trust nirs/vmnet-helper
+          brew install vmnet-helper
+
+      - name: Ensure Metal toolchain is available
+        run: |
+          if ! xcrun -f metal >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+          xcrun -f metal
+
+      - name: Cache host dependency prefix
+        uses: actions/cache@v4
+        with:
+          path: build/prefix
+          key: host-deps-macos26-arm64-xcode265-${{ hashFiles(
+            'runtime/manifest.toml',
+            'scripts/build-app.sh',
+            'scripts/build-common.sh',
+            'scripts/build-dependencies.sh',
+            'patches/moltenvk/**',
+            'patches/virglrenderer/**',
+            'patches/neptune-generated/virglrenderer.patch',
+            'patches/dxmt/**',
+            'patches/d3dmetal-native/**'
+            ) }}
+
+      - name: Build host dependencies
+        run: make dependencies
+
+      - name: Free dependency build space
+        run: |
+          rm -rf build/deps/src build/deps/venv
+          rm -rf "$HOME/Library/Developer/Xcode/DerivedData"/*
+          df -h .
+
+      - name: Download guest runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: guest-runtime
+          path: build/guest
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            build/cargo
+          key: cargo-macos26-arm64-${{ hashFiles('Cargo.lock', 'Cargo.toml') }}
+          restore-keys: |
+            cargo-macos26-arm64-
+
+      - name: Build Varmint.app
+        run: make bundle
+
+      - name: Package app
+        run: |
+          ditto \
+            -c -k \
+            --sequesterRsrc \
+            --keepParent \
+            dist/Varmint.app \
+            Varmint.zip
+
+      - name: Upload app
+        uses: actions/upload-artifact@v4
+        with:
+          name: Varmint
+          path: Varmint.zip
+          compression-level: 0
+          retention-days: 7

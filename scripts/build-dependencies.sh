@@ -88,7 +88,10 @@ build_angle() {
   local dylib
 
   log "ANGLE"
-  checkout_repo "$ANGLE_REPOSITORY" "$ANGLE_COMMIT" "$source"
+  checkout_repo_sparse "$ANGLE_REPOSITORY" "$ANGLE_COMMIT" "$source" \
+    Source/ThirdParty/ANGLE \
+    Configurations \
+    Tools/ccache
   [ -d "$angle" ] || die "missing ANGLE source directory: $angle"
   rm -rf "$angle/ANGLE.xcarchive"
   (
