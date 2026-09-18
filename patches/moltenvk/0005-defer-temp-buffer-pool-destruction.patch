@@ -1,0 +1,48 @@
+diff --git a/MoltenVK/MoltenVK/Commands/MVKMTLBufferAllocation.h b/MoltenVK/MoltenVK/Commands/MVKMTLBufferAllocation.h
+index aeef27ff..9d3275f9 100644
+--- a/MoltenVK/MoltenVK/Commands/MVKMTLBufferAllocation.h
++++ b/MoltenVK/MoltenVK/Commands/MVKMTLBufferAllocation.h
+@@ -78,7 +78,7 @@ protected:
+  * To return a MVKMTLBufferAllocation retrieved from this pool, back to this pool, 
+  * call the returnToPool() function on the MVKMTLBufferAllocation instance.
+  */
+-class MVKMTLBufferAllocationPool : public MVKObjectPool<MVKMTLBufferAllocation>, public MVKDeviceTrackingMixin {
++class MVKMTLBufferAllocationPool : public MVKReferenceCountingMixin<MVKObjectPool<MVKMTLBufferAllocation>>, public MVKDeviceTrackingMixin {
+ 
+ public:
+     /** Returns a new allocation. */
+diff --git a/MoltenVK/MoltenVK/Commands/MVKMTLBufferAllocation.mm b/MoltenVK/MoltenVK/Commands/MVKMTLBufferAllocation.mm
+index 5695d019..33399d17 100644
+--- a/MoltenVK/MoltenVK/Commands/MVKMTLBufferAllocation.mm
++++ b/MoltenVK/MoltenVK/Commands/MVKMTLBufferAllocation.mm
+@@ -55,6 +55,7 @@
+     if (!_mtlBuffers[ba->_poolIndex].allocationCount++) {
+         [ba->_mtlBuffer setPurgeableState: MTLPurgeableStateNonVolatile];
+     }
++    retain();
+     return ba;
+ }
+ 
+@@ -76,16 +77,19 @@
+ 
+ void MVKMTLBufferAllocationPool::returnAllocation(MVKMTLBufferAllocation* ba) {
+     if (_isThreadSafe) {
+-        std::lock_guard<std::mutex> lock(_lock);
+-        returnAllocationUnlocked(ba);
++        {
++            std::lock_guard<std::mutex> lock(_lock);
++            returnAllocationUnlocked(ba);
++        }
+     } else {
+         returnAllocationUnlocked(ba);
+     }
++    release();
+ }
+ 
+ MVKMTLBufferAllocationPool::MVKMTLBufferAllocationPool(MVKDevice* device, NSUInteger allocationLength, bool makeThreadSafe,
+ 													   bool isDedicated, MTLStorageMode mtlStorageMode) :
+-	MVKObjectPool<MVKMTLBufferAllocation>(true),
++	MVKReferenceCountingMixin<MVKObjectPool<MVKMTLBufferAllocation>>(),
+ 	MVKDeviceTrackingMixin(device) {
+ 
+     _allocationLength = allocationLength;
