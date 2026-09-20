@@ -40,6 +40,13 @@ The Rockstar Games Launcher may occasionally hang or fail during startup.
 
 If that happens, stop the game in Steam and restart the VM before trying again.
 
+The most reliable workaround so far is to put Steam into offline mode before launching the game:
+
+1. In Steam, open **Steam → Go Offline...**
+2. Launch Grand Theft Auto IV normally.
+
+In testing, the game started successfully on the first attempt several times in a row with Steam in offline mode.
+
 If the launcher still refuses to start, recreate the game's Proton prefix:
 
 ```bash
