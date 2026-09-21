@@ -1,7 +1,7 @@
 use objc2_core_foundation::{CFDictionary, CFNumber, CFNumberType, CFRetained, CFString};
 use objc2_io_surface::{
-    IOSurfaceRef as ObjcIOSurfaceRef, kIOSurfaceBytesPerElement, kIOSurfaceHeight,
-    kIOSurfacePixelFormat, kIOSurfaceWidth,
+    IOSurfaceRef as ObjcIOSurfaceRef, kIOSurfaceBytesPerElement, kIOSurfaceHeight, kIOSurfacePixelFormat,
+    kIOSurfaceWidth,
 };
 use std::ffi::c_void;
 
