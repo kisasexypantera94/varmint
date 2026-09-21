@@ -1,20 +1,15 @@
 # Running Grand Theft Auto IV in Varmint
 
-Grand Theft Auto IV is playable in Varmint using Proton 10.
+Grand Theft Auto IV: The Complete Edition works well in Varmint using Proton 10.
 
-The Rockstar Games Launcher can be unreliable and may occasionally hang or fail to start the game.
+The Rockstar Games Launcher is currently unreliable in Varmint. The recommended workaround is to install RGLess, which removes the launcher from the game's startup path.
 
-If that happens, restarting the VM usually helps. If the launcher still refuses to work, recreating the game's Proton prefix is the most reliable fix.
-
-If possible, allocate 24 GB of RAM to the VM.
+**Thanks to `dr_strangekebab` for pointing out the RGLess workaround.**
 
 ## Quick setup
 
-Use the following configuration:
-
 ```text
 Proton version: Proton 10.0
-RAM:            24 GB recommended
 ```
 
 ### 1. Select Proton 10
@@ -26,37 +21,60 @@ In Steam:
 3. Enable **Force the use of a specific Steam Play compatibility tool**.
 4. Select **Proton 10.0**.
 
-### 2. Start the game
+### 2. Install RGLess
+
+Install `unzip` first:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y unzip
+```
+
+Then install RGLess:
+
+```bash
+GAME="$HOME/.local/share/Steam/steamapps/common/Grand Theft Auto IV/GTAIV"
+ZIP="/tmp/RGLessIV.zip"
+TMP="/tmp/rgless-install"
+
+cd "$GAME"
+
+mv GTAIV.exe GTAIVbak.exe
+mv PlayGTAIV.exe PlayGTAIVbak.exe
+mv binkw32.dll binkw32bak.dll
+
+curl -fL \
+  "https://archive.org/download/rgless-iv/RGLessIV.zip" \
+  -o "$ZIP"
+
+rm -rf "$TMP"
+mkdir -p "$TMP"
+
+unzip -q "$ZIP" -d "$TMP"
+cp -av "$TMP"/. "$GAME"/
+```
+
+RGLess replaces `GTAIV.exe`, `PlayGTAIV.exe`, and `binkw32.dll`. The original files are kept as `GTAIVbak.exe`, `PlayGTAIVbak.exe`, and `binkw32bak.dll`.
+
+### 3. Start the game
 
 Launch Grand Theft Auto IV normally from Steam.
 
-No additional launch options are required for the tested setup.
+No additional launch options are required. The Rockstar Games Launcher should no longer appear.
 
-## Known issues
+## Save files
 
-### Rockstar Games Launcher
+RGLess uses a local save directory instead of the normal Rockstar Games Launcher location:
 
-The Rockstar Games Launcher may occasionally hang or fail during startup.
-
-If that happens, stop the game in Steam and restart the VM before trying again.
-
-The most reliable workaround so far is to put Steam into offline mode before launching the game:
-
-1. In Steam, open **Steam → Go Offline...**
-2. Launch Grand Theft Auto IV normally.
-
-In testing, the game started successfully on the first attempt several times in a row with Steam in offline mode.
-
-If the launcher still refuses to start, recreate the game's Proton prefix:
-
-```bash
-cd "$HOME/.local/share/Steam/steamapps/compatdata" &&
-mv 12210 "12210.bak-$(date +%Y%m%d-%H%M%S)"
+```text
+~/.local/share/Steam/steamapps/common/Grand Theft Auto IV/GTAIV/save/GTA IV
 ```
 
-Then launch the game again from Steam.
+Existing saves may need to be copied there manually.
 
-Proton will recreate the prefix and reinstall the Rockstar Games Launcher / Social Club components.
+Rockstar cloud saves are not available when using RGLess.
+
+## Known issues
 
 ### Shader warmup
 
@@ -67,8 +85,8 @@ If possible, leave it running and let shader compilation finish. If it becomes c
 ## Tested configuration
 
 ```text
-Grand Theft Auto IV
+Grand Theft Auto IV: The Complete Edition
 Steam App ID 12210
 Proton 10.0
-24 GB RAM
+RGLess
 ```
