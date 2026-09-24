@@ -1,19 +1,13 @@
 diff --git a/src/virtio/neptune/npt_overrides_d3d11_view.c b/src/virtio/neptune/npt_overrides_d3d11_view.c
-index 7c79cec3c9f..dcd28b5e4d4 100644
+index 7c79cec3c9f..4bd097ffc10 100644
 --- a/src/virtio/neptune/npt_overrides_d3d11_view.c
 +++ b/src/virtio/neptune/npt_overrides_d3d11_view.c
-@@ -81,6 +81,7 @@ view_record_resource_iid(void *view, void *pResource)
- }
+@@ -114,19 +114,85 @@ VIEW_CREATE_OVERRIDE(id3d11device3, CreateUnorderedAccessView1,
+                      ID3D11UnorderedAccessView1, D3D11_UNORDERED_ACCESS_VIEW_DESC1)
  
  
-+
- /* Per-Device Create*View overrides: call the generated default,
-  * then stamp the new view's aux with the originating resource's
-  * IID.  All paths fall through to the default if the view-creation
-@@ -116,17 +117,86 @@ VIEW_CREATE_OVERRIDE(id3d11device3, CreateUnorderedAccessView1,
- 
- /* View::GetResource override: wrap the returned host pointer with
-  * the derived IID recorded at Create*View time. */
+-/* View::GetResource override: wrap the returned host pointer with
+- * the derived IID recorded at Create*View time. */
 +/*
 + * Wrap a resource returned by View::GetResource with its concrete D3D11
 + * resource interface.
@@ -87,7 +81,6 @@ index 7c79cec3c9f..dcd28b5e4d4 100644
 +   return base;
 +}
 +
-+
  static void NPT_STDMETHODCALLTYPE
  view_GetResource_override(void *self, ID3D11Resource **ppResource)
  {
@@ -102,7 +95,7 @@ index 7c79cec3c9f..dcd28b5e4d4 100644
     if (npt_com_self_device(self)->multi_ring_enabled) {
        npt_call_ID3D11View_GetResource(
           npt_com_self_ring(self), npt_com_self_id(self), redirect);
-@@ -137,21 +207,10 @@ view_GetResource_override(void *self, ID3D11Resource **ppResource)
+@@ -137,21 +203,10 @@ view_GetResource_override(void *self, ID3D11Resource **ppResource)
  
     if (!ppResource)
        return;
