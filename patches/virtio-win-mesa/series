@@ -1,4 +1,5 @@
 0002-add-neptune-d3d11-dynamic-buffer-zerocopy.patch
-0003-fix-neptune-bc-texture-mapping.patch
 0004-fix-neptune-com-parent-lifetime.patch
 0005-disable-neptune-xcb-explicit-sync.patch
+0006-fix-neptune-d3d11-view-getresource-type.patch
+0007-refuse-unsupported-neptune-d3d11-texture-formats.patch
