@@ -132,6 +132,16 @@ setup_fex() {
   }
 }
 EOF_CONFIG
+
+    # Work around FEX-Emu/FEX#5336
+    run_as_user sh -c 'mkdir -p "$(dirname "$1")"; cat > "$1"' sh \
+        "$home_dir/.config/fex-emu/AppConfig/steamwebhelper.json" <<'EOF_APPCONFIG'
+{
+  "Config": {
+    "Multiblock": "0"
+  }
+}
+EOF_APPCONFIG
 }
 
 install_steam() {
