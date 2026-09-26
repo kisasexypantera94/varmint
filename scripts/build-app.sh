@@ -23,7 +23,10 @@ MOLTENVK_PATCHES=(
 VIRGL_GENERATED_PATCH="$ROOT/patches/neptune-generated/virglrenderer.patch"
 VIRGL_PATCH_SERIES="$ROOT/patches/virglrenderer/series"
 DXMT_PATCHES=(
-  "$ROOT/patches/dxmt/0001-neptune-d3d11-correctness-and-zerocopy.patch"
+  "$ROOT/patches/dxmt/0001-fix-neptune-staging-and-vertex-sample-flicker.patch"
+  "$ROOT/patches/dxmt/0002-add-neptune-d3d11-dynamic-buffer-zerocopy.patch"
+  "$ROOT/patches/dxmt/0003-add-neptune-r10-bgra8-present-conversion.patch"
+  "$ROOT/patches/dxmt/0004-fix-dxmt-occlusion-query-empty-tail.patch"
 )
 D3DMETAL_PATCHES=(
   "$ROOT/patches/d3dmetal-native/0001-fix-macos-shm-open-cloexec.patch"

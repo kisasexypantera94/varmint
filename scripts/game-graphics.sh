@@ -10,7 +10,7 @@ MODE="${2:-status}"
 EXE_REL="${3:-}"
 
 [ -n "$APPID" ] || {
-    echo "usage: $0 <steam-appid> <status|venus|neptune> [relative/path/to/Game.exe]" >&2
+    echo "usage: $0 <steam-appid> <status|venus|neptune|neptune-dx12> [relative/path/to/Game.exe]" >&2
     exit 2
 }
 

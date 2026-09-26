@@ -1,0 +1,178 @@
+diff --git a/src/d3d11/d3d11_context_impl.cpp b/src/d3d11/d3d11_context_impl.cpp
+--- a/src/d3d11/d3d11_context_impl.cpp
++++ b/src/d3d11/d3d11_context_impl.cpp
+@@ -4122,6 +4122,32 @@ public:
+           cmd_cptex.origin = cmd.DstOrigin;
+         });
+       } else if (auto src = GetTexture(cmd.pSrc)) {
++        // Neptune WSI: X11 cannot represent our RGB10A2 dmabuf as a
++        // depth-30 pixmap. Convert only the internal shared present pool
++        // from RGB10A2 to BGRA8; the application's backbuffer stays RGB10A2.
++        auto dst_allocation = dst->current();
++        const bool neptune_present_convert =
++            cmd.Src.Format == DXGI_FORMAT_R10G10B10A2_UNORM &&
++            cmd.Dst.Format == DXGI_FORMAT_B8G8R8A8_UNORM &&
++            cmd.Src.MipLevel == 0 && cmd.Src.ArraySlice == 0 &&
++            cmd.Dst.MipLevel == 0 && cmd.Dst.ArraySlice == 0 &&
++            cmd.SrcOrigin.x == 0 && cmd.SrcOrigin.y == 0 && cmd.SrcOrigin.z == 0 &&
++            cmd.DstOrigin.x == 0 && cmd.DstOrigin.y == 0 && cmd.DstOrigin.z == 0 &&
++            cmd.SrcSize.width == cmd.Src.Width &&
++            cmd.SrcSize.height == cmd.Src.Height &&
++            cmd.SrcSize.depth == cmd.Src.Depth &&
++            dst_allocation &&
++            dst_allocation->flags().test(TextureAllocationFlag::Shared) &&
++            dst_allocation->mappedMemory;
++
++        if (neptune_present_convert) {
++          InvalidateCurrentPass(true);
++          EmitOP([dst_ = std::move(dst), src_ = std::move(src)](ArgumentEncodingContext &enc) {
++            enc.blit_color_cmd.copy(src_, dst_);
++          });
++          return;
++        }
++
+         // on-device copy
+         SwitchToBlitEncoder(CommandBufferState::BlitEncoderActive);
+         EmitOP([dst_ = std::move(dst), src_ = std::move(src), cmd = std::move(cmd)](ArgumentEncodingContext &enc) {
+diff --git a/src/dxmt/dxmt_command.cpp b/src/dxmt/dxmt_command.cpp
+--- a/src/dxmt/dxmt_command.cpp
++++ b/src/dxmt/dxmt_command.cpp
+@@ -254,6 +254,78 @@ ClearRenderTargetContext::end() {
+   clearing_texture_view_ = 0;
+ };
+ 
++ColorBlitContext::ColorBlitContext(
++    WMT::Device device, InternalCommandLibrary &lib, ArgumentEncodingContext &ctx
++) :
++    ctx_(ctx) {
++  WMT::Reference<WMT::Error> err;
++  auto library = lib.getLibrary();
++
++  auto vs_copy = library.newFunction("vs_present_quad");
++  auto fs_copy = library.newFunction("fs_neptune_present_copy");
++
++  WMTRenderPipelineInfo pipeline_info;
++  WMT::InitializeRenderPipelineInfo(pipeline_info);
++  pipeline_info.vertex_function = vs_copy;
++  pipeline_info.fragment_function = fs_copy;
++  pipeline_info.colors[0].pixel_format = WMTPixelFormatBGRA8Unorm;
++  pipeline_info.rasterization_enabled = true;
++  pipeline_info.input_primitive_topology = WMTPrimitiveTopologyClassTriangle;
++
++  pso_ = device.newRenderPipelineState(pipeline_info, err);
++  if (!pso_)
++    ERR("Failed to create Neptune color-conversion PSO: ", err.description().getUTF8String());
++}
++
++void
++ColorBlitContext::copy(const Rc<Texture> &src, const Rc<Texture> &dst) {
++  if (!pso_)
++    return;
++
++  TextureViewKey view = 0;
++
++  auto &pass_info = *ctx_.startRenderPass(0, 0, 1, 0);
++  auto &color = pass_info.colors[0];
++  color.attachment =
++      ctx_.access<PipelineStage::Pixel>(dst, view, ResourceAccess::Write);
++  color.depth_plane = 0;
++  color.load_action = WMTLoadActionDontCare;
++  color.store_action = WMTStoreActionStore;
++
++  const auto width = dst->width(view);
++  const auto height = dst->height(view);
++  pass_info.render_target_width = width;
++  pass_info.render_target_height = height;
++  pass_info.render_target_array_length = 1;
++  pass_info.default_raster_sample_count = dst->sampleCount();
++
++  auto src_view =
++      ctx_.access(src, view, ResourceAccess::Read).texture;
++
++  auto &setpso = ctx_.encodeRenderCommand<wmtcmd_render_setpso>();
++  setpso.type = WMTRenderCommandSetPSO;
++  setpso.pso = pso_;
++
++  auto &setvp = ctx_.encodeRenderCommand<wmtcmd_render_setviewport>();
++  setvp.type = WMTRenderCommandSetViewport;
++  setvp.viewport = {0.0, 0.0, (double)width, (double)height, 0.0, 1.0};
++
++  auto &settex = ctx_.encodeRenderCommand<wmtcmd_render_settexture>();
++  settex.type = WMTRenderCommandSetFragmentTexture;
++  settex.texture = src_view;
++  settex.index = 0;
++
++  auto &draw = ctx_.encodeRenderCommand<wmtcmd_render_draw>();
++  draw.type = WMTRenderCommandDraw;
++  draw.primitive_type = WMTPrimitiveTypeTriangle;
++  draw.vertex_start = 0;
++  draw.vertex_count = 3;
++  draw.base_instance = 0;
++  draw.instance_count = 1;
++
++  ctx_.endPass();
++}
++
+ DepthStencilBlitContext::DepthStencilBlitContext(
+     WMT::Device device, InternalCommandLibrary &lib, ArgumentEncodingContext &ctx
+ ) :
+diff --git a/src/dxmt/dxmt_command.hpp b/src/dxmt/dxmt_command.hpp
+--- a/src/dxmt/dxmt_command.hpp
++++ b/src/dxmt/dxmt_command.hpp
+@@ -229,6 +229,17 @@ private:
+   TextureViewKey clearing_texture_view_;
+ };
+ 
++class ColorBlitContext {
++public:
++  ColorBlitContext(WMT::Device device, InternalCommandLibrary &lib, ArgumentEncodingContext &ctx);
++
++  void copy(const Rc<Texture> &src, const Rc<Texture> &dst);
++
++private:
++  ArgumentEncodingContext &ctx_;
++  WMT::Reference<WMT::RenderPipelineState> pso_;
++};
++
+ class DepthStencilBlitContext {
+ 
+ public:
+diff --git a/src/dxmt/dxmt_command.metal b/src/dxmt/dxmt_command.metal
+--- a/src/dxmt/dxmt_command.metal
++++ b/src/dxmt/dxmt_command.metal
+@@ -251,6 +251,13 @@ struct present_data {
+   return output;
+ }
+ 
++[[fragment]] float4 fs_neptune_present_copy(
++    present_data input [[stage_in]],
++    texture2d<float, access::read> source [[texture(0)]]
++) {
++  return source.read(uint2(input.position.xy));
++}
++
+ constant constexpr float PQ_M1 = 0.1593017578125;
+ constant constexpr float PQ_M2 = 78.84375;
+ constant constexpr float PQ_C1 = 0.8359375;
+diff --git a/src/dxmt/dxmt_context.cpp b/src/dxmt/dxmt_context.cpp
+--- a/src/dxmt/dxmt_context.cpp
++++ b/src/dxmt/dxmt_context.cpp
+@@ -32,6 +32,7 @@ namespace dxmt {
+ ArgumentEncodingContext::ArgumentEncodingContext(CommandQueue &queue, WMT::Device device, InternalCommandLibrary &lib) :
+     emulated_cmd(device, lib, *this),
+     clear_rt_cmd(device, lib, *this),
++    blit_color_cmd(device, lib, *this),
+     blit_depth_stencil_cmd(device, lib, *this),
+     clear_res_cmd(device, lib, *this),
+     mv_scale_cmd(device, lib, *this),
+diff --git a/src/dxmt/dxmt_context.hpp b/src/dxmt/dxmt_context.hpp
+--- a/src/dxmt/dxmt_context.hpp
++++ b/src/dxmt/dxmt_context.hpp
+@@ -864,6 +864,7 @@ public:
+ 
+   EmulatedCommandContext emulated_cmd;
+   ClearRenderTargetContext clear_rt_cmd;
++  ColorBlitContext blit_color_cmd;
+   DepthStencilBlitContext blit_depth_stencil_cmd;
+   ClearResourceKernelContext clear_res_cmd;
+   MTLFXMVScaleContext mv_scale_cmd;

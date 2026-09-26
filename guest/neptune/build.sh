@@ -4,7 +4,7 @@ set -euo pipefail
 REPO="${VARMINT_NEPTUNE_REPO:-$HOME/virtio-win-mesa-neptune}"
 BUILD="${VARMINT_NEPTUNE_BUILD:-$REPO/builddir-win64-x86unix}"
 
-test -d "$REPO/.git" || {
+git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
     echo "missing repo: $REPO" >&2
     exit 1
 }
@@ -80,13 +80,24 @@ meson compile -C "$BUILD"
 
 echo
 echo "=== artifacts ==="
-find "$BUILD/src/virtio/neptune" -type f \( \
-    -name d3d11.dll -o \
-    -name dxgi.dll -o \
-    -name d3d12.dll -o \
-    -name nptunix.dll -o \
-    -name nptunix.so \
-\) -print
+
+ARTIFACT_DIR="$BUILD/src/virtio/neptune"
+REQUIRED_ARTIFACTS=(
+    d3d11.dll
+    dxgi.dll
+    d3d12.dll
+    nptunix/nptunix.dll
+    nptunix/nptunix.so
+)
+
+for rel in "${REQUIRED_ARTIFACTS[@]}"; do
+    path="$ARTIFACT_DIR/$rel"
+    test -s "$path" || {
+        echo "missing or zero-byte Neptune artifact: $path" >&2
+        exit 1
+    }
+    ls -lh "$path"
+done
 
 echo
 echo "=== build OK ==="

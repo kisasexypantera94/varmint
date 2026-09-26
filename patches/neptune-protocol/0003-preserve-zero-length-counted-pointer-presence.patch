@@ -1,0 +1,277 @@
+diff --git a/templates/cs_helpers.h b/templates/cs_helpers.h
+index e0873a7..bec9c73 100644
+--- a/templates/cs_helpers.h
++++ b/templates/cs_helpers.h
+@@ -289,6 +289,41 @@ static inline uint64_t npt_peek_array_count(struct npt_cs_decoder *dec)
+     return count;
+ }
+ 
++/*
++ * Counted pointers historically used count=0 for both NULL+0 and
++ * non-NULL+0, losing pointer presence.  Keep the one-word wire format:
++ *
++ *   0             -> NULL
++ *   UINT64_MAX    -> present pointer, logical count 0
++ *   N             -> present pointer, logical count N
++ *
++ * UINT64_MAX is not a meaningful allocatable array length.
++ */
++#define NPT_COUNTED_POINTER_PRESENT_ZERO (~(uint64_t)0)
++
++static inline uint64_t
++npt_counted_pointer_wire_count(const void *ptr, uint64_t count)
++{
++    if (!ptr)
++        return 0;
++    return count ? count : NPT_COUNTED_POINTER_PRESENT_ZERO;
++}
++
++static inline bool
++npt_decode_counted_pointer_count(struct npt_cs_decoder *dec, uint64_t *count)
++{
++    uint64_t wire_count = npt_decode_array_count_unchecked(dec);
++
++    if (!wire_count) {
++        *count = 0;
++        return false;
++    }
++
++    *count = wire_count == NPT_COUNTED_POINTER_PRESENT_ZERO
++        ? 0 : wire_count;
++    return true;
++}
++
+ /* ------------------------------------------------------------------ */
+ /* Simple pointer (present = 1, absent = 0)                            */
+ /* ------------------------------------------------------------------ */
+diff --git a/tests/test_roundtrip_manual.c b/tests/test_roundtrip_manual.c
+index f753c8e..66f0f40 100644
+--- a/tests/test_roundtrip_manual.c
++++ b/tests/test_roundtrip_manual.c
+@@ -1175,6 +1175,68 @@ struct manual_test_entry {
+     manual_test_func func;
+ };
+ 
++
++/* ------------------------------------------------------------------ */
++/* Counted pointer presence with zero logical length                  */
++/* ------------------------------------------------------------------ */
++
++static int test_manual_counted_pointer_present_zero(void)
++{
++    D3D12_ROOT_SIGNATURE_DESC orig;
++    memset(&orig, 0, sizeof(orig));
++
++    D3D12_ROOT_PARAMETER dummy;
++    memset(&dummy, 0, sizeof(dummy));
++
++    orig.NumParameters = 0;
++    orig.pParameters = &dummy;      /* present + logical count 0 */
++    orig.NumStaticSamplers = 0;
++    orig.pStaticSamplers = NULL;    /* absent + logical count 0 */
++
++    size_t w1_size = npt_sizeof_D3D12_ROOT_SIGNATURE_DESC(&orig, 0);
++    uint8_t *w1 = (uint8_t *)calloc(1, w1_size ? w1_size : 1);
++    struct npt_cs_encoder enc1 = npt_test_encoder_init(w1, w1_size);
++    npt_encode_D3D12_ROOT_SIGNATURE_DESC(&enc1, &orig);
++    size_t w1_actual = npt_test_encoder_written(&enc1, w1);
++
++    D3D12_ROOT_SIGNATURE_DESC decoded;
++    memset(&decoded, 0, sizeof(decoded));
++    struct npt_cs_decoder dec = npt_test_decoder_init(w1, w1_actual);
++    npt_decode_D3D12_ROOT_SIGNATURE_DESC(&dec, &decoded);
++
++    int result = 0;
++
++    if (!decoded.pParameters || decoded.NumParameters != 0) {
++        fprintf(stderr,
++                "FAIL: present zero-length counted pointer lost presence "
++                "(pParameters=%p NumParameters=%u)\n",
++                (void *)decoded.pParameters, decoded.NumParameters);
++        result = -1;
++    }
++
++    if (decoded.pStaticSamplers != NULL ||
++        decoded.NumStaticSamplers != 0) {
++        fprintf(stderr,
++                "FAIL: absent zero-length counted pointer became present\n");
++        result = -1;
++    }
++
++    size_t w2_size = npt_sizeof_D3D12_ROOT_SIGNATURE_DESC(&decoded, 0);
++    uint8_t *w2 = (uint8_t *)calloc(1, w2_size ? w2_size : 1);
++    struct npt_cs_encoder enc2 = npt_test_encoder_init(w2, w2_size);
++    npt_encode_D3D12_ROOT_SIGNATURE_DESC(&enc2, &decoded);
++    size_t w2_actual = npt_test_encoder_written(&enc2, w2);
++
++    if (npt_wire_compare("counted pointer present + zero length",
++                         w1, w1_actual, w2, w2_actual))
++        result = -1;
++
++    npt_test_cleanup(&dec);
++    free(w1);
++    free(w2);
++    return result;
++}
++
+ static const struct manual_test_entry manual_tests[] = {
+     { "D3D11_AUTHENTICATED_PROTECTION_FLAGS (Value variant)",
+       test_manual_D3D11_AUTHENTICATED_PROTECTION_FLAGS_Value },
+@@ -1194,6 +1256,8 @@ static const struct manual_test_entry manual_tests[] = {
+       test_manual_D3D12_ROOT_PARAMETER1_Constants },
+     { "D3D12_ROOT_SIGNATURE_DESC",
+       test_manual_D3D12_ROOT_SIGNATURE_DESC },
++    { "counted pointer present + zero length",
++      test_manual_counted_pointer_present_zero },
+     { "D3D12_ROOT_SIGNATURE_DESC1",
+       test_manual_D3D12_ROOT_SIGNATURE_DESC1 },
+     { "D3D12_ROOT_SIGNATURE_DESC2",
+diff --git a/tools/npt_codegen.py b/tools/npt_codegen.py
+index 408d859..4175881 100644
+--- a/tools/npt_codegen.py
++++ b/tools/npt_codegen.py
+@@ -1396,9 +1396,11 @@ class Gen:
+         # dereferenced to a single inner struct.  acc[_i] is T*; pass it
+         # directly to npt_encode_<T> (no `&`).
+         if field.indirection >= 2 and count_expr is not None and not field.is_handle:
++            wire_count = count_expr if for_output else (
++                f'npt_counted_pointer_wire_count({acc}, (uint64_t)({count_expr}))')
+             return [
+                 f'if ({acc}) {{',
+-                f'    npt_encode_array_count(enc, {count_expr});',
++                f'    npt_encode_array_count(enc, {wire_count});',
+                 f'    for (uint32_t _i = 0; _i < (uint32_t)({count_expr}); _i++)',
+                 f'        npt_encode_{field.type_name}(enc, {acc}[_i]);',
+                 f'}} else {{',
+@@ -1430,9 +1432,11 @@ class Gen:
+                     f'npt_encode_array_count(enc, {count_expr});',
+                     f'npt_encode_{field.type_name}_array(enc, (const {field.type_name} *){acc}, {count_expr});',
+                 ]
++            wire_count = count_expr if for_output else (
++                f'npt_counted_pointer_wire_count({acc}, (uint64_t)({count_expr}))')
+             return [
+                 f'if ({acc}) {{',
+-                f'    npt_encode_array_count(enc, {count_expr});',
++                f'    npt_encode_array_count(enc, {wire_count});',
+                 f'    npt_encode_{field.type_name}_array(enc, {acc}, {count_expr});',
+                 f'}} else {{',
+                 f'    npt_encode_array_count(enc, 0);',
+@@ -1455,9 +1459,11 @@ class Gen:
+                     f'for (uint32_t _i = 0; _i < (uint32_t)({count_expr}); _i++)',
+                     f'    npt_encode_{field.type_name}(enc, &{acc}[_i]);',
+                 ]
++            wire_count = count_expr if for_output else (
++                f'npt_counted_pointer_wire_count({acc}, (uint64_t)({count_expr}))')
+             return [
+                 f'if ({acc}) {{',
+-                f'    npt_encode_array_count(enc, {count_expr});',
++                f'    npt_encode_array_count(enc, {wire_count});',
+                 f'    for (uint32_t _i = 0; _i < (uint32_t)({count_expr}); _i++)',
+                 f'        npt_encode_{field.type_name}(enc, &{acc}[_i]);',
+                 f'}} else {{',
+@@ -1741,16 +1747,17 @@ class Gen:
+                     f'        npt_decode_{field.type_name}(dec, '
+                     f'({field.type_name} *)&{acc}[_i]);']
+         return [
+-            f'if (npt_peek_array_count(dec)) {{',
+-            f'    const uint64_t _count = npt_decode_array_count_unchecked(dec);',
+-            f'    {acc} = npt_cs_decoder_alloc_temp_array(dec, '
+-            f'sizeof({field.type_name}), _count);',
+-            f'    if (!{acc}) return;',
+-            *elem,
+-            f'}} else {{',
+-            f'    (void)npt_decode_array_count_unchecked(dec); /* consume the 0 */',
+-            f'    (void)({count_expr}); /* unused: count_expr from registry */',
+-            f'    {acc} = NULL;',
++            f'{{',
++            f'    uint64_t _count = 0;',
++            f'    if (npt_decode_counted_pointer_count(dec, &_count)) {{',
++            f'        {acc} = npt_cs_decoder_alloc_temp_array(dec, '
++            f'sizeof({field.type_name}), _count ? _count : 1);',
++            f'        if (!{acc}) return;',
++            *[f'    {line}' for line in elem],
++            f'    }} else {{',
++            f'        (void)({count_expr}); /* unused: count_expr from registry */',
++            f'        {acc} = NULL;',
++            f'    }}',
+             f'}}',
+         ]
+ 
+@@ -1766,20 +1773,21 @@ class Gen:
+         if field.indirection >= 2 and count_expr is not None and not field.is_handle \
+                 and alloc_temp:
+             return [
+-                f'if (npt_peek_array_count(dec)) {{',
+-                f'    const uint64_t _count = npt_decode_array_count_unchecked(dec);',
+-                f'    {acc} = npt_cs_decoder_alloc_temp_array(dec, sizeof({field.type_name} *), _count);',
+-                f'    if (!{acc}) return;',
+-                f'    for (uint32_t _i = 0; _i < (uint32_t)_count; _i++) {{',
+-                f'        {field.type_name} *_elem = npt_cs_decoder_alloc_temp(dec, sizeof({field.type_name}));',
+-                f'        if (!_elem) return;',
+-                f'        npt_decode_{field.type_name}(dec, _elem);',
+-                f'        (({field.type_name} **){acc})[_i] = _elem;',
++                f'{{',
++                f'    uint64_t _count = 0;',
++                f'    if (npt_decode_counted_pointer_count(dec, &_count)) {{',
++                f'        {acc} = npt_cs_decoder_alloc_temp_array(dec, sizeof({field.type_name} *), _count ? _count : 1);',
++                f'        if (!{acc}) return;',
++                f'        for (uint32_t _i = 0; _i < (uint32_t)_count; _i++) {{',
++                f'            {field.type_name} *_elem = npt_cs_decoder_alloc_temp(dec, sizeof({field.type_name}));',
++                f'            if (!_elem) return;',
++                f'            npt_decode_{field.type_name}(dec, _elem);',
++                f'            (({field.type_name} **){acc})[_i] = _elem;',
++                f'        }}',
++                f'    }} else {{',
++                f'        (void)({count_expr}); /* unused: count_expr from registry */',
++                f'        {acc} = NULL;',
+                 f'    }}',
+-                f'}} else {{',
+-                f'    (void)npt_decode_array_count_unchecked(dec); /* consume the 0 */',
+-                f'    (void)({count_expr}); /* unused: count_expr from registry */',
+-                f'    {acc} = NULL;',
+                 f'}}',
+             ]
+ 
+@@ -1835,14 +1843,12 @@ class Gen:
+                 ]
+             return [
+                 f'uint64_t {cnt} = 0;',
+-                f'if (npt_peek_array_count(dec)) {{',
+-                f'    {cnt} = npt_decode_array_count_unchecked(dec);',
++                f'if (npt_decode_counted_pointer_count(dec, &{cnt})) {{',
+                 f'    {acc} = npt_cs_decoder_alloc_temp_array(dec, '
+-                f'sizeof({field.type_name}), {cnt});',
++                f'sizeof({field.type_name}), {cnt} ? {cnt} : 1);',
+                 f'    if (!{acc}) return;',
+                 *elem,
+                 f'}} else {{',
+-                f'    (void)npt_decode_array_count_unchecked(dec); /* consume the 0 */',
+                 f'    {acc} = NULL;',
+                 f'}}',
+             ]
+diff --git a/tools/npt_testgen.py b/tools/npt_testgen.py
+index 7be1ad7..0f9072d 100644
+--- a/tools/npt_testgen.py
++++ b/tools/npt_testgen.py
+@@ -2125,17 +2125,19 @@ def _gen_reencode_param(out, reg, field, prefix, fields_map, for_output=False,
+             cnt = get_count_expr(field, prefix, fields_map)
+         if cnt is None:
+             return
++        wire_cnt = cnt if for_output else (
++            f'npt_counted_pointer_wire_count({acc}, (uint64_t)({cnt}))')
+         base = reg.resolve_alias_chain(field.type_name)
+         if base in PRIMITIVE_NAMES or reg.is_enum(field):
+             out.write(f'{ind}if ({acc}) {{\n')
+-            out.write(f'{ind}    npt_encode_array_count(&enc, {cnt});\n')
++            out.write(f'{ind}    npt_encode_array_count(&enc, {wire_cnt});\n')
+             out.write(f'{ind}    npt_encode_{field.type_name}_array(&enc, {acc}, {cnt});\n')
+             out.write(f'{ind}}} else {{\n')
+             out.write(f'{ind}    npt_encode_array_count(&enc, 0);\n')
+             out.write(f'{ind}}}\n')
+         else:
+             out.write(f'{ind}if ({acc}) {{\n')
+-            out.write(f'{ind}    npt_encode_array_count(&enc, {cnt});\n')
++            out.write(f'{ind}    npt_encode_array_count(&enc, {wire_cnt});\n')
+             out.write(f'{ind}    for (uint32_t _i = 0; _i < (uint32_t)({cnt}); _i++)\n')
+             out.write(f'{ind}        npt_encode_{field.type_name}(&enc, &{acc}[_i]);\n')
+             out.write(f'{ind}}} else {{\n')
