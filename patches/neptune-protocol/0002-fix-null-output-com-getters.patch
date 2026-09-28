@@ -96,10 +96,10 @@ index 7c21004..f753c8e 100644
      if (result) {
          fprintf(stderr, "FAIL: OMGetBlendState reply size %zu != %zu\n",
 diff --git a/tools/npt_codegen.py b/tools/npt_codegen.py
-index 202f2d7..408d859 100644
+index 202f2d7..3e59fc4 100644
 --- a/tools/npt_codegen.py
 +++ b/tools/npt_codegen.py
-@@ -317,13 +317,9 @@ class Gen:
+@@ -317,31 +317,47 @@ class Gen:
          Whether the guest thunk must wait for a reply.
  
          Output COM handles are marshaled as guest-allocated ids in the
@@ -110,49 +110,62 @@ index 202f2d7..408d859 100644
 -        ring threads), so Create-then-Use is race-free without a round
 -        trip.  A failed Create leaves a failed-object record under the
 -        id; the first use surfaces it (deferred-fatal model).
-+        command body, but NULL vs non-NULL remains observable.  Such
-+        methods therefore wait for a reply carrying output presence:
-+        the original guest id for a materialized object, or zero for NULL.
- 
-         HRESULT-only returns are async-eligible under that same model.
+-
+-        HRESULT-only returns are async-eligible under that same model.
++        command body, so HRESULT-only creators keep the existing async
++        deferred-fatal model.  Methods with no return value must wait for
++        output presence so NULL vs non-NULL is visible before return.
++
++        HRESULT-only returns are otherwise async-eligible under that model.
          Other scalar returns (BOOL, UINT, ...) and struct returns need a
-@@ -339,9 +335,34 @@ class Gen:
+-        sync reply to deliver the value.
+-
+-        force_sync (registry annotation) is for methods whose HRESULT
+-        carries control-flow meaning rather than fatal-error semantics --
+-        enumeration terminators like EnumOutputs / EnumAdapters signal
+-        end-of-iteration with DXGI_ERROR_NOT_FOUND, and the deferred-fatal
+-        path would mask that into a fake S_OK and make the caller loop
+-        forever.
++        reply.  Non-handle output parameters also require a reply.
++        force_sync covers methods whose HRESULT has immediate control-flow
++        meaning, such as enumeration terminators.
+         """
          has_non_handle_output = any(
              p.output and not self.is_output_com_handle(p)
              for p in method.params)
-+        has_output_com_handle = any(
++
++        has_output_com = any(
 +            self.is_output_com_handle(p)
 +            for p in method.params)
++
          has_ret = self.has_return(method.return_type)
          has_sync_ret = has_ret and method.return_type != 'HRESULT'
 -        return has_non_handle_output or has_sync_ret or method.force_sync
 +
-+        # Any output-only COM handle makes NULL vs non-NULL observable.
-+        # The guest preallocates the wire id before dispatch, so it must wait
-+        # for the host to report whether that id was actually materialized.
-+        #
-+        # This applies both to void state/query getters and HRESULT-returning
-+        # Create*/QueryInterface-style methods.  HRESULT alone is insufficient:
-+        # a successful call may still legally leave an optional COM output NULL.
-+        has_output_com = has_output_com_handle
++        # void GetFoo(IFoo **out): NULL/non-NULL must be known on return.
++        # HRESULT CreateFoo(..., IFoo **out): keep the guest-id/deferred-fatal
++        # fast path unless another rule independently requires synchronization.
++        has_no_return_com_output = has_output_com and not has_ret
 +
 +        return (has_non_handle_output
 +                or has_sync_ret
-+                or has_output_com
-+                or method.force_sync)
++                or has_no_return_com_output
++                or getattr(method, 'force_sync', False))
 +
 +    def method_reply_output_handles(self, method) -> bool:
-+        """Whether a reply must carry COM-output presence ids.
++        """Whether a synchronous reply carries COM-output presence ids.
 +
-+        Any output-only COM handle needs the host to report the original
-+        guest id for a non-NULL output and 0 for a NULL output.  HRESULT
-+        does not encode COM-output presence by itself.
++        For a synchronous call, a materialized object is represented by the
++        original guest id and NULL by zero.  Async HRESULT-only creators keep
++        the normal deferred output-handle model and carry no reply payload.
 +        """
-+        return any(self.is_output_com_handle(p) for p in method.params)
++        return (self.method_always_sync(method)
++                and any(self.is_output_com_handle(p)
++                        for p in method.params))
  
      def method_is_staged(self, iface, method) -> bool:
          """
-@@ -477,34 +498,94 @@ class Gen:
+@@ -477,34 +493,94 @@ class Gen:
              return ''
          return self._decode_output_alloc(field, prefix, indent)
  
@@ -170,7 +183,7 @@ index 202f2d7..408d859 100644
 +        guest-preallocated id.  Synchronous COM-output methods also carry
 +        a tiny presence reply: the host returns the original guest id for
 +        a non-NULL output and 0 for a NULL output.  This is required for
-+        getters and HRESULT-returning creators alike.
++        synchronous getters and other calls that already require a reply.
          """
          if self.is_output_com_handle(field):
 +            if reply_output_handles:
@@ -255,7 +268,7 @@ index 202f2d7..408d859 100644
              return (f'/* skip {prefix}{field.name} (guest-allocated id, '
                      f'wrapper built on client thunk; not in reply) */')
          if not field.output:
-@@ -2156,10 +2237,15 @@ class Gen:
+@@ -2156,10 +2232,15 @@ class Gen:
                  return (f'{ind}if ({acc} && {prefix}_guest_ids_{field.name}) {{\n'
                          f'{ind}    const uint32_t _n = '
                          f'{prefix}_guest_id_count_{field.name};\n'
@@ -275,7 +288,7 @@ index 202f2d7..408d859 100644
              return (f'{ind}if ({acc} && *{acc})\n'
                      f'{ind}    npt_cs_handle_register_guest_id(ctx, '
 diff --git a/tools/npt_testgen.py b/tools/npt_testgen.py
-index 336e175..7be1ad7 100644
+index 336e175..158d425 100644
 --- a/tools/npt_testgen.py
 +++ b/tools/npt_testgen.py
 @@ -165,7 +165,7 @@ class Field:
@@ -295,30 +308,46 @@ index 336e175..7be1ad7 100644
  
  
  class TypeInfo:
-@@ -1265,6 +1266,22 @@ def method_has_output(method):
+@@ -1265,6 +1266,38 @@ def method_has_output(method):
      return False
  
  
 +def method_reply_output_handles(method):
-+    """Mirror the protocol rule for COM-output presence replies.
++    """Mirror synchronous COM-output presence replies from npt_codegen."""
 +
-+    Any output-only COM handle uses the guest-id/zero reply payload so
-+    NULL outputs remain observable, including HRESULT-returning Create*
-+    and QueryInterface-style methods.
-+    """
-+    return any(
-+        p.handle == 'com'
-+        and p.indirection == 2
-+        and p.output
-+        and not p.input
++    def is_output_com(p):
++        return (
++            p.handle == 'com'
++            and p.indirection == 2
++            and p.output
++            and not p.input
++        )
++
++    has_output_com = any(is_output_com(p) for p in method.params)
++    if not has_output_com:
++        return False
++
++    has_non_handle_output = any(
++        p.output and not is_output_com(p)
 +        for p in method.params
++    )
++
++    has_ret = has_return(method.return_type)
++    has_sync_ret = has_ret and method.return_type != 'HRESULT'
++    has_no_return_com_output = not has_ret
++
++    return (
++        has_non_handle_output
++        or has_sync_ret
++        or has_no_return_com_output
++        or getattr(method, 'force_sync', False)
 +    )
 +
 +
  # ---------------------------------------------------------------------------
  # Collect struct dependencies for init functions
  # ---------------------------------------------------------------------------
-@@ -1543,6 +1560,47 @@ def _gen_host_encode_reply(out, reg, iface, method, fname, is_toplevel, idx):
+@@ -1543,6 +1576,47 @@ def _gen_host_encode_reply(out, reg, iface, method, fname, is_toplevel, idx):
      _gen_method_param_init(out, reg, params, fields_map, 'args.',
                             output_only=True, for_reply=True)
  
@@ -366,7 +395,7 @@ index 336e175..7be1ad7 100644
      # Handle count_output styles
      _gen_count_output_styles(out, reg, params, fields_map)
  
-@@ -1830,7 +1888,7 @@ def _gen_count_output_styles(out, reg, params, fields_map):
+@@ -1830,7 +1904,7 @@ def _gen_count_output_styles(out, reg, params, fields_map):
  
  
  def _gen_reencode_param(out, reg, field, prefix, fields_map, for_output=False,
@@ -375,7 +404,7 @@ index 336e175..7be1ad7 100644
      """Generate re-encode code for a single param."""
      ind = '    ' * indent
      acc = f'{prefix}{field.name}'
-@@ -1851,8 +1909,10 @@ def _gen_reencode_param(out, reg, field, prefix, fields_map, for_output=False,
+@@ -1851,8 +1925,10 @@ def _gen_reencode_param(out, reg, field, prefix, fields_map, for_output=False,
          t2 = reg.types.get(field.type_name)
          if t2:
              for inner in t2.fields:
@@ -388,7 +417,7 @@ index 336e175..7be1ad7 100644
          return
  
      if cls in ('COM_HANDLE', 'INTERFACE_REF'):
-@@ -1866,7 +1926,21 @@ def _gen_reencode_param(out, reg, field, prefix, fields_map, for_output=False,
+@@ -1866,7 +1942,21 @@ def _gen_reencode_param(out, reg, field, prefix, fields_map, for_output=False,
              # knows it.  The test harness must mirror the wire layout.
              cnt = get_count_expr(field, prefix, fields_map)
              if for_output:
@@ -411,7 +440,7 @@ index 336e175..7be1ad7 100644
                  return
              # Command side: re-encode the guest-allocated id(s) that
              # the decoder read into the args struct's shadow fields.
-@@ -1910,9 +1984,29 @@ def _gen_reencode_param(out, reg, field, prefix, fields_map, for_output=False,
+@@ -1910,9 +2000,29 @@ def _gen_reencode_param(out, reg, field, prefix, fields_map, for_output=False,
      if cls == 'COM_HANDLE_ARRAY':
          cnt = get_count_expr(field, prefix, fields_map)
          if for_output and field.output and field.indirection == 2:
@@ -444,7 +473,7 @@ index 336e175..7be1ad7 100644
              return
          if not for_output and field.output and field.indirection == 2:
              # Command-side re-encode of an output COM handle array:
-@@ -2367,15 +2461,20 @@ def _gen_guest_verify_reply(out, reg, iface, method, fname, is_toplevel, idx):
+@@ -2367,15 +2477,20 @@ def _gen_guest_verify_reply(out, reg, iface, method, fname, is_toplevel, idx):
          out.write(f'    npt_encode_{ret_type}(&enc, &ret_val);\n')
  
      # Re-encode output params
@@ -467,7 +496,7 @@ index 336e175..7be1ad7 100644
  
      out.write(f'\n    size_t w2_actual = npt_test_encoder_written(&enc, w2);\n')
      out.write(f'    int result = npt_wire_compare("REPLY_{fname}", buf, size, w2, w2_actual);\n')
-@@ -2385,11 +2484,13 @@ def _gen_guest_verify_reply(out, reg, iface, method, fname, is_toplevel, idx):
+@@ -2385,11 +2500,13 @@ def _gen_guest_verify_reply(out, reg, iface, method, fname, is_toplevel, idx):
      out.write(f'}}\n\n')
  
  

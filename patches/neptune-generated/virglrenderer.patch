@@ -74,54 +74,11 @@ index d956c063..dead7f9e 100644
  }
  
  static inline void
-diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d11classlinkage.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d11classlinkage.h
-index 613457ec..34d058b7 100644
---- a/src/neptune/neptune-protocol/npt_protocol_host_id3d11classlinkage.h
-+++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d11classlinkage.h
-@@ -79,7 +79,11 @@ npt_encode_ID3D11ClassLinkage_GetClassInstance_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppInstance (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppInstance && *args->ppInstance)
-+            ? args->_guest_id_ppInstance : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -239,7 +243,11 @@ npt_encode_ID3D11ClassLinkage_CreateClassInstance_reply(struct npt_cs_encoder *e
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppInstance (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppInstance && *args->ppInstance)
-+            ? args->_guest_id_ppInstance : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d11device.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d11device.h
-index 2b17b32c..832dd6e6 100644
+index 2b17b32c..251df08b 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_id3d11device.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d11device.h
-@@ -84,7 +84,11 @@ npt_encode_ID3D11Device_CreateBuffer_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppBuffer (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppBuffer && *args->ppBuffer)
-+            ? args->_guest_id_ppBuffer : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -205,14 +209,12 @@ npt_decode_ID3D11Device_CreateTexture1D_args_temp(struct npt_cs_decoder *dec,
+@@ -205,14 +205,12 @@ npt_decode_ID3D11Device_CreateTexture1D_args_temp(struct npt_cs_decoder *dec,
          return;
      }
      uint64_t _cnt_pInitialData = 0;
@@ -138,20 +95,7 @@ index 2b17b32c..832dd6e6 100644
          args->pInitialData = NULL;
      }
      {
-@@ -249,7 +251,11 @@ npt_encode_ID3D11Device_CreateTexture1D_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppTexture1D (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppTexture1D && *args->ppTexture1D)
-+            ? args->_guest_id_ppTexture1D : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -370,14 +376,12 @@ npt_decode_ID3D11Device_CreateTexture2D_args_temp(struct npt_cs_decoder *dec,
+@@ -370,14 +368,12 @@ npt_decode_ID3D11Device_CreateTexture2D_args_temp(struct npt_cs_decoder *dec,
          return;
      }
      uint64_t _cnt_pInitialData = 0;
@@ -168,20 +112,7 @@ index 2b17b32c..832dd6e6 100644
          args->pInitialData = NULL;
      }
      {
-@@ -414,7 +418,11 @@ npt_encode_ID3D11Device_CreateTexture2D_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppTexture2D (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppTexture2D && *args->ppTexture2D)
-+            ? args->_guest_id_ppTexture2D : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -535,14 +543,12 @@ npt_decode_ID3D11Device_CreateTexture3D_args_temp(struct npt_cs_decoder *dec,
+@@ -535,14 +531,12 @@ npt_decode_ID3D11Device_CreateTexture3D_args_temp(struct npt_cs_decoder *dec,
          return;
      }
      uint64_t _cnt_pInitialData = 0;
@@ -198,72 +129,7 @@ index 2b17b32c..832dd6e6 100644
          args->pInitialData = NULL;
      }
      {
-@@ -579,7 +585,11 @@ npt_encode_ID3D11Device_CreateTexture3D_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppTexture3D (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppTexture3D && *args->ppTexture3D)
-+            ? args->_guest_id_ppTexture3D : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -732,7 +742,11 @@ npt_encode_ID3D11Device_CreateShaderResourceView_reply(struct npt_cs_encoder *en
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppSRView (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppSRView && *args->ppSRView)
-+            ? args->_guest_id_ppSRView : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -885,7 +899,11 @@ npt_encode_ID3D11Device_CreateUnorderedAccessView_reply(struct npt_cs_encoder *e
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppUAView (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppUAView && *args->ppUAView)
-+            ? args->_guest_id_ppUAView : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -1038,7 +1056,11 @@ npt_encode_ID3D11Device_CreateRenderTargetView_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppRTView (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppRTView && *args->ppRTView)
-+            ? args->_guest_id_ppRTView : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -1191,7 +1213,11 @@ npt_encode_ID3D11Device_CreateDepthStencilView_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppDepthStencilView (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppDepthStencilView && *args->ppDepthStencilView)
-+            ? args->_guest_id_ppDepthStencilView : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -1305,14 +1331,12 @@ npt_decode_ID3D11Device_CreateInputLayout_args_temp(struct npt_cs_decoder *dec,
+@@ -1305,14 +1299,12 @@ npt_decode_ID3D11Device_CreateInputLayout_args_temp(struct npt_cs_decoder *dec,
  {
      /* Decode input parameters from the wire */
      uint64_t _cnt_pInputElementDescs = 0;
@@ -280,46 +146,7 @@ index 2b17b32c..832dd6e6 100644
          args->pInputElementDescs = NULL;
      }
      npt_decode_UINT(dec, &args->NumElements);
-@@ -1363,7 +1387,11 @@ npt_encode_ID3D11Device_CreateInputLayout_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppInputLayout (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppInputLayout && *args->ppInputLayout)
-+            ? args->_guest_id_ppInputLayout : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -1522,7 +1550,11 @@ npt_encode_ID3D11Device_CreateVertexShader_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppVertexShader (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppVertexShader && *args->ppVertexShader)
-+            ? args->_guest_id_ppVertexShader : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -1681,7 +1713,11 @@ npt_encode_ID3D11Device_CreateGeometryShader_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppGeometryShader (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppGeometryShader && *args->ppGeometryShader)
-+            ? args->_guest_id_ppGeometryShader : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -1810,25 +1846,21 @@ npt_decode_ID3D11Device_CreateGeometryShaderWithStreamOutput_args_temp(struct np
+@@ -1810,25 +1802,21 @@ npt_decode_ID3D11Device_CreateGeometryShaderWithStreamOutput_args_temp(struct np
      }
      npt_decode_SIZE_T(dec, &args->BytecodeLength);
      uint64_t _cnt_pSODeclaration = 0;
@@ -349,202 +176,7 @@ index 2b17b32c..832dd6e6 100644
          args->pBufferStrides = NULL;
      }
      npt_decode_UINT(dec, &args->NumStrides);
-@@ -1883,7 +1915,11 @@ npt_encode_ID3D11Device_CreateGeometryShaderWithStreamOutput_reply(struct npt_cs
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppGeometryShader (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppGeometryShader && *args->ppGeometryShader)
-+            ? args->_guest_id_ppGeometryShader : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -2042,7 +2078,11 @@ npt_encode_ID3D11Device_CreatePixelShader_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppPixelShader (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppPixelShader && *args->ppPixelShader)
-+            ? args->_guest_id_ppPixelShader : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -2201,7 +2241,11 @@ npt_encode_ID3D11Device_CreateHullShader_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppHullShader (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppHullShader && *args->ppHullShader)
-+            ? args->_guest_id_ppHullShader : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -2360,7 +2404,11 @@ npt_encode_ID3D11Device_CreateDomainShader_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppDomainShader (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppDomainShader && *args->ppDomainShader)
-+            ? args->_guest_id_ppDomainShader : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -2519,7 +2567,11 @@ npt_encode_ID3D11Device_CreateComputeShader_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppComputeShader (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppComputeShader && *args->ppComputeShader)
-+            ? args->_guest_id_ppComputeShader : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -2655,7 +2707,11 @@ npt_encode_ID3D11Device_CreateClassLinkage_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppLinkage (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppLinkage && *args->ppLinkage)
-+            ? args->_guest_id_ppLinkage : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -2802,7 +2858,11 @@ npt_encode_ID3D11Device_CreateBlendState_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppBlendState (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppBlendState && *args->ppBlendState)
-+            ? args->_guest_id_ppBlendState : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -2949,7 +3009,11 @@ npt_encode_ID3D11Device_CreateDepthStencilState_reply(struct npt_cs_encoder *enc
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppDepthStencilState (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppDepthStencilState && *args->ppDepthStencilState)
-+            ? args->_guest_id_ppDepthStencilState : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -3096,7 +3160,11 @@ npt_encode_ID3D11Device_CreateRasterizerState_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppRasterizerState (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppRasterizerState && *args->ppRasterizerState)
-+            ? args->_guest_id_ppRasterizerState : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -3243,7 +3311,11 @@ npt_encode_ID3D11Device_CreateSamplerState_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppSamplerState (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppSamplerState && *args->ppSamplerState)
-+            ? args->_guest_id_ppSamplerState : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -3390,7 +3462,11 @@ npt_encode_ID3D11Device_CreateQuery_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppQuery (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppQuery && *args->ppQuery)
-+            ? args->_guest_id_ppQuery : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -3537,7 +3613,11 @@ npt_encode_ID3D11Device_CreatePredicate_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppPredicate (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppPredicate && *args->ppPredicate)
-+            ? args->_guest_id_ppPredicate : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -3684,7 +3764,11 @@ npt_encode_ID3D11Device_CreateCounter_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppCounter (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppCounter && *args->ppCounter)
-+            ? args->_guest_id_ppCounter : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -3823,7 +3907,11 @@ npt_encode_ID3D11Device_CreateDeferredContext_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppDeferredContext (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppDeferredContext && *args->ppDeferredContext)
-+            ? args->_guest_id_ppDeferredContext : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -3978,7 +4066,11 @@ npt_encode_ID3D11Device_OpenSharedResource_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppResource (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppResource && *args->ppResource)
-+            ? args->_guest_id_ppResource : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -5627,7 +5719,11 @@ npt_encode_ID3D11Device_GetImmediateContext_reply(struct npt_cs_encoder *enc,
+@@ -5627,7 +5615,11 @@ npt_encode_ID3D11Device_GetImmediateContext_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -557,7 +189,7 @@ index 2b17b32c..832dd6e6 100644
  }
  
  static inline void
-@@ -5997,7 +6093,11 @@ npt_encode_ID3D11Device1_GetImmediateContext1_reply(struct npt_cs_encoder *enc,
+@@ -5997,7 +5989,11 @@ npt_encode_ID3D11Device1_GetImmediateContext1_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -570,46 +202,7 @@ index 2b17b32c..832dd6e6 100644
  }
  
  static inline void
-@@ -6136,7 +6236,11 @@ npt_encode_ID3D11Device1_CreateDeferredContext1_reply(struct npt_cs_encoder *enc
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppDeferredContext (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppDeferredContext && *args->ppDeferredContext)
-+            ? args->_guest_id_ppDeferredContext : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -6283,7 +6387,11 @@ npt_encode_ID3D11Device1_CreateBlendState1_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppBlendState (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppBlendState && *args->ppBlendState)
-+            ? args->_guest_id_ppBlendState : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -6430,7 +6538,11 @@ npt_encode_ID3D11Device1_CreateRasterizerState1_reply(struct npt_cs_encoder *enc
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppRasterizerState (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppRasterizerState && *args->ppRasterizerState)
-+            ? args->_guest_id_ppRasterizerState : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -6547,13 +6659,11 @@ npt_decode_ID3D11Device1_CreateDeviceContextState_args_temp(struct npt_cs_decode
+@@ -6547,13 +6543,11 @@ npt_decode_ID3D11Device1_CreateDeviceContextState_args_temp(struct npt_cs_decode
      /* Decode input parameters from the wire */
      npt_decode_UINT(dec, &args->Flags);
      uint64_t _cnt_pFeatureLevels = 0;
@@ -625,7 +218,7 @@ index 2b17b32c..832dd6e6 100644
          args->pFeatureLevels = NULL;
      }
      npt_decode_UINT(dec, &args->FeatureLevels);
-@@ -6610,7 +6720,11 @@ npt_encode_ID3D11Device1_CreateDeviceContextState_reply(struct npt_cs_encoder *e
+@@ -6610,7 +6604,11 @@ npt_encode_ID3D11Device1_CreateDeviceContextState_reply(struct npt_cs_encoder *e
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
      if (npt_encode_simple_pointer(enc, args->pChosenFeatureLevel))
          npt_encode_D3D_FEATURE_LEVEL(enc, args->pChosenFeatureLevel);
@@ -638,33 +231,7 @@ index 2b17b32c..832dd6e6 100644
  }
  
  static inline void
-@@ -6765,7 +6879,11 @@ npt_encode_ID3D11Device1_OpenSharedResource1_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppResource (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppResource && *args->ppResource)
-+            ? args->_guest_id_ppResource : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -6928,7 +7046,11 @@ npt_encode_ID3D11Device1_OpenSharedResourceByName_reply(struct npt_cs_encoder *e
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppResource (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppResource && *args->ppResource)
-+            ? args->_guest_id_ppResource : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -7064,7 +7186,11 @@ npt_encode_ID3D11Device2_GetImmediateContext2_reply(struct npt_cs_encoder *enc,
+@@ -7064,7 +7062,11 @@ npt_encode_ID3D11Device2_GetImmediateContext2_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -677,20 +244,7 @@ index 2b17b32c..832dd6e6 100644
  }
  
  static inline void
-@@ -7203,7 +7329,11 @@ npt_encode_ID3D11Device2_CreateDeferredContext2_reply(struct npt_cs_encoder *enc
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppDeferredContext (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppDeferredContext && *args->ppDeferredContext)
-+            ? args->_guest_id_ppDeferredContext : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -7630,14 +7760,12 @@ npt_decode_ID3D11Device3_CreateTexture2D1_args_temp(struct npt_cs_decoder *dec,
+@@ -7630,14 +7632,12 @@ npt_decode_ID3D11Device3_CreateTexture2D1_args_temp(struct npt_cs_decoder *dec,
          return;
      }
      uint64_t _cnt_pInitialData = 0;
@@ -707,20 +261,7 @@ index 2b17b32c..832dd6e6 100644
          args->pInitialData = NULL;
      }
      {
-@@ -7674,7 +7802,11 @@ npt_encode_ID3D11Device3_CreateTexture2D1_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppTexture2D (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppTexture2D && *args->ppTexture2D)
-+            ? args->_guest_id_ppTexture2D : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -7795,14 +7927,12 @@ npt_decode_ID3D11Device3_CreateTexture3D1_args_temp(struct npt_cs_decoder *dec,
+@@ -7795,14 +7795,12 @@ npt_decode_ID3D11Device3_CreateTexture3D1_args_temp(struct npt_cs_decoder *dec,
          return;
      }
      uint64_t _cnt_pInitialData = 0;
@@ -737,85 +278,7 @@ index 2b17b32c..832dd6e6 100644
          args->pInitialData = NULL;
      }
      {
-@@ -7839,7 +7969,11 @@ npt_encode_ID3D11Device3_CreateTexture3D1_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppTexture3D (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppTexture3D && *args->ppTexture3D)
-+            ? args->_guest_id_ppTexture3D : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -7986,7 +8120,11 @@ npt_encode_ID3D11Device3_CreateRasterizerState2_reply(struct npt_cs_encoder *enc
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppRasterizerState (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppRasterizerState && *args->ppRasterizerState)
-+            ? args->_guest_id_ppRasterizerState : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -8139,7 +8277,11 @@ npt_encode_ID3D11Device3_CreateShaderResourceView1_reply(struct npt_cs_encoder *
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppSRView1 (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppSRView1 && *args->ppSRView1)
-+            ? args->_guest_id_ppSRView1 : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -8292,7 +8434,11 @@ npt_encode_ID3D11Device3_CreateUnorderedAccessView1_reply(struct npt_cs_encoder
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppUAView1 (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppUAView1 && *args->ppUAView1)
-+            ? args->_guest_id_ppUAView1 : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -8445,7 +8591,11 @@ npt_encode_ID3D11Device3_CreateRenderTargetView1_reply(struct npt_cs_encoder *en
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppRTView1 (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppRTView1 && *args->ppRTView1)
-+            ? args->_guest_id_ppRTView1 : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -8592,7 +8742,11 @@ npt_encode_ID3D11Device3_CreateQuery1_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppQuery1 (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppQuery1 && *args->ppQuery1)
-+            ? args->_guest_id_ppQuery1 : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -8727,7 +8881,11 @@ npt_encode_ID3D11Device3_GetImmediateContext3_reply(struct npt_cs_encoder *enc,
+@@ -8727,7 +8725,11 @@ npt_encode_ID3D11Device3_GetImmediateContext3_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -823,45 +286,6 @@ index 2b17b32c..832dd6e6 100644
 +    {
 +        const uint64_t _gid = (args->ppImmediateContext && *args->ppImmediateContext)
 +            ? args->_guest_id_ppImmediateContext : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -8866,7 +9024,11 @@ npt_encode_ID3D11Device3_CreateDeferredContext3_reply(struct npt_cs_encoder *enc
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppDeferredContext (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppDeferredContext && *args->ppDeferredContext)
-+            ? args->_guest_id_ppDeferredContext : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -9563,7 +9725,11 @@ npt_encode_ID3D11Device5_OpenSharedFence_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppFence (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppFence && *args->ppFence)
-+            ? args->_guest_id_ppFence : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -9717,7 +9883,11 @@ npt_encode_ID3D11Device5_CreateFence_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppFence (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppFence && *args->ppFence)
-+            ? args->_guest_id_ppFence : 0;
 +        npt_encode_uint64_t(enc, &_gid);
 +    }
  }
@@ -885,7 +309,7 @@ index 45063c31..9728867d 100644
  
  static inline void
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d11devicecontext.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d11devicecontext.h
-index d23f7c98..98067726 100644
+index d23f7c98..7e1394f5 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_id3d11devicecontext.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d11devicecontext.h
 @@ -1564,23 +1564,19 @@ npt_decode_ID3D11DeviceContext_IASetVertexBuffers_args_temp(struct npt_cs_decode
@@ -2137,20 +1561,7 @@ index d23f7c98..98067726 100644
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -15337,7 +15739,11 @@ npt_encode_ID3D11DeviceContext_FinishCommandList_reply(struct npt_cs_encoder *en
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppCommandList (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppCommandList && *args->ppCommandList)
-+            ? args->_guest_id_ppCommandList : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -16011,23 +16417,19 @@ npt_decode_ID3D11DeviceContext1_VSSetConstantBuffers1_args_temp(struct npt_cs_de
+@@ -16011,23 +16413,19 @@ npt_decode_ID3D11DeviceContext1_VSSetConstantBuffers1_args_temp(struct npt_cs_de
          args->ppConstantBuffers = NULL;
      }
      uint64_t _cnt_pFirstConstant = 0;
@@ -2178,7 +1589,7 @@ index d23f7c98..98067726 100644
          args->pNumConstants = NULL;
      }
      /* A counted array must carry every element the callee will read. */
-@@ -16188,23 +16590,19 @@ npt_decode_ID3D11DeviceContext1_HSSetConstantBuffers1_args_temp(struct npt_cs_de
+@@ -16188,23 +16586,19 @@ npt_decode_ID3D11DeviceContext1_HSSetConstantBuffers1_args_temp(struct npt_cs_de
          args->ppConstantBuffers = NULL;
      }
      uint64_t _cnt_pFirstConstant = 0;
@@ -2206,7 +1617,7 @@ index d23f7c98..98067726 100644
          args->pNumConstants = NULL;
      }
      /* A counted array must carry every element the callee will read. */
-@@ -16365,23 +16763,19 @@ npt_decode_ID3D11DeviceContext1_DSSetConstantBuffers1_args_temp(struct npt_cs_de
+@@ -16365,23 +16759,19 @@ npt_decode_ID3D11DeviceContext1_DSSetConstantBuffers1_args_temp(struct npt_cs_de
          args->ppConstantBuffers = NULL;
      }
      uint64_t _cnt_pFirstConstant = 0;
@@ -2234,7 +1645,7 @@ index d23f7c98..98067726 100644
          args->pNumConstants = NULL;
      }
      /* A counted array must carry every element the callee will read. */
-@@ -16542,23 +16936,19 @@ npt_decode_ID3D11DeviceContext1_GSSetConstantBuffers1_args_temp(struct npt_cs_de
+@@ -16542,23 +16932,19 @@ npt_decode_ID3D11DeviceContext1_GSSetConstantBuffers1_args_temp(struct npt_cs_de
          args->ppConstantBuffers = NULL;
      }
      uint64_t _cnt_pFirstConstant = 0;
@@ -2262,7 +1673,7 @@ index d23f7c98..98067726 100644
          args->pNumConstants = NULL;
      }
      /* A counted array must carry every element the callee will read. */
-@@ -16719,23 +17109,19 @@ npt_decode_ID3D11DeviceContext1_PSSetConstantBuffers1_args_temp(struct npt_cs_de
+@@ -16719,23 +17105,19 @@ npt_decode_ID3D11DeviceContext1_PSSetConstantBuffers1_args_temp(struct npt_cs_de
          args->ppConstantBuffers = NULL;
      }
      uint64_t _cnt_pFirstConstant = 0;
@@ -2290,7 +1701,7 @@ index d23f7c98..98067726 100644
          args->pNumConstants = NULL;
      }
      /* A counted array must carry every element the callee will read. */
-@@ -16896,23 +17282,19 @@ npt_decode_ID3D11DeviceContext1_CSSetConstantBuffers1_args_temp(struct npt_cs_de
+@@ -16896,23 +17278,19 @@ npt_decode_ID3D11DeviceContext1_CSSetConstantBuffers1_args_temp(struct npt_cs_de
          args->ppConstantBuffers = NULL;
      }
      uint64_t _cnt_pFirstConstant = 0;
@@ -2318,7 +1729,7 @@ index d23f7c98..98067726 100644
          args->pNumConstants = NULL;
      }
      /* A counted array must carry every element the callee will read. */
-@@ -17115,7 +17497,14 @@ npt_encode_ID3D11DeviceContext1_VSGetConstantBuffers1_reply(struct npt_cs_encode
+@@ -17115,7 +17493,14 @@ npt_encode_ID3D11DeviceContext1_VSGetConstantBuffers1_reply(struct npt_cs_encode
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -2334,7 +1745,7 @@ index d23f7c98..98067726 100644
      if (args->pFirstConstant) {
          npt_encode_array_count(enc, args->NumBuffers);
          npt_encode_UINT_array(enc, args->pFirstConstant, args->NumBuffers);
-@@ -17201,9 +17590,14 @@ npt_dispatch_ID3D11DeviceContext1_VSGetConstantBuffers1(struct npt_dispatch_cont
+@@ -17201,9 +17586,14 @@ npt_dispatch_ID3D11DeviceContext1_VSGetConstantBuffers1(struct npt_dispatch_cont
       * whose type is determined by the caller's riid. */
      if (args.ppConstantBuffers && args._guest_ids_ppConstantBuffers) {
          const uint32_t _n = args._guest_id_count_ppConstantBuffers;
@@ -2352,7 +1763,7 @@ index d23f7c98..98067726 100644
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -17293,7 +17687,14 @@ npt_encode_ID3D11DeviceContext1_HSGetConstantBuffers1_reply(struct npt_cs_encode
+@@ -17293,7 +17683,14 @@ npt_encode_ID3D11DeviceContext1_HSGetConstantBuffers1_reply(struct npt_cs_encode
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -2368,7 +1779,7 @@ index d23f7c98..98067726 100644
      if (args->pFirstConstant) {
          npt_encode_array_count(enc, args->NumBuffers);
          npt_encode_UINT_array(enc, args->pFirstConstant, args->NumBuffers);
-@@ -17379,9 +17780,14 @@ npt_dispatch_ID3D11DeviceContext1_HSGetConstantBuffers1(struct npt_dispatch_cont
+@@ -17379,9 +17776,14 @@ npt_dispatch_ID3D11DeviceContext1_HSGetConstantBuffers1(struct npt_dispatch_cont
       * whose type is determined by the caller's riid. */
      if (args.ppConstantBuffers && args._guest_ids_ppConstantBuffers) {
          const uint32_t _n = args._guest_id_count_ppConstantBuffers;
@@ -2386,7 +1797,7 @@ index d23f7c98..98067726 100644
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -17471,7 +17877,14 @@ npt_encode_ID3D11DeviceContext1_DSGetConstantBuffers1_reply(struct npt_cs_encode
+@@ -17471,7 +17873,14 @@ npt_encode_ID3D11DeviceContext1_DSGetConstantBuffers1_reply(struct npt_cs_encode
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -2402,7 +1813,7 @@ index d23f7c98..98067726 100644
      if (args->pFirstConstant) {
          npt_encode_array_count(enc, args->NumBuffers);
          npt_encode_UINT_array(enc, args->pFirstConstant, args->NumBuffers);
-@@ -17557,9 +17970,14 @@ npt_dispatch_ID3D11DeviceContext1_DSGetConstantBuffers1(struct npt_dispatch_cont
+@@ -17557,9 +17966,14 @@ npt_dispatch_ID3D11DeviceContext1_DSGetConstantBuffers1(struct npt_dispatch_cont
       * whose type is determined by the caller's riid. */
      if (args.ppConstantBuffers && args._guest_ids_ppConstantBuffers) {
          const uint32_t _n = args._guest_id_count_ppConstantBuffers;
@@ -2420,7 +1831,7 @@ index d23f7c98..98067726 100644
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -17649,7 +18067,14 @@ npt_encode_ID3D11DeviceContext1_GSGetConstantBuffers1_reply(struct npt_cs_encode
+@@ -17649,7 +18063,14 @@ npt_encode_ID3D11DeviceContext1_GSGetConstantBuffers1_reply(struct npt_cs_encode
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -2436,7 +1847,7 @@ index d23f7c98..98067726 100644
      if (args->pFirstConstant) {
          npt_encode_array_count(enc, args->NumBuffers);
          npt_encode_UINT_array(enc, args->pFirstConstant, args->NumBuffers);
-@@ -17735,9 +18160,14 @@ npt_dispatch_ID3D11DeviceContext1_GSGetConstantBuffers1(struct npt_dispatch_cont
+@@ -17735,9 +18156,14 @@ npt_dispatch_ID3D11DeviceContext1_GSGetConstantBuffers1(struct npt_dispatch_cont
       * whose type is determined by the caller's riid. */
      if (args.ppConstantBuffers && args._guest_ids_ppConstantBuffers) {
          const uint32_t _n = args._guest_id_count_ppConstantBuffers;
@@ -2454,7 +1865,7 @@ index d23f7c98..98067726 100644
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -17827,7 +18257,14 @@ npt_encode_ID3D11DeviceContext1_PSGetConstantBuffers1_reply(struct npt_cs_encode
+@@ -17827,7 +18253,14 @@ npt_encode_ID3D11DeviceContext1_PSGetConstantBuffers1_reply(struct npt_cs_encode
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -2470,7 +1881,7 @@ index d23f7c98..98067726 100644
      if (args->pFirstConstant) {
          npt_encode_array_count(enc, args->NumBuffers);
          npt_encode_UINT_array(enc, args->pFirstConstant, args->NumBuffers);
-@@ -17913,9 +18350,14 @@ npt_dispatch_ID3D11DeviceContext1_PSGetConstantBuffers1(struct npt_dispatch_cont
+@@ -17913,9 +18346,14 @@ npt_dispatch_ID3D11DeviceContext1_PSGetConstantBuffers1(struct npt_dispatch_cont
       * whose type is determined by the caller's riid. */
      if (args.ppConstantBuffers && args._guest_ids_ppConstantBuffers) {
          const uint32_t _n = args._guest_id_count_ppConstantBuffers;
@@ -2488,7 +1899,7 @@ index d23f7c98..98067726 100644
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -18005,7 +18447,14 @@ npt_encode_ID3D11DeviceContext1_CSGetConstantBuffers1_reply(struct npt_cs_encode
+@@ -18005,7 +18443,14 @@ npt_encode_ID3D11DeviceContext1_CSGetConstantBuffers1_reply(struct npt_cs_encode
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -2504,7 +1915,7 @@ index d23f7c98..98067726 100644
      if (args->pFirstConstant) {
          npt_encode_array_count(enc, args->NumBuffers);
          npt_encode_UINT_array(enc, args->pFirstConstant, args->NumBuffers);
-@@ -18091,9 +18540,14 @@ npt_dispatch_ID3D11DeviceContext1_CSGetConstantBuffers1(struct npt_dispatch_cont
+@@ -18091,9 +18536,14 @@ npt_dispatch_ID3D11DeviceContext1_CSGetConstantBuffers1(struct npt_dispatch_cont
       * whose type is determined by the caller's riid. */
      if (args.ppConstantBuffers && args._guest_ids_ppConstantBuffers) {
          const uint32_t _n = args._guest_id_count_ppConstantBuffers;
@@ -2522,7 +1933,7 @@ index d23f7c98..98067726 100644
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -18162,7 +18616,11 @@ npt_encode_ID3D11DeviceContext1_SwapDeviceContextState_reply(struct npt_cs_encod
+@@ -18162,7 +18612,11 @@ npt_encode_ID3D11DeviceContext1_SwapDeviceContextState_reply(struct npt_cs_encod
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -2535,7 +1946,7 @@ index d23f7c98..98067726 100644
  }
  
  static inline void
-@@ -18278,14 +18736,12 @@ npt_decode_ID3D11DeviceContext1_ClearView_args_temp(struct npt_cs_decoder *dec,
+@@ -18278,14 +18732,12 @@ npt_decode_ID3D11DeviceContext1_ClearView_args_temp(struct npt_cs_decoder *dec,
      if (!args->Color) return;
      npt_decode_FLOAT_array(dec, (FLOAT *)args->Color, 4);
      uint64_t _cnt_pRect = 0;
@@ -2552,7 +1963,7 @@ index d23f7c98..98067726 100644
          args->pRect = NULL;
      }
      npt_decode_UINT(dec, &args->NumRects);
-@@ -18423,14 +18879,12 @@ npt_decode_ID3D11DeviceContext1_DiscardView1_args_temp(struct npt_cs_decoder *de
+@@ -18423,14 +18875,12 @@ npt_decode_ID3D11DeviceContext1_DiscardView1_args_temp(struct npt_cs_decoder *de
          args->pResourceView = (ID3D11View *)npt_object_from_id(_id);
      }
      uint64_t _cnt_pRects = 0;
@@ -2569,7 +1980,7 @@ index d23f7c98..98067726 100644
          args->pRects = NULL;
      }
      npt_decode_UINT(dec, &args->NumRects);
-@@ -18576,25 +19030,21 @@ npt_decode_ID3D11DeviceContext2_UpdateTileMappings_args_temp(struct npt_cs_decod
+@@ -18576,25 +19026,21 @@ npt_decode_ID3D11DeviceContext2_UpdateTileMappings_args_temp(struct npt_cs_decod
      }
      npt_decode_UINT(dec, &args->NumTiledResourceRegions);
      uint64_t _cnt_pTiledResourceRegionStartCoordinates = 0;
@@ -2599,7 +2010,7 @@ index d23f7c98..98067726 100644
          args->pTiledResourceRegionSizes = NULL;
      }
      {
-@@ -18604,33 +19054,27 @@ npt_decode_ID3D11DeviceContext2_UpdateTileMappings_args_temp(struct npt_cs_decod
+@@ -18604,33 +19050,27 @@ npt_decode_ID3D11DeviceContext2_UpdateTileMappings_args_temp(struct npt_cs_decod
      }
      npt_decode_UINT(dec, &args->NumRanges);
      uint64_t _cnt_pRangeFlags = 0;
@@ -2640,49 +2051,10 @@ index d23f7c98..98067726 100644
      }
      npt_decode_UINT(dec, &args->Flags);
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d11on12device.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d11on12device.h
-index 1bdf41ef..ca0bdfde 100644
+index 1bdf41ef..9ea190ef 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_id3d11on12device.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d11on12device.h
-@@ -100,7 +100,11 @@ npt_encode_ID3D11On12Device_CreateWrappedResource_reply(struct npt_cs_encoder *e
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppResource11 (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppResource11 && *args->ppResource11)
-+            ? args->_guest_id_ppResource11 : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -532,7 +536,11 @@ npt_encode_ID3D11On12Device1_GetD3D12Device_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvDevice (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvDevice && *args->ppvDevice)
-+            ? args->_guest_id_ppvDevice : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -692,7 +700,11 @@ npt_encode_ID3D11On12Device2_UnwrapUnderlyingResource_reply(struct npt_cs_encode
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvResource12 (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvResource12 && *args->ppvResource12)
-+            ? args->_guest_id_ppvResource12 : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -807,13 +819,11 @@ npt_decode_ID3D11On12Device2_ReturnUnderlyingResource_args_temp(struct npt_cs_de
+@@ -807,13 +807,11 @@ npt_decode_ID3D11On12Device2_ReturnUnderlyingResource_args_temp(struct npt_cs_de
      }
      npt_decode_UINT(dec, &args->NumSync);
      uint64_t _cnt_pSignalValues = 0;
@@ -2819,114 +2191,6 @@ index 0402273a..b2ac0647 100644
          args->pBufferDesc = NULL;
      }
      /* A counted array must carry every element the callee will read. */
-diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d11videodevice.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d11videodevice.h
-index 7bf80b10..5e45681f 100644
---- a/src/neptune/neptune-protocol/npt_protocol_host_id3d11videodevice.h
-+++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d11videodevice.h
-@@ -86,7 +86,11 @@ npt_encode_ID3D11VideoDevice_CreateVideoDecoder_reply(struct npt_cs_encoder *enc
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppDecoder (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppDecoder && *args->ppDecoder)
-+            ? args->_guest_id_ppDecoder : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -233,7 +237,11 @@ npt_encode_ID3D11VideoDevice_CreateVideoProcessor_reply(struct npt_cs_encoder *e
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppVideoProcessor (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppVideoProcessor && *args->ppVideoProcessor)
-+            ? args->_guest_id_ppVideoProcessor : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -372,7 +380,11 @@ npt_encode_ID3D11VideoDevice_CreateAuthenticatedChannel_reply(struct npt_cs_enco
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppAuthenticatedChannel (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppAuthenticatedChannel && *args->ppAuthenticatedChannel)
-+            ? args->_guest_id_ppAuthenticatedChannel : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -539,7 +551,11 @@ npt_encode_ID3D11VideoDevice_CreateCryptoSession_reply(struct npt_cs_encoder *en
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppCryptoSession (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppCryptoSession && *args->ppCryptoSession)
-+            ? args->_guest_id_ppCryptoSession : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -694,7 +710,11 @@ npt_encode_ID3D11VideoDevice_CreateVideoDecoderOutputView_reply(struct npt_cs_en
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppVDOVView (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppVDOVView && *args->ppVDOVView)
-+            ? args->_guest_id_ppVDOVView : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -857,7 +877,11 @@ npt_encode_ID3D11VideoDevice_CreateVideoProcessorInputView_reply(struct npt_cs_e
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppVPIView (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppVPIView && *args->ppVPIView)
-+            ? args->_guest_id_ppVPIView : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -1020,7 +1044,11 @@ npt_encode_ID3D11VideoDevice_CreateVideoProcessorOutputView_reply(struct npt_cs_
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppVPOView (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppVPOView && *args->ppVPOView)
-+            ? args->_guest_id_ppVPOView : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -1167,7 +1195,11 @@ npt_encode_ID3D11VideoDevice_CreateVideoProcessorEnumerator_reply(struct npt_cs_
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppEnum (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppEnum && *args->ppEnum)
-+            ? args->_guest_id_ppEnum : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d11view.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d11view.h
 index afb7a828..5221fa43 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_id3d11view.h
@@ -3019,101 +2283,10 @@ index 083afbb8..d973dc2e 100644
      }
      npt_decode_D3D12_TILE_MAPPING_FLAGS(dec, &args->Flags);
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d12device.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d12device.h
-index d9d4a544..a87f1040 100644
+index d9d4a544..64869286 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_id3d12device.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d12device.h
-@@ -202,7 +202,11 @@ npt_encode_ID3D12Device_CreateCommandQueue_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppCommandQueue (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppCommandQueue && *args->ppCommandQueue)
-+            ? args->_guest_id_ppCommandQueue : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -353,7 +357,11 @@ npt_encode_ID3D12Device_CreateCommandAllocator_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppCommandAllocator (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppCommandAllocator && *args->ppCommandAllocator)
-+            ? args->_guest_id_ppCommandAllocator : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -514,7 +522,11 @@ npt_encode_ID3D12Device_CreateGraphicsPipelineState_reply(struct npt_cs_encoder
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppPipelineState (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppPipelineState && *args->ppPipelineState)
-+            ? args->_guest_id_ppPipelineState : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -675,7 +687,11 @@ npt_encode_ID3D12Device_CreateComputePipelineState_reply(struct npt_cs_encoder *
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppPipelineState (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppPipelineState && *args->ppPipelineState)
-+            ? args->_guest_id_ppPipelineState : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -845,7 +861,11 @@ npt_encode_ID3D12Device_CreateCommandList_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppCommandList (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppCommandList && *args->ppCommandList)
-+            ? args->_guest_id_ppCommandList : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -1144,7 +1164,11 @@ npt_encode_ID3D12Device_CreateDescriptorHeap_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvHeap (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvHeap && *args->ppvHeap)
-+            ? args->_guest_id_ppvHeap : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -1429,7 +1453,11 @@ npt_encode_ID3D12Device_CreateRootSignature_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvRootSignature (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvRootSignature && *args->ppvRootSignature)
-+            ? args->_guest_id_ppvRootSignature : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -2345,46 +2373,38 @@ npt_decode_ID3D12Device_CopyDescriptors_args_temp(struct npt_cs_decoder *dec,
+@@ -2345,46 +2345,38 @@ npt_decode_ID3D12Device_CopyDescriptors_args_temp(struct npt_cs_decoder *dec,
      /* Decode input parameters from the wire */
      npt_decode_UINT(dec, &args->NumDestDescriptorRanges);
      uint64_t _cnt_pDestDescriptorRangeStarts = 0;
@@ -3168,7 +2341,7 @@ index d9d4a544..a87f1040 100644
          args->pSrcDescriptorRangeSizes = NULL;
      }
      npt_decode_D3D12_DESCRIPTOR_HEAP_TYPE(dec, &args->DescriptorHeapsType);
-@@ -2661,14 +2681,12 @@ npt_decode_ID3D12Device_GetResourceAllocationInfo_args_temp(struct npt_cs_decode
+@@ -2661,14 +2653,12 @@ npt_decode_ID3D12Device_GetResourceAllocationInfo_args_temp(struct npt_cs_decode
      npt_decode_UINT(dec, &args->visibleMask);
      npt_decode_UINT(dec, &args->numResourceDescs);
      uint64_t _cnt_pResourceDescs = 0;
@@ -3185,124 +2358,7 @@ index d9d4a544..a87f1040 100644
          args->pResourceDescs = NULL;
      }
      /* A counted array must carry every element the callee will read. */
-@@ -3004,7 +3022,11 @@ npt_encode_ID3D12Device_CreateCommittedResource_reply(struct npt_cs_encoder *enc
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvResource (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvResource && *args->ppvResource)
-+            ? args->_guest_id_ppvResource : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -3163,7 +3185,11 @@ npt_encode_ID3D12Device_CreateHeap_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvHeap (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvHeap && *args->ppvHeap)
-+            ? args->_guest_id_ppvHeap : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -3345,7 +3371,11 @@ npt_encode_ID3D12Device_CreatePlacedResource_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvResource (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvResource && *args->ppvResource)
-+            ? args->_guest_id_ppvResource : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -3516,7 +3546,11 @@ npt_encode_ID3D12Device_CreateReservedResource_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvResource (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvResource && *args->ppvResource)
-+            ? args->_guest_id_ppvResource : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -3820,7 +3854,11 @@ npt_encode_ID3D12Device_OpenSharedHandle_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvObj (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvObj && *args->ppvObj)
-+            ? args->_guest_id_ppvObj : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -4397,7 +4435,11 @@ npt_encode_ID3D12Device_CreateFence_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppFence (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppFence && *args->ppFence)
-+            ? args->_guest_id_ppFence : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -4860,7 +4902,11 @@ npt_encode_ID3D12Device_CreateQueryHeap_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvHeap (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvHeap && *args->ppvHeap)
-+            ? args->_guest_id_ppvHeap : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -5146,7 +5192,11 @@ npt_encode_ID3D12Device_CreateCommandSignature_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvCommandSignature (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvCommandSignature && *args->ppvCommandSignature)
-+            ? args->_guest_id_ppvCommandSignature : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -5602,7 +5652,11 @@ npt_encode_ID3D12Device1_CreatePipelineLibrary_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppPipelineLibrary (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppPipelineLibrary && *args->ppPipelineLibrary)
-+            ? args->_guest_id_ppPipelineLibrary : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -5724,13 +5778,11 @@ npt_decode_ID3D12Device1_SetEventOnMultipleFenceCompletion_args_temp(struct npt_
+@@ -5724,13 +5714,11 @@ npt_decode_ID3D12Device1_SetEventOnMultipleFenceCompletion_args_temp(struct npt_
          args->ppFences = NULL;
      }
      uint64_t _cnt_pFenceValues = 0;
@@ -3318,7 +2374,7 @@ index d9d4a544..a87f1040 100644
          args->pFenceValues = NULL;
      }
      npt_decode_UINT(dec, &args->NumFences);
-@@ -5893,13 +5945,11 @@ npt_decode_ID3D12Device1_SetResidencyPriority_args_temp(struct npt_cs_decoder *d
+@@ -5893,13 +5881,11 @@ npt_decode_ID3D12Device1_SetResidencyPriority_args_temp(struct npt_cs_decoder *d
          args->ppObjects = NULL;
      }
      uint64_t _cnt_pPriorities = 0;
@@ -3334,111 +2390,7 @@ index d9d4a544..a87f1040 100644
          args->pPriorities = NULL;
      }
      /* A counted array must carry every element the callee will read. */
-@@ -6090,7 +6140,11 @@ npt_encode_ID3D12Device2_CreatePipelineState_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppPipelineState (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppPipelineState && *args->ppPipelineState)
-+            ? args->_guest_id_ppPipelineState : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -6242,7 +6296,11 @@ npt_encode_ID3D12Device3_OpenExistingHeapFromAddress_reply(struct npt_cs_encoder
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvHeap (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvHeap && *args->ppvHeap)
-+            ? args->_guest_id_ppvHeap : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -6398,7 +6456,11 @@ npt_encode_ID3D12Device3_OpenExistingHeapFromFileMapping_reply(struct npt_cs_enc
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvHeap (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvHeap && *args->ppvHeap)
-+            ? args->_guest_id_ppvHeap : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -6712,7 +6774,11 @@ npt_encode_ID3D12Device4_CreateCommandList1_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppCommandList (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppCommandList && *args->ppCommandList)
-+            ? args->_guest_id_ppCommandList : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -6871,7 +6937,11 @@ npt_encode_ID3D12Device4_CreateProtectedResourceSession_reply(struct npt_cs_enco
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppSession (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppSession && *args->ppSession)
-+            ? args->_guest_id_ppSession : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -7064,7 +7134,11 @@ npt_encode_ID3D12Device4_CreateCommittedResource1_reply(struct npt_cs_encoder *e
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvResource (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvResource && *args->ppvResource)
-+            ? args->_guest_id_ppvResource : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -7231,7 +7305,11 @@ npt_encode_ID3D12Device4_CreateHeap1_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvHeap (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvHeap && *args->ppvHeap)
-+            ? args->_guest_id_ppvHeap : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -7410,7 +7488,11 @@ npt_encode_ID3D12Device4_CreateReservedResource1_reply(struct npt_cs_encoder *en
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvResource (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvResource && *args->ppvResource)
-+            ? args->_guest_id_ppvResource : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -7521,14 +7603,12 @@ npt_decode_ID3D12Device4_GetResourceAllocationInfo1_args_temp(struct npt_cs_deco
+@@ -7521,14 +7507,12 @@ npt_decode_ID3D12Device4_GetResourceAllocationInfo1_args_temp(struct npt_cs_deco
      npt_decode_UINT(dec, &args->visibleMask);
      npt_decode_UINT(dec, &args->numResourceDescs);
      uint64_t _cnt_pResourceDescs = 0;
@@ -3455,72 +2407,7 @@ index d9d4a544..a87f1040 100644
          args->pResourceDescs = NULL;
      }
  
-@@ -7725,7 +7805,11 @@ npt_encode_ID3D12Device5_CreateLifetimeTracker_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvTracker (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvTracker && *args->ppvTracker)
-+            ? args->_guest_id_ppvTracker : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -8312,7 +8396,11 @@ npt_encode_ID3D12Device5_CreateMetaCommand_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppMetaCommand (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppMetaCommand && *args->ppMetaCommand)
-+            ? args->_guest_id_ppMetaCommand : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -8473,7 +8561,11 @@ npt_encode_ID3D12Device5_CreateStateObject_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppStateObject (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppStateObject && *args->ppStateObject)
-+            ? args->_guest_id_ppStateObject : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -9042,7 +9134,11 @@ npt_encode_ID3D12Device7_AddToStateObject_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppNewStateObject (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppNewStateObject && *args->ppNewStateObject)
-+            ? args->_guest_id_ppNewStateObject : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -9201,7 +9297,11 @@ npt_encode_ID3D12Device7_CreateProtectedResourceSession1_reply(struct npt_cs_enc
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppSession (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppSession && *args->ppSession)
-+            ? args->_guest_id_ppSession : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -9312,14 +9412,12 @@ npt_decode_ID3D12Device8_GetResourceAllocationInfo2_args_temp(struct npt_cs_deco
+@@ -9312,14 +9296,12 @@ npt_decode_ID3D12Device8_GetResourceAllocationInfo2_args_temp(struct npt_cs_deco
      npt_decode_UINT(dec, &args->visibleMask);
      npt_decode_UINT(dec, &args->numResourceDescs);
      uint64_t _cnt_pResourceDescs = 0;
@@ -3537,59 +2424,7 @@ index d9d4a544..a87f1040 100644
          args->pResourceDescs = NULL;
      }
  
-@@ -9553,7 +9651,11 @@ npt_encode_ID3D12Device8_CreateCommittedResource2_reply(struct npt_cs_encoder *e
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvResource (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvResource && *args->ppvResource)
-+            ? args->_guest_id_ppvResource : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -9735,7 +9837,11 @@ npt_encode_ID3D12Device8_CreatePlacedResource1_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvResource (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvResource && *args->ppvResource)
-+            ? args->_guest_id_ppvResource : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -10216,7 +10322,11 @@ npt_encode_ID3D12Device9_CreateShaderCacheSession_reply(struct npt_cs_encoder *e
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvSession (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvSession && *args->ppvSession)
-+            ? args->_guest_id_ppvSession : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -10508,7 +10618,11 @@ npt_encode_ID3D12Device9_CreateCommandQueue1_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppCommandQueue (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppCommandQueue && *args->ppCommandQueue)
-+            ? args->_guest_id_ppCommandQueue : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -10661,13 +10775,11 @@ npt_decode_ID3D12Device10_CreateCommittedResource3_args_temp(struct npt_cs_decod
+@@ -10661,13 +10643,11 @@ npt_decode_ID3D12Device10_CreateCommittedResource3_args_temp(struct npt_cs_decod
      }
      npt_decode_UINT32(dec, &args->NumCastableFormats);
      uint64_t _cnt_pCastableFormats = 0;
@@ -3605,20 +2440,7 @@ index d9d4a544..a87f1040 100644
          args->pCastableFormats = NULL;
      }
      if (npt_decode_simple_pointer(dec)) {
-@@ -10721,7 +10833,11 @@ npt_encode_ID3D12Device10_CreateCommittedResource3_reply(struct npt_cs_encoder *
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvResource (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvResource && *args->ppvResource)
-+            ? args->_guest_id_ppvResource : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -10864,13 +10980,11 @@ npt_decode_ID3D12Device10_CreatePlacedResource2_args_temp(struct npt_cs_decoder
+@@ -10864,13 +10844,11 @@ npt_decode_ID3D12Device10_CreatePlacedResource2_args_temp(struct npt_cs_decoder
      }
      npt_decode_UINT32(dec, &args->NumCastableFormats);
      uint64_t _cnt_pCastableFormats = 0;
@@ -3634,20 +2456,7 @@ index d9d4a544..a87f1040 100644
          args->pCastableFormats = NULL;
      }
      if (npt_decode_simple_pointer(dec)) {
-@@ -10923,7 +11037,11 @@ npt_encode_ID3D12Device10_CreatePlacedResource2_reply(struct npt_cs_encoder *enc
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvResource (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvResource && *args->ppvResource)
-+            ? args->_guest_id_ppvResource : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -11064,13 +11182,11 @@ npt_decode_ID3D12Device10_CreateReservedResource2_args_temp(struct npt_cs_decode
+@@ -11064,13 +11042,11 @@ npt_decode_ID3D12Device10_CreateReservedResource2_args_temp(struct npt_cs_decode
      }
      npt_decode_UINT32(dec, &args->NumCastableFormats);
      uint64_t _cnt_pCastableFormats = 0;
@@ -3663,20 +2472,7 @@ index d9d4a544..a87f1040 100644
          args->pCastableFormats = NULL;
      }
      if (npt_decode_simple_pointer(dec)) {
-@@ -11122,7 +11238,11 @@ npt_encode_ID3D12Device10_CreateReservedResource2_reply(struct npt_cs_encoder *e
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvResource (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvResource && *args->ppvResource)
-+            ? args->_guest_id_ppvResource : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -11364,24 +11484,20 @@ npt_decode_ID3D12Device12_GetResourceAllocationInfo3_args_temp(struct npt_cs_dec
+@@ -11364,24 +11340,20 @@ npt_decode_ID3D12Device12_GetResourceAllocationInfo3_args_temp(struct npt_cs_dec
      npt_decode_UINT(dec, &args->visibleMask);
      npt_decode_UINT(dec, &args->numResourceDescs);
      uint64_t _cnt_pResourceDescs = 0;
@@ -3705,116 +2501,11 @@ index d9d4a544..a87f1040 100644
          args->pNumCastableFormats = NULL;
      }
      /* ppCastableFormats: unsized optional, skip */
-@@ -11586,7 +11702,11 @@ npt_encode_ID3D12Device13_OpenExistingHeapFromAddress1_reply(struct npt_cs_encod
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvHeap (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvHeap && *args->ppvHeap)
-+            ? args->_guest_id_ppvHeap : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -11764,7 +11884,11 @@ npt_encode_ID3D12Device14_CreateRootSignatureFromSubobjectInLibrary_reply(struct
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvRootSignature (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvRootSignature && *args->ppvRootSignature)
-+            ? args->_guest_id_ppvRootSignature : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d12devicechild.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d12devicechild.h
-index b61a79d0..dcae989e 100644
---- a/src/neptune/neptune-protocol/npt_protocol_host_id3d12devicechild.h
-+++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d12devicechild.h
-@@ -75,7 +75,11 @@ npt_encode_ID3D12DeviceChild_GetDevice_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvDevice (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvDevice && *args->ppvDevice)
-+            ? args->_guest_id_ppvDevice : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d12deviceconfiguration.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d12deviceconfiguration.h
-index d88ddc21..6beddb35 100644
---- a/src/neptune/neptune-protocol/npt_protocol_host_id3d12deviceconfiguration.h
-+++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d12deviceconfiguration.h
-@@ -344,8 +344,16 @@ npt_encode_ID3D12DeviceConfiguration_SerializeVersionedRootSignature_reply(struc
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppResult (guest-allocated id, registered host-side; not in reply) */
--/* skip args->ppError (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppResult && *args->ppResult)
-+            ? args->_guest_id_ppResult : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
-+    {
-+        const uint64_t _gid = (args->ppError && *args->ppError)
-+            ? args->_guest_id_ppError : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -513,7 +521,11 @@ npt_encode_ID3D12DeviceConfiguration_CreateVersionedRootSignatureDeserializer_re
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvDeserializer (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvDeserializer && *args->ppvDeserializer)
-+            ? args->_guest_id_ppvDeserializer : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -688,7 +700,11 @@ npt_encode_ID3D12DeviceConfiguration1_CreateVersionedRootSignatureDeserializerFr
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvDeserializer (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvDeserializer && *args->ppvDeserializer)
-+            ? args->_guest_id_ppvDeserializer : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d12devicefactory.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d12devicefactory.h
-index 4bec7ac9..09cc4a78 100644
+index 4bec7ac9..1fe54a8c 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_id3d12devicefactory.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d12devicefactory.h
-@@ -553,7 +553,11 @@ npt_encode_ID3D12DeviceFactory_GetConfigurationInterface_reply(struct npt_cs_enc
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppv (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppv && *args->ppv)
-+            ? args->_guest_id_ppv : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -663,14 +667,12 @@ npt_decode_ID3D12DeviceFactory_EnableExperimentalFeatures_args_temp(struct npt_c
+@@ -663,14 +663,12 @@ npt_decode_ID3D12DeviceFactory_EnableExperimentalFeatures_args_temp(struct npt_c
      /* Decode input parameters from the wire */
      npt_decode_UINT(dec, &args->NumFeatures);
      uint64_t _cnt_pIIDs = 0;
@@ -3831,7 +2522,7 @@ index 4bec7ac9..09cc4a78 100644
          args->pIIDs = NULL;
      }
      {
-@@ -684,13 +686,11 @@ npt_decode_ID3D12DeviceFactory_EnableExperimentalFeatures_args_temp(struct npt_c
+@@ -684,13 +682,11 @@ npt_decode_ID3D12DeviceFactory_EnableExperimentalFeatures_args_temp(struct npt_c
          }
      }
      uint64_t _cnt_pConfigurationStructSizes = 0;
@@ -3847,19 +2538,6 @@ index 4bec7ac9..09cc4a78 100644
          args->pConfigurationStructSizes = NULL;
      }
      /* A counted array must carry every element the callee will read. */
-@@ -877,7 +877,11 @@ npt_encode_ID3D12DeviceFactory_CreateDevice_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvDevice (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvDevice && *args->ppvDevice)
-+            ? args->_guest_id_ppvDevice : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d12graphicscommandlist.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d12graphicscommandlist.h
 index 25a1c7e7..086a6060 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_id3d12graphicscommandlist.h
@@ -4197,170 +2875,6 @@ index 25a1c7e7..086a6060 100644
          args->pBarrierGroups = NULL;
      }
      /* A counted array must carry every element the callee will read. */
-diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d12heap.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d12heap.h
-index dd3aa97f..e4b1b8b5 100644
---- a/src/neptune/neptune-protocol/npt_protocol_host_id3d12heap.h
-+++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d12heap.h
-@@ -194,7 +194,11 @@ npt_encode_ID3D12Heap1_GetProtectedResourceSession_reply(struct npt_cs_encoder *
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppProtectedSession (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppProtectedSession && *args->ppProtectedSession)
-+            ? args->_guest_id_ppProtectedSession : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d12pipelinelibrary.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d12pipelinelibrary.h
-index d65cf964..0d2571e8 100644
---- a/src/neptune/neptune-protocol/npt_protocol_host_id3d12pipelinelibrary.h
-+++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d12pipelinelibrary.h
-@@ -236,7 +236,11 @@ npt_encode_ID3D12PipelineLibrary_LoadGraphicsPipeline_reply(struct npt_cs_encode
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppPipelineState (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppPipelineState && *args->ppPipelineState)
-+            ? args->_guest_id_ppPipelineState : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -409,7 +413,11 @@ npt_encode_ID3D12PipelineLibrary_LoadComputePipeline_reply(struct npt_cs_encoder
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppPipelineState (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppPipelineState && *args->ppPipelineState)
-+            ? args->_guest_id_ppPipelineState : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -831,7 +839,11 @@ npt_encode_ID3D12PipelineLibrary1_LoadPipeline_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppPipelineState (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppPipelineState && *args->ppPipelineState)
-+            ? args->_guest_id_ppPipelineState : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d12pipelinestate.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d12pipelinestate.h
-index 17eeb6a9..c598847a 100644
---- a/src/neptune/neptune-protocol/npt_protocol_host_id3d12pipelinestate.h
-+++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d12pipelinestate.h
-@@ -64,7 +64,11 @@ npt_encode_ID3D12PipelineState_GetCachedBlob_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppBlob (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppBlob && *args->ppBlob)
-+            ? args->_guest_id_ppBlob : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d12protectedsession.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d12protectedsession.h
-index 00ea7969..6f6a46bc 100644
---- a/src/neptune/neptune-protocol/npt_protocol_host_id3d12protectedsession.h
-+++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d12protectedsession.h
-@@ -75,7 +75,11 @@ npt_encode_ID3D12ProtectedSession_GetStatusFence_reply(struct npt_cs_encoder *en
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppFence (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppFence && *args->ppFence)
-+            ? args->_guest_id_ppFence : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d12resource.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d12resource.h
-index 02270c50..5284302b 100644
---- a/src/neptune/neptune-protocol/npt_protocol_host_id3d12resource.h
-+++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d12resource.h
-@@ -982,7 +982,11 @@ npt_encode_ID3D12Resource1_GetProtectedResourceSession_reply(struct npt_cs_encod
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppProtectedSession (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppProtectedSession && *args->ppProtectedSession)
-+            ? args->_guest_id_ppProtectedSession : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d12sdkconfiguration.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d12sdkconfiguration.h
-index cd651eac..e190b477 100644
---- a/src/neptune/neptune-protocol/npt_protocol_host_id3d12sdkconfiguration.h
-+++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d12sdkconfiguration.h
-@@ -221,7 +221,11 @@ npt_encode_ID3D12SDKConfiguration1_CreateDeviceFactory_reply(struct npt_cs_encod
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvFactory (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvFactory && *args->ppvFactory)
-+            ? args->_guest_id_ppvFactory : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d12swapchainassistant.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d12swapchainassistant.h
-index 8121737e..d6dc5973 100644
---- a/src/neptune/neptune-protocol/npt_protocol_host_id3d12swapchainassistant.h
-+++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d12swapchainassistant.h
-@@ -194,7 +194,11 @@ npt_encode_ID3D12SwapChainAssistant_GetSwapChainObject_reply(struct npt_cs_encod
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppv (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppv && *args->ppv)
-+            ? args->_guest_id_ppv : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -368,8 +372,16 @@ npt_encode_ID3D12SwapChainAssistant_GetCurrentResourceAndCommandQueue_reply(stru
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvResource (guest-allocated id, registered host-side; not in reply) */
--/* skip args->ppvQueue (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvResource && *args->ppvResource)
-+            ? args->_guest_id_ppvResource : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
-+    {
-+        const uint64_t _gid = (args->ppvQueue && *args->ppvQueue)
-+            ? args->_guest_id_ppvQueue : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_idxgiadapter.h b/src/neptune/neptune-protocol/npt_protocol_host_idxgiadapter.h
 index 834061eb..9e8c29cc 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_idxgiadapter.h
@@ -4379,39 +2893,10 @@ index 834061eb..9e8c29cc 100644
  
  static inline void
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_idxgidevice.h b/src/neptune/neptune-protocol/npt_protocol_host_idxgidevice.h
-index a3f4fd86..e595c07e 100644
+index a3f4fd86..3e561c5a 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_idxgidevice.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_idxgidevice.h
-@@ -64,7 +64,11 @@ npt_encode_IDXGIDevice_GetAdapter_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->pAdapter (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->pAdapter && *args->pAdapter)
-+            ? args->_guest_id_pAdapter : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -233,7 +237,14 @@ npt_encode_IDXGIDevice_CreateSurface_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppSurface (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _cnt = args->_guest_id_count_ppSurface;
-+        npt_encode_array_count(enc, _cnt);
-+        for (uint64_t _i = 0; _i < _cnt; _i++) {
-+            const uint64_t _gid = (args->ppSurface && args->ppSurface[_i]) ? args->_guest_ids_ppSurface[_i] : 0;
-+            npt_encode_uint64_t(enc, &_gid);
-+        }
-+    }
- }
- 
- static inline void
-@@ -307,9 +318,14 @@ npt_dispatch_IDXGIDevice_CreateSurface(struct npt_dispatch_context *ctx,
+@@ -307,9 +307,14 @@ npt_dispatch_IDXGIDevice_CreateSurface(struct npt_dispatch_context *ctx,
       * whose type is determined by the caller's riid. */
      if (args.ppSurface && args._guest_ids_ppSurface) {
          const uint32_t _n = args._guest_id_count_ppSurface;
@@ -4429,25 +2914,8 @@ index a3f4fd86..e595c07e 100644
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-diff --git a/src/neptune/neptune-protocol/npt_protocol_host_idxgidevicesubobject.h b/src/neptune/neptune-protocol/npt_protocol_host_idxgidevicesubobject.h
-index 1392e2f6..771b4ad2 100644
---- a/src/neptune/neptune-protocol/npt_protocol_host_idxgidevicesubobject.h
-+++ b/src/neptune/neptune-protocol/npt_protocol_host_idxgidevicesubobject.h
-@@ -75,7 +75,11 @@ npt_encode_IDXGIDeviceSubObject_GetDevice_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppDevice (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppDevice && *args->ppDevice)
-+            ? args->_guest_id_ppDevice : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_idxgifactory.h b/src/neptune/neptune-protocol/npt_protocol_host_idxgifactory.h
-index 71e532d7..f548490a 100644
+index 71e532d7..a1ee911a 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_idxgifactory.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_idxgifactory.h
 @@ -67,7 +67,11 @@ npt_encode_IDXGIFactory_EnumAdapters_reply(struct npt_cs_encoder *enc,
@@ -4463,20 +2931,7 @@ index 71e532d7..f548490a 100644
  }
  
  static inline void
-@@ -473,7 +477,11 @@ npt_encode_IDXGIFactory_CreateSwapChain_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppSwapChain (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppSwapChain && *args->ppSwapChain)
-+            ? args->_guest_id_ppSwapChain : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -617,7 +625,11 @@ npt_encode_IDXGIFactory_CreateSoftwareAdapter_reply(struct npt_cs_encoder *enc,
+@@ -756,7 +760,11 @@ npt_encode_IDXGIFactory1_EnumAdapters1_reply(struct npt_cs_encoder *enc,
          .cmd_return = (uint32_t)args->ret,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -4489,59 +2944,7 @@ index 71e532d7..f548490a 100644
  }
  
  static inline void
-@@ -756,7 +768,11 @@ npt_encode_IDXGIFactory1_EnumAdapters1_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppAdapter (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppAdapter && *args->ppAdapter)
-+            ? args->_guest_id_ppAdapter : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -1168,7 +1184,11 @@ npt_encode_IDXGIFactory2_CreateSwapChainForHwnd_reply(struct npt_cs_encoder *enc
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppSwapChain (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppSwapChain && *args->ppSwapChain)
-+            ? args->_guest_id_ppSwapChain : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -1339,7 +1359,11 @@ npt_encode_IDXGIFactory2_CreateSwapChainForCoreWindow_reply(struct npt_cs_encode
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppSwapChain (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppSwapChain && *args->ppSwapChain)
-+            ? args->_guest_id_ppSwapChain : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -2399,7 +2423,11 @@ npt_encode_IDXGIFactory2_CreateSwapChainForComposition_reply(struct npt_cs_encod
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppSwapChain (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppSwapChain && *args->ppSwapChain)
-+            ? args->_guest_id_ppSwapChain : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -2665,7 +2693,11 @@ npt_encode_IDXGIFactory4_EnumAdapterByLuid_reply(struct npt_cs_encoder *enc,
+@@ -2665,7 +2673,11 @@ npt_encode_IDXGIFactory4_EnumAdapterByLuid_reply(struct npt_cs_encoder *enc,
          .cmd_return = (uint32_t)args->ret,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -4554,7 +2957,7 @@ index 71e532d7..f548490a 100644
  }
  
  static inline void
-@@ -2813,7 +2845,11 @@ npt_encode_IDXGIFactory4_EnumWarpAdapter_reply(struct npt_cs_encoder *enc,
+@@ -3107,7 +3119,11 @@ npt_encode_IDXGIFactory6_EnumAdapterByGpuPreference_reply(struct npt_cs_encoder
          .cmd_return = (uint32_t)args->ret,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -4562,89 +2965,16 @@ index 71e532d7..f548490a 100644
 +    {
 +        const uint64_t _gid = (args->ppvAdapter && *args->ppvAdapter)
 +            ? args->_guest_id_ppvAdapter : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -3107,7 +3143,11 @@ npt_encode_IDXGIFactory6_EnumAdapterByGpuPreference_reply(struct npt_cs_encoder
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppvAdapter (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppvAdapter && *args->ppvAdapter)
-+            ? args->_guest_id_ppvAdapter : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-diff --git a/src/neptune/neptune-protocol/npt_protocol_host_idxgifactorymedia.h b/src/neptune/neptune-protocol/npt_protocol_host_idxgifactorymedia.h
-index a340bd18..bcba6633 100644
---- a/src/neptune/neptune-protocol/npt_protocol_host_idxgifactorymedia.h
-+++ b/src/neptune/neptune-protocol/npt_protocol_host_idxgifactorymedia.h
-@@ -99,7 +99,11 @@ npt_encode_IDXGIFactoryMedia_CreateSwapChainForCompositionSurfaceHandle_reply(st
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppSwapChain (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppSwapChain && *args->ppSwapChain)
-+            ? args->_guest_id_ppSwapChain : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -278,7 +282,11 @@ npt_encode_IDXGIFactoryMedia_CreateDecodeSwapChainForCompositionSurfaceHandle_re
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppSwapChain (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppSwapChain && *args->ppSwapChain)
-+            ? args->_guest_id_ppSwapChain : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-diff --git a/src/neptune/neptune-protocol/npt_protocol_host_idxgiobject.h b/src/neptune/neptune-protocol/npt_protocol_host_idxgiobject.h
-index fd631268..1da6e1d3 100644
---- a/src/neptune/neptune-protocol/npt_protocol_host_idxgiobject.h
-+++ b/src/neptune/neptune-protocol/npt_protocol_host_idxgiobject.h
-@@ -507,7 +507,11 @@ npt_encode_IDXGIObject_GetParent_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppParent (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppParent && *args->ppParent)
-+            ? args->_guest_id_ppParent : 0;
 +        npt_encode_uint64_t(enc, &_gid);
 +    }
  }
  
  static inline void
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_idxgioutput.h b/src/neptune/neptune-protocol/npt_protocol_host_idxgioutput.h
-index c538d8bf..99f6dd24 100644
+index c538d8bf..519a40b1 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_idxgioutput.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_idxgioutput.h
-@@ -2021,7 +2021,11 @@ npt_encode_IDXGIOutput1_DuplicateOutput_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppOutputDuplication (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppOutputDuplication && *args->ppOutputDuplication)
-+            ? args->_guest_id_ppOutputDuplication : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -2529,13 +2533,11 @@ npt_decode_IDXGIOutput5_DuplicateOutput1_args_temp(struct npt_cs_decoder *dec,
+@@ -2529,13 +2529,11 @@ npt_decode_IDXGIOutput5_DuplicateOutput1_args_temp(struct npt_cs_decoder *dec,
      npt_decode_UINT(dec, &args->Flags);
      npt_decode_UINT(dec, &args->SupportedFormatsCount);
      uint64_t _cnt_pSupportedFormats = 0;
@@ -4660,19 +2990,6 @@ index c538d8bf..99f6dd24 100644
          args->pSupportedFormats = NULL;
      }
      {
-@@ -2575,7 +2577,11 @@ npt_encode_IDXGIOutput5_DuplicateOutput1_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppOutputDuplication (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppOutputDuplication && *args->ppOutputDuplication)
-+            ? args->_guest_id_ppOutputDuplication : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_idxgioutputduplication.h b/src/neptune/neptune-protocol/npt_protocol_host_idxgioutputduplication.h
 index 64fba667..5007044a 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_idxgioutputduplication.h
@@ -4685,23 +3002,6 @@ index 64fba667..5007044a 100644
 +    {
 +        const uint64_t _gid = (args->ppDesktopResource && *args->ppDesktopResource)
 +            ? args->_guest_id_ppDesktopResource : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-diff --git a/src/neptune/neptune-protocol/npt_protocol_host_idxgiresource.h b/src/neptune/neptune-protocol/npt_protocol_host_idxgiresource.h
-index bb620a84..cedaa260 100644
---- a/src/neptune/neptune-protocol/npt_protocol_host_idxgiresource.h
-+++ b/src/neptune/neptune-protocol/npt_protocol_host_idxgiresource.h
-@@ -554,7 +554,11 @@ npt_encode_IDXGIResource1_CreateSubresourceSurface_reply(struct npt_cs_encoder *
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppSurface (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppSurface && *args->ppSurface)
-+            ? args->_guest_id_ppSurface : 0;
 +        npt_encode_uint64_t(enc, &_gid);
 +    }
  }
@@ -4725,23 +3025,10 @@ index 844a58c3..e3d0a711 100644
          npt_encode_UINT(enc, args->pSubresourceIndex);
  }
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_idxgiswapchain.h b/src/neptune/neptune-protocol/npt_protocol_host_idxgiswapchain.h
-index 7c3f0ab3..6fe54b5d 100644
+index 7c3f0ab3..ee388460 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_idxgiswapchain.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_idxgiswapchain.h
-@@ -200,7 +200,11 @@ npt_encode_IDXGISwapChain_GetBuffer_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppSurface (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppSurface && *args->ppSurface)
-+            ? args->_guest_id_ppSurface : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -471,7 +475,11 @@ npt_encode_IDXGISwapChain_GetFullscreenState_reply(struct npt_cs_encoder *enc,
+@@ -471,7 +471,11 @@ npt_encode_IDXGISwapChain_GetFullscreenState_reply(struct npt_cs_encoder *enc,
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
      if (npt_encode_simple_pointer(enc, args->pFullscreen))
          npt_encode_BOOL(enc, args->pFullscreen);
@@ -4754,46 +3041,7 @@ index 7c3f0ab3..6fe54b5d 100644
  }
  
  static inline void
-@@ -990,7 +998,11 @@ npt_encode_IDXGISwapChain_GetContainingOutput_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppOutput (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppOutput && *args->ppOutput)
-+            ? args->_guest_id_ppOutput : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -1751,7 +1763,11 @@ npt_encode_IDXGISwapChain1_GetCoreWindow_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppUnk (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppUnk && *args->ppUnk)
-+            ? args->_guest_id_ppUnk : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -2137,7 +2153,11 @@ npt_encode_IDXGISwapChain1_GetRestrictToOutput_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppRestrictToOutput (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppRestrictToOutput && *args->ppRestrictToOutput)
-+            ? args->_guest_id_ppRestrictToOutput : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -3967,13 +3987,11 @@ npt_decode_IDXGISwapChain3_ResizeBuffers1_args_temp(struct npt_cs_decoder *dec,
+@@ -3967,13 +3971,11 @@ npt_decode_IDXGISwapChain3_ResizeBuffers1_args_temp(struct npt_cs_decoder *dec,
      npt_decode_DXGI_FORMAT(dec, &args->Format);
      npt_decode_UINT(dec, &args->SwapChainFlags);
      uint64_t _cnt_pCreationNodeMask = 0;
@@ -6122,49 +4370,10 @@ index 0158b5a6..4165a32d 100644
      }
  }
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_toplevel.h b/src/neptune/neptune-protocol/npt_protocol_host_toplevel.h
-index fbd0f130..47810f15 100644
+index fbd0f130..0420da31 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_toplevel.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_toplevel.h
-@@ -70,7 +70,11 @@ npt_encode_CreateDXGIFactory_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppFactory (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppFactory && *args->ppFactory)
-+            ? args->_guest_id_ppFactory : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -184,7 +188,11 @@ npt_encode_CreateDXGIFactory1_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppFactory (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppFactory && *args->ppFactory)
-+            ? args->_guest_id_ppFactory : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -301,7 +309,11 @@ npt_encode_CreateDXGIFactory2_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppFactory (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppFactory && *args->ppFactory)
-+            ? args->_guest_id_ppFactory : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
-@@ -487,13 +499,11 @@ npt_decode_D3D11CreateDevice_args_temp(struct npt_cs_decoder *dec,
+@@ -487,13 +487,11 @@ npt_decode_D3D11CreateDevice_args_temp(struct npt_cs_decoder *dec,
      }
      npt_decode_UINT(dec, &args->Flags);
      uint64_t _cnt_pFeatureLevels = 0;
@@ -6180,7 +4389,7 @@ index fbd0f130..47810f15 100644
          args->pFeatureLevels = NULL;
      }
      npt_decode_UINT(dec, &args->FeatureLevels);
-@@ -551,10 +561,18 @@ npt_encode_D3D11CreateDevice_reply(struct npt_cs_encoder *enc,
+@@ -551,10 +549,18 @@ npt_encode_D3D11CreateDevice_reply(struct npt_cs_encoder *enc,
          .cmd_return = (uint32_t)args->ret,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -6201,7 +4410,7 @@ index fbd0f130..47810f15 100644
  }
  
  static inline void
-@@ -663,13 +681,11 @@ npt_decode_D3D11CreateDeviceAndSwapChain_args_temp(struct npt_cs_decoder *dec,
+@@ -663,13 +669,11 @@ npt_decode_D3D11CreateDeviceAndSwapChain_args_temp(struct npt_cs_decoder *dec,
      }
      npt_decode_UINT(dec, &args->Flags);
      uint64_t _cnt_pFeatureLevels = 0;
@@ -6217,7 +4426,7 @@ index fbd0f130..47810f15 100644
          args->pFeatureLevels = NULL;
      }
      npt_decode_UINT(dec, &args->FeatureLevels);
-@@ -746,11 +762,23 @@ npt_encode_D3D11CreateDeviceAndSwapChain_reply(struct npt_cs_encoder *enc,
+@@ -746,11 +750,23 @@ npt_encode_D3D11CreateDeviceAndSwapChain_reply(struct npt_cs_encoder *enc,
          .cmd_return = (uint32_t)args->ret,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -6244,7 +4453,7 @@ index fbd0f130..47810f15 100644
  }
  
  static inline void
-@@ -854,13 +882,11 @@ npt_decode_D3D11On12CreateDevice_args_temp(struct npt_cs_decoder *dec,
+@@ -854,13 +870,11 @@ npt_decode_D3D11On12CreateDevice_args_temp(struct npt_cs_decoder *dec,
      }
      npt_decode_UINT(dec, &args->Flags);
      uint64_t _cnt_pFeatureLevels = 0;
@@ -6260,7 +4469,7 @@ index fbd0f130..47810f15 100644
          args->pFeatureLevels = NULL;
      }
      npt_decode_UINT(dec, &args->FeatureLevels);
-@@ -939,8 +965,16 @@ npt_encode_D3D11On12CreateDevice_reply(struct npt_cs_encoder *enc,
+@@ -939,8 +953,16 @@ npt_encode_D3D11On12CreateDevice_reply(struct npt_cs_encoder *enc,
          .cmd_return = (uint32_t)args->ret,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -6279,16 +4488,3 @@ index fbd0f130..47810f15 100644
      if (npt_encode_simple_pointer(enc, args->pChosenFeatureLevel))
          npt_encode_D3D_FEATURE_LEVEL(enc, args->pChosenFeatureLevel);
  }
-@@ -1071,7 +1105,11 @@ npt_encode_D3D12CreateDevice_reply(struct npt_cs_encoder *enc,
-         .cmd_return = (uint32_t)args->ret,
-     };
-     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
--/* skip args->ppDevice (guest-allocated id, registered host-side; not in reply) */
-+    {
-+        const uint64_t _gid = (args->ppDevice && *args->ppDevice)
-+            ? args->_guest_id_ppDevice : 0;
-+        npt_encode_uint64_t(enc, &_gid);
-+    }
- }
- 
- static inline void
