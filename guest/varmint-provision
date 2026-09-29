@@ -120,10 +120,30 @@ Section "Device"
 EndSection
 EOF_XORG
 
+install -d -m 0755 /usr/local/libexec
+cat > /usr/local/libexec/varmint-greeter-wrapper <<'EOF_GREETER'
+#!/bin/sh
+
+scale=1
+if [ -r /etc/varmint/ui-scale ]; then
+    IFS= read -r configured_scale < /etc/varmint/ui-scale || true
+    case "$configured_scale" in
+        1|2) scale=$configured_scale ;;
+    esac
+fi
+
+export GDK_SCALE="$scale"
+export XCURSOR_SIZE="$((24 * scale))"
+
+exec "$@"
+EOF_GREETER
+chmod 0755 /usr/local/libexec/varmint-greeter-wrapper
+
 install -d -m 0755 /etc/lightdm/lightdm.conf.d
 cat > /etc/lightdm/lightdm.conf.d/50-varmint.conf <<'EOF_LIGHTDM'
 [Seat:*]
 greeter-session=lightdm-gtk-greeter
+greeter-wrapper=/usr/local/libexec/varmint-greeter-wrapper
 user-session=xfce
 EOF_LIGHTDM
 

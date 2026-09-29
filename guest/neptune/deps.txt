@@ -15,4 +15,5 @@ mingw-w64-x86-64-dev
 libxcb1-dev:amd64
 libxcb-dri3-dev:amd64
 libxcb-present-dev:amd64
+libxcb-render0-dev:amd64
 libdrm-dev:amd64

@@ -172,14 +172,6 @@ impl DisplayMode {
         })
     }
 
-    fn doubled(self) -> Option<Self> {
-        Self::new(
-            u32::from(self.width).checked_mul(2)?,
-            u32::from(self.height).checked_mul(2)?,
-            self.refresh_hz,
-        )
-    }
-
     fn with_refresh(self, refresh_hz: u16) -> Self {
         Self { refresh_hz, ..self }
     }
@@ -213,17 +205,35 @@ impl DisplayMode {
     }
 }
 
-pub fn build(width: u32, height: u32, _compatibility_mode: Option<(u32, u32)>) -> Option<[u8; EDID_SIZE]> {
-    let half_retina_120 = DisplayMode::new(width, height, 120)?;
-    let half_retina_60 = half_retina_120.with_refresh(60);
-    let retina_120 = half_retina_120.doubled()?;
-    let retina_60 = retina_120.with_refresh(60);
-    let physical_size = half_retina_120.physical_size();
+pub fn build(width: u32, height: u32, compatibility_mode: Option<(u32, u32)>) -> Option<[u8; EDID_SIZE]> {
+    let native_120 = DisplayMode::new(width, height, 120)?;
+    let native_60 = native_120.with_refresh(60);
 
-    let preferred_timing = half_retina_60.timing()?;
+    let compatibility_60 = match compatibility_mode {
+        Some((compat_width, compat_height)) if compat_width != width || compat_height != height => {
+            Some(DisplayMode::new(compat_width, compat_height, 60)?)
+        }
+        _ => None,
+    };
+    let compatibility_120 = compatibility_60.map(|mode| mode.with_refresh(120));
+
+    let wuxga_60 = DisplayMode::new(1920, 1200, 60)?;
+    let wuxga_120 = wuxga_60.with_refresh(120);
+
+    let wqxga_60 = DisplayMode::new(2560, 1600, 60)?;
+    let wqxga_120 = wqxga_60.with_refresh(120);
+
+    // Preserve roughly the same physical-size/DPI model as before:
+    // on a HiDPI host the logical mode represents the desktop size,
+    // while on a 1x host logical and native are identical.
+    let physical_size = compatibility_60.unwrap_or(native_60).physical_size();
+
+    let preferred_timing = native_60.timing()?;
+    let second_timing = compatibility_120.unwrap_or(native_120).timing()?;
+
     let descriptors = [
         preferred_timing.descriptor(physical_size)?,
-        half_retina_120.timing()?.descriptor(physical_size)?,
+        second_timing.descriptor(physical_size)?,
         text_descriptor(MONITOR_NAME_TAG, MONITOR_NAME),
         range_limits_descriptor(),
     ];
@@ -244,17 +254,30 @@ pub fn build(width: u32, height: u32, _compatibility_mode: Option<(u32, u32)>) -
         features: PREFERRED_TIMING_PRESENT,
         chromaticity: [0; 10],
         established_timings: [0; 3],
-        standard_timings: [0x01; 16],
+        // 1920x1200 @ 60 Hz, 16:10. EDID standard timing encoding:
+        // horizontal = (1920 / 8) - 31 = 0xd1,
+        // aspect = 16:10 (0b00), refresh = 60 Hz.
+        standard_timings: [
+            0xd1, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
+        ],
         descriptors,
         extension_count: 1,
         checksum: 0,
     };
     base.checksum = checksum(base.as_bytes());
 
-    // Half Retina modes are already advertised by the two base-block DTDs.
-    // Keep the DisplayID extension for the Retina-only modes so DRM does not
-    // expose duplicate resolutions and refresh rates.
-    let extension = displayid_extension(&[(retina_120, false), (retina_60, false)])?;
+    let mut extension_modes = Vec::with_capacity(5);
+
+    if let Some(compatibility_60) = compatibility_60 {
+        // Compatibility @120 is already the second base-block DTD.
+        extension_modes.push((native_120, false));
+        extension_modes.push((compatibility_60, false));
+    }
+
+    // 1920x1200 @60 is already the base-block standard timing.
+    extension_modes.extend_from_slice(&[(wuxga_120, false), (wqxga_120, false), (wqxga_60, false)]);
+
+    let extension = displayid_extension(&extension_modes)?;
 
     let mut edid = [0u8; EDID_SIZE];
     edid[..BLOCK_SIZE].copy_from_slice(base.as_bytes());

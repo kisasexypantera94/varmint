@@ -1,3 +1,3 @@
 #!/bin/sh
 set -eu
-exec FEXBash -c 'exec steam -no-cef-sandbox'
+exec FEXBash -c 'exec /usr/bin/steam -no-cef-sandbox "$@"' sh "$@"

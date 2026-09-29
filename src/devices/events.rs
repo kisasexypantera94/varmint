@@ -33,7 +33,12 @@ pub enum RuntimeEvent {
     NetRx(Vec<u8>),
     UartRx(u8),
     Input(RuntimeInputEvent),
-    DisplayResized { width: u32, height: u32 },
+    DisplayResized {
+        physical_width: u32,
+        physical_height: u32,
+        logical_width: u32,
+        logical_height: u32,
+    },
     Clipboard(Vec<u8>),
 }
 
@@ -69,10 +74,18 @@ impl<'a> RuntimeEventPump<'a> {
             }
             RuntimeEvent::UartRx(byte) => self.devices.uart.lock().unwrap().enqueue(byte),
             RuntimeEvent::Input(event) => self.handle_input(event, pointer_move),
-            RuntimeEvent::DisplayResized { width, height } => {
-                self.devices
-                    .gpu
-                    .send_event(virtio::gpu::ExternalEvent::DisplayResized { width, height });
+            RuntimeEvent::DisplayResized {
+                physical_width,
+                physical_height,
+                logical_width,
+                logical_height,
+            } => {
+                self.devices.gpu.send_event(virtio::gpu::ExternalEvent::DisplayResized {
+                    physical_width,
+                    physical_height,
+                    logical_width,
+                    logical_height,
+                });
             }
             RuntimeEvent::Clipboard(payload) => {
                 self.devices

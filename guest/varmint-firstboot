@@ -121,6 +121,7 @@ setup_fex() {
 {
   "Config": {
     "RootFS": "$FEX_ROOTFS",
+    "DiskCache": "0",
     "TSOEnabled": "0",
     "VectorTSOEnabled": "0",
     "MemcpySetTSOEnabled": "0",
@@ -142,6 +143,43 @@ EOF_CONFIG
   }
 }
 EOF_APPCONFIG
+}
+
+setup_desktop() {
+    ui_scale=1
+
+    for arg in $(cat /proc/cmdline); do
+        case "$arg" in
+            varmint.ui_scale=1) ui_scale=1 ;;
+            varmint.ui_scale=2) ui_scale=2 ;;
+        esac
+    done
+
+    cursor_size=$((24 * ui_scale))
+
+    install -d -m 0755 /etc/varmint
+    printf '%s
+' "$ui_scale" > /etc/varmint/ui-scale
+    chmod 0644 /etc/varmint/ui-scale
+
+    run_as_user dbus-run-session -- sh -c '
+        scale=$1
+        cursor_size=$2
+
+        set_int() {
+            property=$1
+            value=$2
+
+            if xfconf-query -c xsettings -p "$property" >/dev/null 2>&1; then
+                xfconf-query -c xsettings -p "$property" -s "$value"
+            else
+                xfconf-query -c xsettings -p "$property" -n -t int -s "$value"
+            fi
+        }
+
+        set_int /Gdk/WindowScalingFactor "$scale"
+        set_int /Gtk/CursorThemeSize "$cursor_size"
+    ' sh "$ui_scale" "$cursor_size"
 }
 
 install_steam() {
@@ -185,7 +223,7 @@ verify_setup() {
         printf 'FEX verification failed: expected x86_64, got %s.\n' "$arch" >&2
         exit 1
     }
-    run_as_user FEXBash -c 'command -v steam >/dev/null' || {
+    run_as_user FEXBash -c 'test -x /usr/bin/steam' || {
         printf 'Steam launcher is not available inside FEX.\n' >&2
         exit 1
     }
@@ -199,6 +237,7 @@ main() {
 
     printf '\nPreparing the gaming environment. This may take a few minutes...\n'
     setup_fex
+    setup_desktop
     install_steam
     verify_setup
 

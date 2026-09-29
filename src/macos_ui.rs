@@ -237,3 +237,15 @@ pub fn show_about() {
         objc2::ffi::objc_release(options);
     }
 }
+
+pub fn backing_scale_factor() -> u32 {
+    unsafe {
+        let screen: *mut AnyObject = msg_send![class!(NSScreen), mainScreen];
+        if screen.is_null() {
+            return 1;
+        }
+
+        let factor: f64 = msg_send![screen, backingScaleFactor];
+        if factor >= 1.5 { 2 } else { 1 }
+    }
+}

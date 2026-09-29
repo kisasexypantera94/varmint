@@ -1,0 +1,370 @@
+diff --git a/src/virtio/neptune/nptunix/npt_unix_wsi.c b/src/virtio/neptune/nptunix/npt_unix_wsi.c
+index 58596ea0074..dd87bcb0f31 100644
+--- a/src/virtio/neptune/nptunix/npt_unix_wsi.c
++++ b/src/virtio/neptune/nptunix/npt_unix_wsi.c
+@@ -30,6 +30,7 @@
+ #include <xcb/xcb.h>
+ #include <xcb/dri3.h>
+ #include <xcb/present.h>
++#include <xcb/render.h>
+ 
+ #include <xf86drm.h>
+ 
+@@ -40,10 +41,16 @@ static struct {
+    xcb_connection_t *conn;
+    xcb_window_t window;
+    uint32_t width, height;
++   uint32_t target_width, target_height;
+    uint32_t num_images;
++   bool scale;
++   xcb_render_pictformat_t rgb24_format;
+    struct {
+       xcb_pixmap_t pixmap;
+       int fd;
++      xcb_render_picture_t src_picture;
++      xcb_pixmap_t scaled_pixmap;
++      xcb_render_picture_t scaled_picture;
+ #ifdef NPT_HAVE_XCB_DRI3_SYNCOBJ
+       /* Persistent X XID, rebound each Present. */
+       xcb_dri3_syncobj_t acquire_syncobj;
+@@ -58,6 +65,190 @@ static struct {
+    xcb_special_event_t *special_event;
+ } g_wsi;
+ 
++static xcb_render_pictformat_t
++find_rgb24_format(xcb_connection_t *conn)
++{
++   xcb_render_query_pict_formats_reply_t *reply =
++      xcb_render_query_pict_formats_reply(
++         conn, xcb_render_query_pict_formats(conn), NULL);
++   if (!reply)
++      return XCB_NONE;
++
++   xcb_render_pictformat_t result = XCB_NONE;
++   for (xcb_render_pictforminfo_iterator_t it =
++           xcb_render_query_pict_formats_formats_iterator(reply);
++        it.rem;
++        xcb_render_pictforminfo_next(&it)) {
++      const xcb_render_pictforminfo_t *f = it.data;
++
++      if (f->type == XCB_RENDER_PICT_TYPE_DIRECT &&
++          f->depth == 24 &&
++          f->direct.red_shift == 16 &&
++          f->direct.red_mask == 0xff &&
++          f->direct.green_shift == 8 &&
++          f->direct.green_mask == 0xff &&
++          f->direct.blue_shift == 0 &&
++          f->direct.blue_mask == 0xff &&
++          f->direct.alpha_mask == 0) {
++         result = f->id;
++         break;
++      }
++   }
++
++   free(reply);
++   return result;
++}
++
++static bool
++create_scaled_image(uint32_t i)
++{
++   typeof(g_wsi.images[0]) *img = &g_wsi.images[i];
++
++   img->src_picture = xcb_generate_id(g_wsi.conn);
++   xcb_void_cookie_t ck = xcb_render_create_picture_checked(
++      g_wsi.conn, img->src_picture, img->pixmap,
++      g_wsi.rgb24_format, 0, NULL);
++   xcb_generic_error_t *err = xcb_request_check(g_wsi.conn, ck);
++   if (err) {
++      fprintf(stderr,
++              "neptune unixlib wsi: create source Render picture failed (%u)\n",
++              err->error_code);
++      free(err);
++      img->src_picture = XCB_NONE;
++      return false;
++   }
++
++   img->scaled_pixmap = xcb_generate_id(g_wsi.conn);
++   ck = xcb_create_pixmap_checked(
++      g_wsi.conn, 24, img->scaled_pixmap, g_wsi.window,
++      g_wsi.target_width, g_wsi.target_height);
++   err = xcb_request_check(g_wsi.conn, ck);
++   if (err) {
++      fprintf(stderr,
++              "neptune unixlib wsi: create scaled pixmap failed (%u)\n",
++              err->error_code);
++      free(err);
++      img->scaled_pixmap = XCB_NONE;
++      return false;
++   }
++
++   img->scaled_picture = xcb_generate_id(g_wsi.conn);
++   ck = xcb_render_create_picture_checked(
++      g_wsi.conn, img->scaled_picture, img->scaled_pixmap,
++      g_wsi.rgb24_format, 0, NULL);
++   err = xcb_request_check(g_wsi.conn, ck);
++   if (err) {
++      fprintf(stderr,
++              "neptune unixlib wsi: create scaled Render picture failed (%u)\n",
++              err->error_code);
++      free(err);
++      img->scaled_picture = XCB_NONE;
++      return false;
++   }
++
++   return true;
++}
++
++static void
++wait_for_source_fence(struct npt_unix_wsi_present_params *p)
++{
++   if (p->wait_fence_fd < 0)
++      return;
++
++   struct pollfd pfd = {
++      .fd = p->wait_fence_fd,
++      .events = POLLIN,
++   };
++
++   int rc;
++   do {
++      rc = poll(&pfd, 1, 30000);
++   } while (rc < 0 && errno == EINTR);
++
++   close(p->wait_fence_fd);
++   p->wait_fence_consumed = 1;
++}
++
++static void
++scale_image(uint32_t i)
++{
++   typeof(g_wsi.images[0]) *img = &g_wsi.images[i];
++
++   uint32_t view_w = g_wsi.target_width;
++   uint32_t view_h =
++      (uint32_t)(((uint64_t)g_wsi.height * view_w) / g_wsi.width);
++
++   if (view_h > g_wsi.target_height) {
++      view_h = g_wsi.target_height;
++      view_w =
++         (uint32_t)(((uint64_t)g_wsi.width * view_h) / g_wsi.height);
++   }
++
++   if (!view_w) view_w = 1;
++   if (!view_h) view_h = 1;
++
++   const int16_t dst_x =
++      (int16_t)((g_wsi.target_width - view_w) / 2);
++   const int16_t dst_y =
++      (int16_t)((g_wsi.target_height - view_h) / 2);
++
++   const xcb_render_color_t black = {
++      .red = 0,
++      .green = 0,
++      .blue = 0,
++      .alpha = 0xffff,
++   };
++   const xcb_rectangle_t full = {
++      .x = 0,
++      .y = 0,
++      .width = (uint16_t)g_wsi.target_width,
++      .height = (uint16_t)g_wsi.target_height,
++   };
++
++   xcb_render_fill_rectangles(
++      g_wsi.conn,
++      XCB_RENDER_PICT_OP_SRC,
++      img->scaled_picture,
++      black,
++      1,
++      &full);
++
++   xcb_render_transform_t transform = {
++      .matrix11 =
++         (xcb_render_fixed_t)(((uint64_t)g_wsi.width << 16) / view_w),
++      .matrix12 = 0,
++      .matrix13 = 0,
++      .matrix21 = 0,
++      .matrix22 =
++         (xcb_render_fixed_t)(((uint64_t)g_wsi.height << 16) / view_h),
++      .matrix23 = 0,
++      .matrix31 = 0,
++      .matrix32 = 0,
++      .matrix33 = 1 << 16,
++   };
++
++   xcb_render_set_picture_transform(
++      g_wsi.conn, img->src_picture, transform);
++
++   static const char filter[] = "bilinear";
++   xcb_render_set_picture_filter(
++      g_wsi.conn, img->src_picture,
++      sizeof(filter) - 1, filter,
++      0, NULL);
++
++   xcb_render_composite(
++      g_wsi.conn,
++      XCB_RENDER_PICT_OP_SRC,
++      img->src_picture,
++      XCB_NONE,
++      img->scaled_picture,
++      0, 0,
++      0, 0,
++      dst_x, dst_y,
++      (uint16_t)view_w,
++      (uint16_t)view_h);
++}
++
+ NTSTATUS npt_do_wsi_init(void *args)
+ {
+    struct npt_unix_wsi_init_params *p = args;
+@@ -72,6 +263,9 @@ NTSTATUS npt_do_wsi_init(void *args)
+ #endif
+    for (uint32_t i = 0; i < NPT_WSI_MAX_IMAGES; i++) {
+       g_wsi.images[i].fd = -1;
++      g_wsi.images[i].src_picture = XCB_NONE;
++      g_wsi.images[i].scaled_pixmap = XCB_NONE;
++      g_wsi.images[i].scaled_picture = XCB_NONE;
+ #ifdef NPT_HAVE_XCB_DRI3_SYNCOBJ
+       g_wsi.images[i].acquire_syncobj = XCB_NONE;
+ #endif
+@@ -127,8 +321,43 @@ NTSTATUS npt_do_wsi_init(void *args)
+    }
+    g_wsi.width = p->width;
+    g_wsi.height = p->height;
++   g_wsi.target_width = p->width;
++   g_wsi.target_height = p->height;
+    g_wsi.num_images = p->num_images;
+ 
++   xcb_get_geometry_reply_t *geom = xcb_get_geometry_reply(
++      g_wsi.conn, xcb_get_geometry(g_wsi.conn, g_wsi.window), NULL);
++   if (geom) {
++      if (geom->width)
++         g_wsi.target_width = geom->width;
++      if (geom->height)
++         g_wsi.target_height = geom->height;
++      free(geom);
++   }
++
++   g_wsi.scale =
++      g_wsi.target_width != g_wsi.width ||
++      g_wsi.target_height != g_wsi.height;
++
++   if (g_wsi.scale) {
++      g_wsi.rgb24_format = find_rgb24_format(g_wsi.conn);
++      if (g_wsi.rgb24_format == XCB_NONE) {
++         fprintf(stderr,
++                 "neptune unixlib wsi: no RGB24 XRender format; "
++                 "cannot scale %ux%u -> %ux%u\n",
++                 g_wsi.width, g_wsi.height,
++                 g_wsi.target_width, g_wsi.target_height);
++         xcb_disconnect(g_wsi.conn);
++         g_wsi.conn = NULL;
++         return STATUS_SUCCESS;
++      }
++
++      fprintf(stderr,
++              "neptune unixlib wsi: scaling %ux%u -> %ux%u\n",
++              g_wsi.width, g_wsi.height,
++              g_wsi.target_width, g_wsi.target_height);
++   }
++
+    for (uint32_t i = 0; i < p->num_images; i++) {
+       if (p->fds[i] < 0) continue;
+ 
+@@ -155,6 +384,15 @@ NTSTATUS npt_do_wsi_init(void *args)
+       fprintf(stderr, "neptune unixlib wsi: pixmap 0x%x for image %u (%ux%u)\n",
+               g_wsi.images[i].pixmap, i, p->width, p->height);
+ 
++      if (g_wsi.scale && !create_scaled_image(i)) {
++         fprintf(stderr,
++                 "neptune unixlib wsi: failed to initialize scaler for image %u\n",
++                 i);
++         xcb_disconnect(g_wsi.conn);
++         g_wsi.conn = NULL;
++         return STATUS_SUCCESS;
++      }
++
+ #ifdef NPT_HAVE_XCB_DRI3_SYNCOBJ
+       if (g_wsi.dri3_has_explicit_sync) {
+          /* XID is rebound to a fresh sync_file each Present. */
+@@ -188,7 +426,8 @@ static int
+ image_index_for_pixmap(xcb_pixmap_t pixmap)
+ {
+    for (uint32_t i = 0; i < g_wsi.num_images; i++) {
+-      if (g_wsi.images[i].pixmap == pixmap)
++      if (g_wsi.images[i].pixmap == pixmap ||
++          g_wsi.images[i].scaled_pixmap == pixmap)
+          return (int)i;
+    }
+    return -1;
+@@ -260,6 +499,34 @@ NTSTATUS npt_do_wsi_present(void *args)
+ 
+    const uint32_t this_serial = ++g_wsi.serial;
+ 
++   /*
++    * Wine/Proton fullscreen can expose a logical swapchain smaller than
++    * the real X11 whole_window. X Present does not scale pixmaps, so do
++    * the scale explicitly into a window-sized staging pixmap.
++    *
++    * Wait on the Neptune source fence before XRender reads the dmabuf.
++    * The normal 1:1 path below keeps its asynchronous explicit-sync path.
++    */
++   if (g_wsi.scale) {
++      wait_for_source_fence(p);
++      scale_image(p->image_index);
++
++      xcb_pixmap_t scaled =
++         g_wsi.images[p->image_index].scaled_pixmap;
++
++      xcb_present_pixmap(
++         g_wsi.conn, g_wsi.window, scaled,
++         this_serial,
++         0, 0, 0, 0,
++         XCB_NONE, XCB_NONE, XCB_NONE,
++         kPresentOptions,
++         0, 0, 0, 0, NULL);
++
++      xcb_flush(g_wsi.conn);
++      p->result = 0;
++      return STATUS_SUCCESS;
++   }
++
+ #ifdef NPT_HAVE_XCB_DRI3_SYNCOBJ
+    if (g_wsi.dri3_has_explicit_sync &&
+        g_wsi.images[p->image_index].acquire_syncobj != XCB_NONE) {
+@@ -375,6 +642,15 @@ NTSTATUS npt_do_wsi_destroy(void *args)
+    if (!g_wsi.conn) return STATUS_SUCCESS;
+ 
+    for (uint32_t i = 0; i < g_wsi.num_images; i++) {
++      if (g_wsi.images[i].src_picture != XCB_NONE)
++         xcb_render_free_picture(g_wsi.conn,
++                                 g_wsi.images[i].src_picture);
++      if (g_wsi.images[i].scaled_picture != XCB_NONE)
++         xcb_render_free_picture(g_wsi.conn,
++                                 g_wsi.images[i].scaled_picture);
++      if (g_wsi.images[i].scaled_pixmap != XCB_NONE)
++         xcb_free_pixmap(g_wsi.conn,
++                         g_wsi.images[i].scaled_pixmap);
+ #ifdef NPT_HAVE_XCB_DRI3_SYNCOBJ
+       if (g_wsi.images[i].acquire_syncobj != XCB_NONE)
+          xcb_dri3_free_syncobj(g_wsi.conn, g_wsi.images[i].acquire_syncobj);
+diff --git a/src/virtio/neptune/nptunix/meson.build b/src/virtio/neptune/nptunix/meson.build
+--- a/src/virtio/neptune/nptunix/meson.build
++++ b/src/virtio/neptune/nptunix/meson.build
+@@ -63,6 +63,7 @@
+ endif
+ 
+ npt_dep_xcb = dependency('xcb', native : true)
++npt_dep_xcb_render = dependency('xcb-render', native : true)
+ 
+ # Bake the xcb-dri3 libdir as an rpath so nptunix.so resolves the
+ # pkg-config-resolved libxcb-dri3.so.0 at runtime even when loaded inside
+@@ -73,6 +74,7 @@
+ 
+ npt_nptunix_deps = [
+   npt_dep_xcb, npt_dep_xcb_dri3, npt_dep_xcb_present,
++  npt_dep_xcb_render,
+   dependency('libdrm', native : true),
+ ]
+ npt_nptunix_c_args = []

@@ -307,8 +307,10 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
         }
 
         let _ = self.host_tx.send(RuntimeEvent::DisplayResized {
-            width: logical_size.width,
-            height: logical_size.height,
+            physical_width: width,
+            physical_height: height,
+            logical_width: logical_size.width,
+            logical_height: logical_size.height,
         });
 
         if self.poll_display() || self.frame_pending {
@@ -339,8 +341,10 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
 
                 let logical_size = PhysicalSize::new(width, height).to_logical::<u32>(scale_factor);
                 let _ = self.host_tx.send(RuntimeEvent::DisplayResized {
-                    width: logical_size.width,
-                    height: logical_size.height,
+                    physical_width: width,
+                    physical_height: height,
+                    logical_width: logical_size.width,
+                    logical_height: logical_size.height,
                 });
 
                 self.present(PresentMode::Redraw);
