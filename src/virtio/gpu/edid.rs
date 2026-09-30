@@ -20,7 +20,7 @@ const MIN_VERTICAL_HZ: u8 = 48;
 const MAX_VERTICAL_HZ: u8 = 120;
 const MIN_HORIZONTAL_KHZ: u8 = 30;
 const MAX_HORIZONTAL_KHZ: u8 = 255;
-const MAX_PIXEL_CLOCK_MHZ: u16 = 1200;
+const MAX_PIXEL_CLOCK_MHZ: u16 = 2500;
 
 const HORIZONTAL_BLANKING: u16 = 160;
 const HORIZONTAL_SYNC_OFFSET: u16 = 48;
@@ -86,7 +86,7 @@ struct DetailedTimingDescriptor {
     flags: u8,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 struct DisplayMode {
     width: u16,
     height: u16,
@@ -205,9 +205,21 @@ impl DisplayMode {
     }
 }
 
-pub fn build(width: u32, height: u32, compatibility_mode: Option<(u32, u32)>) -> Option<[u8; EDID_SIZE]> {
-    let native_120 = DisplayMode::new(width, height, 120)?;
-    let native_60 = native_120.with_refresh(60);
+fn preferred_refresh_hz(refresh_millihertz: u32) -> u16 {
+    if refresh_millihertz >= 90_000 { 120 } else { 60 }
+}
+
+pub fn build(
+    width: u32,
+    height: u32,
+    compatibility_mode: Option<(u32, u32)>,
+    host_refresh_millihertz: u32,
+) -> Option<[u8; EDID_SIZE]> {
+    let preferred_refresh = preferred_refresh_hz(host_refresh_millihertz);
+    let alternate_refresh = if preferred_refresh == 120 { 60 } else { 120 };
+
+    let native_preferred = DisplayMode::new(width, height, preferred_refresh)?;
+    let native_alternate = native_preferred.with_refresh(alternate_refresh);
 
     let compatibility_60 = match compatibility_mode {
         Some((compat_width, compat_height)) if compat_width != width || compat_height != height => {
@@ -215,25 +227,48 @@ pub fn build(width: u32, height: u32, compatibility_mode: Option<(u32, u32)>) ->
         }
         _ => None,
     };
-    let compatibility_120 = compatibility_60.map(|mode| mode.with_refresh(120));
+
+    let compatibility_preferred = compatibility_60.map(|mode| mode.with_refresh(preferred_refresh));
+    let compatibility_alternate = compatibility_60.map(|mode| mode.with_refresh(alternate_refresh));
 
     let wuxga_60 = DisplayMode::new(1920, 1200, 60)?;
     let wuxga_120 = wuxga_60.with_refresh(120);
-
     let wqxga_60 = DisplayMode::new(2560, 1600, 60)?;
     let wqxga_120 = wqxga_60.with_refresh(120);
 
-    // Preserve roughly the same physical-size/DPI model as before:
-    // on a HiDPI host the logical mode represents the desktop size,
-    // while on a 1x host logical and native are identical.
-    let physical_size = compatibility_60.unwrap_or(native_60).physical_size();
+    let physical_size = compatibility_60.unwrap_or(native_preferred).physical_size();
 
-    let preferred_timing = native_60.timing()?;
-    let second_timing = compatibility_120.unwrap_or(native_120).timing()?;
+    // Legacy DTD has a 16-bit pixel clock. Pick two useful modes that
+    // actually fit instead of failing the whole EDID on 4K/5K modes.
+    let candidates = [
+        Some(native_preferred),
+        Some(native_alternate),
+        compatibility_preferred,
+        compatibility_alternate,
+        Some(wqxga_60),
+        Some(wuxga_60),
+    ];
+
+    let mut base_modes = Vec::with_capacity(2);
+    for mode in candidates.into_iter().flatten() {
+        if base_modes.contains(&mode) {
+            continue;
+        }
+
+        if mode.timing()?.descriptor(physical_size).is_some() {
+            base_modes.push(mode);
+            if base_modes.len() == 2 {
+                break;
+            }
+        }
+    }
+
+    let first_mode = *base_modes.first()?;
+    let second_mode = *base_modes.get(1)?;
 
     let descriptors = [
-        preferred_timing.descriptor(physical_size)?,
-        second_timing.descriptor(physical_size)?,
+        first_mode.timing()?.descriptor(physical_size)?,
+        second_mode.timing()?.descriptor(physical_size)?,
         text_descriptor(MONITOR_NAME_TAG, MONITOR_NAME),
         range_limits_descriptor(),
     ];
@@ -251,12 +286,13 @@ pub fn build(width: u32, height: u32, compatibility_mode: Option<(u32, u32)>) ->
         horizontal_size_cm: millimeters_to_centimeters(physical_size.width),
         vertical_size_cm: millimeters_to_centimeters(physical_size.height),
         gamma: GAMMA_2_2,
-        features: PREFERRED_TIMING_PRESENT,
+        features: if first_mode == native_preferred {
+            PREFERRED_TIMING_PRESENT
+        } else {
+            0
+        },
         chromaticity: [0; 10],
         established_timings: [0; 3],
-        // 1920x1200 @ 60 Hz, 16:10. EDID standard timing encoding:
-        // horizontal = (1920 / 8) - 31 = 0xd1,
-        // aspect = 16:10 (0b00), refresh = 60 Hz.
         standard_timings: [
             0xd1, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01,
         ],
@@ -266,16 +302,38 @@ pub fn build(width: u32, height: u32, compatibility_mode: Option<(u32, u32)>) ->
     };
     base.checksum = checksum(base.as_bytes());
 
+    // DisplayID has the wider pixel clock, so important native/logical
+    // modes are always advertised here regardless of legacy DTD limits.
+    let important_modes = [
+        (Some(native_preferred), true),
+        (Some(native_alternate), false),
+        (compatibility_preferred, false),
+        (compatibility_alternate, false),
+    ];
+
+    let fallback_modes = [(wuxga_120, false), (wqxga_120, false), (wqxga_60, false)];
+
     let mut extension_modes = Vec::with_capacity(5);
 
-    if let Some(compatibility_60) = compatibility_60 {
-        // Compatibility @120 is already the second base-block DTD.
-        extension_modes.push((native_120, false));
-        extension_modes.push((compatibility_60, false));
+    for (mode, preferred) in important_modes {
+        let Some(mode) = mode else {
+            continue;
+        };
+
+        if !base_modes.contains(&mode) && !extension_modes.iter().any(|(existing, _)| *existing == mode) {
+            extension_modes.push((mode, preferred));
+        }
     }
 
-    // 1920x1200 @60 is already the base-block standard timing.
-    extension_modes.extend_from_slice(&[(wuxga_120, false), (wqxga_120, false), (wqxga_60, false)]);
+    for (mode, preferred) in fallback_modes {
+        if extension_modes.len() == 5 {
+            break;
+        }
+
+        if !extension_modes.iter().any(|(existing, _)| *existing == mode) {
+            extension_modes.push((mode, preferred));
+        }
+    }
 
     let extension = displayid_extension(&extension_modes)?;
 
@@ -397,4 +455,60 @@ fn copy_bytes<const N: usize>(source: &[u8]) -> [u8; N] {
     let mut bytes = [0u8; N];
     bytes.copy_from_slice(source);
     bytes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_valid_edid(width: u32, height: u32, compatibility_mode: Option<(u32, u32)>, refresh_millihertz: u32) {
+        let edid = build(width, height, compatibility_mode, refresh_millihertz).expect("EDID should build");
+
+        assert_eq!(edid.len(), EDID_SIZE);
+
+        assert_eq!(
+            edid[..BLOCK_SIZE].iter().copied().fold(0u8, u8::wrapping_add),
+            0,
+            "base EDID checksum"
+        );
+
+        assert_eq!(
+            edid[BLOCK_SIZE..].iter().copied().fold(0u8, u8::wrapping_add),
+            0,
+            "extension EDID checksum"
+        );
+    }
+
+    #[test]
+    fn preferred_refresh_tracks_host_refresh() {
+        assert_eq!(preferred_refresh_hz(60_000), 60);
+        assert_eq!(preferred_refresh_hz(75_000), 60);
+        assert_eq!(preferred_refresh_hz(120_000), 120);
+        assert_eq!(preferred_refresh_hz(144_000), 120);
+    }
+
+    #[test]
+    fn macbook_pro_retina_edid_builds() {
+        assert_valid_edid(3456, 2168, Some((1728, 1084)), 120_000);
+    }
+
+    #[test]
+    fn qhd_1x_edid_builds() {
+        assert_valid_edid(2560, 1440, None, 60_000);
+    }
+
+    #[test]
+    fn four_k_60_edid_builds() {
+        assert_valid_edid(3840, 2160, None, 60_000);
+    }
+
+    #[test]
+    fn four_k_120_edid_builds() {
+        assert_valid_edid(3840, 2160, None, 120_000);
+    }
+
+    #[test]
+    fn five_k_hidpi_edid_builds() {
+        assert_valid_edid(5120, 2880, Some((2560, 1440)), 60_000);
+    }
 }

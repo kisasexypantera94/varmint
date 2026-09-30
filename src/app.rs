@@ -19,6 +19,13 @@ use winit::{
     window::{CursorGrabMode, Fullscreen, Window, WindowId},
 };
 
+fn display_refresh_millihertz(window: &Window) -> u32 {
+    window
+        .current_monitor()
+        .and_then(|monitor| monitor.refresh_rate_millihertz())
+        .unwrap_or(60_000)
+}
+
 fn winit_to_linux_key(key: winit::keyboard::KeyCode) -> Option<u16> {
     use winit::keyboard::KeyCode::*;
     Some(match key {
@@ -311,6 +318,7 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
             physical_height: height,
             logical_width: logical_size.width,
             logical_height: logical_size.height,
+            refresh_millihertz: display_refresh_millihertz(self.presenter.as_ref().unwrap().window()),
         });
 
         if self.poll_display() || self.frame_pending {
@@ -345,6 +353,7 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
                     physical_height: height,
                     logical_width: logical_size.width,
                     logical_height: logical_size.height,
+                    refresh_millihertz: display_refresh_millihertz(self.presenter.as_ref().unwrap().window()),
                 });
 
                 self.present(PresentMode::Redraw);

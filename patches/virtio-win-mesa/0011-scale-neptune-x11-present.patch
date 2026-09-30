@@ -368,3 +368,43 @@ diff --git a/src/virtio/neptune/nptunix/meson.build b/src/virtio/neptune/nptunix
    dependency('libdrm', native : true),
  ]
  npt_nptunix_c_args = []
+diff --git a/src/virtio/neptune/npt_swapchain.c b/src/virtio/neptune/npt_swapchain.c
+--- a/src/virtio/neptune/npt_swapchain.c
++++ b/src/virtio/neptune/npt_swapchain.c
+@@ -784,15 +784,31 @@ static HRESULT NPT_STDMETHODCALLTYPE
+ gsc_SetFullscreenState(void *self, BOOL Fullscreen, IDXGIOutput *pTarget)
+ {
+    struct npt_guest_swapchain *s = gsc(self);
++   struct npt_guest_swapchain_common *c = &s->base;
+ 
+    if (!Fullscreen && pTarget)
+       return NPT_DXGI_ERROR_INVALID_CALL;
+ 
++   /*
++    * Serialize the HWND geometry change with Present/Resize.  The WSI caches
++    * the target window geometry at init, so a real fullscreen transition
++    * invalidates it even when the application does not call ResizeBuffers.
++    */
++   mtx_lock(&c->present_mutex);
++   const BOOL was_fullscreen = c->fullscreen;
++
++   HRESULT hr = NPT_S_OK;
++
+    /* Dispatch the windowed <-> fullscreen transition; both directions place
+     * and style the app's own OutputWindow guest-side. */
+-   if (!s->base.fullscreen && Fullscreen)
+-      return gsc_enter_fullscreen(self, s, pTarget);
+-   if (s->base.fullscreen && !Fullscreen)
+-      return gsc_leave_fullscreen(self, s);
+-   return NPT_S_OK;
++   if (!c->fullscreen && Fullscreen)
++      hr = gsc_enter_fullscreen(self, s, pTarget);
++   else if (c->fullscreen && !Fullscreen)
++      hr = gsc_leave_fullscreen(self, s);
++
++   if (c->fullscreen != was_fullscreen)
++      gsc_teardown_wsi(s, false);
++
++   mtx_unlock(&c->present_mutex);
++   return hr;
+ }

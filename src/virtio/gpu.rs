@@ -557,6 +557,7 @@ pub struct Gpu<'a> {
     scanout: Option<Scanout>,
     display_width: u32,
     display_height: u32,
+    display_refresh_millihertz: u32,
     edid_compatibility_mode: Option<(u32, u32)>,
     events_read: u32,
     pending_fences: Vec<PendingFence>,
@@ -575,6 +576,7 @@ impl<'a> Gpu<'a> {
             scanout: None,
             display_width: 0,
             display_height: 0,
+            display_refresh_millihertz: 60_000,
             edid_compatibility_mode: None,
             events_read: 0,
             pending_fences: Vec::new(),
@@ -734,7 +736,12 @@ impl<'a> Gpu<'a> {
 
         let width = self.display_width.max(32);
         let height = self.display_height.max(32);
-        let Some(edid) = edid::build(width, height, self.edid_compatibility_mode) else {
+        let Some(edid) = edid::build(
+            width,
+            height,
+            self.edid_compatibility_mode,
+            self.display_refresh_millihertz,
+        ) else {
             eprintln!("virtio-gpu: cannot build EDID for {}x{}", width, height);
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
@@ -1915,6 +1922,7 @@ pub enum ExternalEvent {
         physical_height: u32,
         logical_width: u32,
         logical_height: u32,
+        refresh_millihertz: u32,
     },
     FenceSignaled {
         ctx_id: u32,
@@ -1934,6 +1942,7 @@ impl<'a> ExternalEventHandler for Gpu<'a> {
                 physical_height,
                 logical_width,
                 logical_height,
+                refresh_millihertz,
             } => {
                 if physical_width == 0 || physical_height == 0 || logical_width == 0 || logical_height == 0 {
                     return;
@@ -1941,6 +1950,7 @@ impl<'a> ExternalEventHandler for Gpu<'a> {
 
                 self.display_width = physical_width;
                 self.display_height = physical_height;
+                self.display_refresh_millihertz = refresh_millihertz;
                 self.edid_compatibility_mode = Some((logical_width, logical_height));
                 self.events_read |= EVENT_DISPLAY;
                 ctx.config_changed();

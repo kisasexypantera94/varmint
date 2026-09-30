@@ -38,6 +38,7 @@ pub enum RuntimeEvent {
         physical_height: u32,
         logical_width: u32,
         logical_height: u32,
+        refresh_millihertz: u32,
     },
     Clipboard(Vec<u8>),
 }
@@ -79,12 +80,14 @@ impl<'a> RuntimeEventPump<'a> {
                 physical_height,
                 logical_width,
                 logical_height,
+                refresh_millihertz,
             } => {
                 self.devices.gpu.send_event(virtio::gpu::ExternalEvent::DisplayResized {
                     physical_width,
                     physical_height,
                     logical_width,
                     logical_height,
+                    refresh_millihertz,
                 });
             }
             RuntimeEvent::Clipboard(payload) => {
