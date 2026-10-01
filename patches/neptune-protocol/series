@@ -1,3 +1,4 @@
 0001-fix-nullable-counted-com-input-array.patch
 0002-fix-null-output-com-getters.patch
 0003-preserve-zero-length-counted-pointer-presence.patch
+0004-skip-failed-ids-for-sync-com-outputs.patch

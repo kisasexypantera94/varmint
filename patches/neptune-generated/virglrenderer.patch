@@ -58,7 +58,7 @@ index cb0a8a19..e8a48ec4 100644
   * Umbrella header for host-side (decoder + dispatch).
   */
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d11classinstance.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d11classinstance.h
-index d956c063..dead7f9e 100644
+index d956c063..f9ba83d5 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_id3d11classinstance.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d11classinstance.h
 @@ -63,7 +63,11 @@ npt_encode_ID3D11ClassInstance_GetClassLinkage_reply(struct npt_cs_encoder *enc,
@@ -74,8 +74,17 @@ index d956c063..dead7f9e 100644
  }
  
  static inline void
+@@ -137,8 +141,6 @@ npt_dispatch_ID3D11ClassInstance_GetClassLinkage(struct npt_dispatch_context *ct
+      * whose type is determined by the caller's riid. */
+     if (args.ppLinkage && *args.ppLinkage)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppLinkage, *args.ppLinkage, NPT_OBJECT_TYPE_ID3D11CLASSLINKAGE);
+-    else if (args.ppLinkage)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppLinkage);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d11device.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d11device.h
-index 2b17b32c..251df08b 100644
+index 2b17b32c..7ada377a 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_id3d11device.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d11device.h
 @@ -205,14 +205,12 @@ npt_decode_ID3D11Device_CreateTexture1D_args_temp(struct npt_cs_decoder *dec,
@@ -189,7 +198,16 @@ index 2b17b32c..251df08b 100644
  }
  
  static inline void
-@@ -5997,7 +5989,11 @@ npt_encode_ID3D11Device1_GetImmediateContext1_reply(struct npt_cs_encoder *enc,
+@@ -5701,8 +5693,6 @@ npt_dispatch_ID3D11Device_GetImmediateContext(struct npt_dispatch_context *ctx,
+      * whose type is determined by the caller's riid. */
+     if (args.ppImmediateContext && *args.ppImmediateContext)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppImmediateContext, *args.ppImmediateContext, NPT_OBJECT_TYPE_ID3D11DEVICECONTEXT);
+-    else if (args.ppImmediateContext)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppImmediateContext);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
+@@ -5997,7 +5987,11 @@ npt_encode_ID3D11Device1_GetImmediateContext1_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -202,7 +220,16 @@ index 2b17b32c..251df08b 100644
  }
  
  static inline void
-@@ -6547,13 +6543,11 @@ npt_decode_ID3D11Device1_CreateDeviceContextState_args_temp(struct npt_cs_decode
+@@ -6071,8 +6065,6 @@ npt_dispatch_ID3D11Device1_GetImmediateContext1(struct npt_dispatch_context *ctx
+      * whose type is determined by the caller's riid. */
+     if (args.ppImmediateContext && *args.ppImmediateContext)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppImmediateContext, *args.ppImmediateContext, NPT_OBJECT_TYPE_ID3D11DEVICECONTEXT1);
+-    else if (args.ppImmediateContext)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppImmediateContext);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
+@@ -6547,13 +6539,11 @@ npt_decode_ID3D11Device1_CreateDeviceContextState_args_temp(struct npt_cs_decode
      /* Decode input parameters from the wire */
      npt_decode_UINT(dec, &args->Flags);
      uint64_t _cnt_pFeatureLevels = 0;
@@ -218,7 +245,7 @@ index 2b17b32c..251df08b 100644
          args->pFeatureLevels = NULL;
      }
      npt_decode_UINT(dec, &args->FeatureLevels);
-@@ -6610,7 +6604,11 @@ npt_encode_ID3D11Device1_CreateDeviceContextState_reply(struct npt_cs_encoder *e
+@@ -6610,7 +6600,11 @@ npt_encode_ID3D11Device1_CreateDeviceContextState_reply(struct npt_cs_encoder *e
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
      if (npt_encode_simple_pointer(enc, args->pChosenFeatureLevel))
          npt_encode_D3D_FEATURE_LEVEL(enc, args->pChosenFeatureLevel);
@@ -231,7 +258,16 @@ index 2b17b32c..251df08b 100644
  }
  
  static inline void
-@@ -7064,7 +7062,11 @@ npt_encode_ID3D11Device2_GetImmediateContext2_reply(struct npt_cs_encoder *enc,
+@@ -6684,8 +6678,6 @@ npt_dispatch_ID3D11Device1_CreateDeviceContextState(struct npt_dispatch_context
+      * whose type is determined by the caller's riid. */
+     if (args.ppContextState && *args.ppContextState)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppContextState, *args.ppContextState, NPT_OBJECT_TYPE_ID3DDEVICECONTEXTSTATE);
+-    else if (args.ppContextState)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppContextState);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
+@@ -7064,7 +7056,11 @@ npt_encode_ID3D11Device2_GetImmediateContext2_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -244,7 +280,16 @@ index 2b17b32c..251df08b 100644
  }
  
  static inline void
-@@ -7630,14 +7632,12 @@ npt_decode_ID3D11Device3_CreateTexture2D1_args_temp(struct npt_cs_decoder *dec,
+@@ -7138,8 +7134,6 @@ npt_dispatch_ID3D11Device2_GetImmediateContext2(struct npt_dispatch_context *ctx
+      * whose type is determined by the caller's riid. */
+     if (args.ppImmediateContext && *args.ppImmediateContext)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppImmediateContext, *args.ppImmediateContext, NPT_OBJECT_TYPE_ID3D11DEVICECONTEXT2);
+-    else if (args.ppImmediateContext)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppImmediateContext);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
+@@ -7630,14 +7624,12 @@ npt_decode_ID3D11Device3_CreateTexture2D1_args_temp(struct npt_cs_decoder *dec,
          return;
      }
      uint64_t _cnt_pInitialData = 0;
@@ -261,7 +306,7 @@ index 2b17b32c..251df08b 100644
          args->pInitialData = NULL;
      }
      {
-@@ -7795,14 +7795,12 @@ npt_decode_ID3D11Device3_CreateTexture3D1_args_temp(struct npt_cs_decoder *dec,
+@@ -7795,14 +7787,12 @@ npt_decode_ID3D11Device3_CreateTexture3D1_args_temp(struct npt_cs_decoder *dec,
          return;
      }
      uint64_t _cnt_pInitialData = 0;
@@ -278,7 +323,7 @@ index 2b17b32c..251df08b 100644
          args->pInitialData = NULL;
      }
      {
-@@ -8727,7 +8725,11 @@ npt_encode_ID3D11Device3_GetImmediateContext3_reply(struct npt_cs_encoder *enc,
+@@ -8727,7 +8717,11 @@ npt_encode_ID3D11Device3_GetImmediateContext3_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -291,8 +336,17 @@ index 2b17b32c..251df08b 100644
  }
  
  static inline void
+@@ -8801,8 +8795,6 @@ npt_dispatch_ID3D11Device3_GetImmediateContext3(struct npt_dispatch_context *ctx
+      * whose type is determined by the caller's riid. */
+     if (args.ppImmediateContext && *args.ppImmediateContext)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppImmediateContext, *args.ppImmediateContext, NPT_OBJECT_TYPE_ID3D11DEVICECONTEXT3);
+-    else if (args.ppImmediateContext)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppImmediateContext);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d11devicechild.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d11devicechild.h
-index 45063c31..9728867d 100644
+index 45063c31..d87f33a8 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_id3d11devicechild.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d11devicechild.h
 @@ -63,7 +63,11 @@ npt_encode_ID3D11DeviceChild_GetDevice_reply(struct npt_cs_encoder *enc,
@@ -308,8 +362,17 @@ index 45063c31..9728867d 100644
  }
  
  static inline void
+@@ -137,8 +141,6 @@ npt_dispatch_ID3D11DeviceChild_GetDevice(struct npt_dispatch_context *ctx,
+      * whose type is determined by the caller's riid. */
+     if (args.ppDevice && *args.ppDevice)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppDevice, *args.ppDevice, NPT_OBJECT_TYPE_ID3D11DEVICE);
+-    else if (args.ppDevice)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppDevice);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d11devicecontext.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d11devicecontext.h
-index d23f7c98..7e1394f5 100644
+index d23f7c98..55fa872d 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_id3d11devicecontext.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d11devicecontext.h
 @@ -1564,23 +1564,19 @@ npt_decode_ID3D11DeviceContext_IASetVertexBuffers_args_temp(struct npt_cs_decode
@@ -438,7 +501,7 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -9154,9 +9147,14 @@ npt_dispatch_ID3D11DeviceContext_VSGetConstantBuffers(struct npt_dispatch_contex
+@@ -9154,9 +9147,11 @@ npt_dispatch_ID3D11DeviceContext_VSGetConstantBuffers(struct npt_dispatch_contex
       * whose type is determined by the caller's riid. */
      if (args.ppConstantBuffers && args._guest_ids_ppConstantBuffers) {
          const uint32_t _n = args._guest_id_count_ppConstantBuffers;
@@ -449,14 +512,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppConstantBuffers[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppConstantBuffers[_i], args.ppConstantBuffers[_i], NPT_OBJECT_TYPE_ID3D11BUFFER);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppConstantBuffers[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -9228,7 +9226,14 @@ npt_encode_ID3D11DeviceContext_PSGetShaderResources_reply(struct npt_cs_encoder
+@@ -9228,7 +9223,14 @@ npt_encode_ID3D11DeviceContext_PSGetShaderResources_reply(struct npt_cs_encoder
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -472,7 +532,7 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -9302,9 +9307,14 @@ npt_dispatch_ID3D11DeviceContext_PSGetShaderResources(struct npt_dispatch_contex
+@@ -9302,9 +9304,11 @@ npt_dispatch_ID3D11DeviceContext_PSGetShaderResources(struct npt_dispatch_contex
       * whose type is determined by the caller's riid. */
      if (args.ppShaderResourceViews && args._guest_ids_ppShaderResourceViews) {
          const uint32_t _n = args._guest_id_count_ppShaderResourceViews;
@@ -483,14 +543,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppShaderResourceViews[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppShaderResourceViews[_i], args.ppShaderResourceViews[_i], NPT_OBJECT_TYPE_ID3D11SHADERRESOURCEVIEW);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppShaderResourceViews[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -9394,8 +9404,19 @@ npt_encode_ID3D11DeviceContext_PSGetShader_reply(struct npt_cs_encoder *enc,
+@@ -9394,8 +9398,19 @@ npt_encode_ID3D11DeviceContext_PSGetShader_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -512,8 +569,12 @@ index d23f7c98..7e1394f5 100644
      if (npt_encode_simple_pointer(enc, args->pNumClassInstances))
          npt_encode_UINT(enc, args->pNumClassInstances);
  }
-@@ -9475,9 +9496,14 @@ npt_dispatch_ID3D11DeviceContext_PSGetShader(struct npt_dispatch_context *ctx,
-         npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppPixelShader);
+@@ -9471,13 +9486,13 @@ npt_dispatch_ID3D11DeviceContext_PSGetShader(struct npt_dispatch_context *ctx,
+      * whose type is determined by the caller's riid. */
+     if (args.ppPixelShader && *args.ppPixelShader)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppPixelShader, *args.ppPixelShader, NPT_OBJECT_TYPE_ID3D11PIXELSHADER);
+-    else if (args.ppPixelShader)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppPixelShader);
      if (args.ppClassInstances && args._guest_ids_ppClassInstances) {
          const uint32_t _n = args._guest_id_count_ppClassInstances;
 -        for (uint32_t _i = 0; _i < _n; _i++)
@@ -523,14 +584,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppClassInstances[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppClassInstances[_i], args.ppClassInstances[_i], NPT_OBJECT_TYPE_ID3D11CLASSINSTANCE);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppClassInstances[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -9549,7 +9575,14 @@ npt_encode_ID3D11DeviceContext_PSGetSamplers_reply(struct npt_cs_encoder *enc,
+@@ -9549,7 +9564,14 @@ npt_encode_ID3D11DeviceContext_PSGetSamplers_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -546,7 +604,7 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -9623,9 +9656,14 @@ npt_dispatch_ID3D11DeviceContext_PSGetSamplers(struct npt_dispatch_context *ctx,
+@@ -9623,9 +9645,11 @@ npt_dispatch_ID3D11DeviceContext_PSGetSamplers(struct npt_dispatch_context *ctx,
       * whose type is determined by the caller's riid. */
      if (args.ppSamplers && args._guest_ids_ppSamplers) {
          const uint32_t _n = args._guest_id_count_ppSamplers;
@@ -557,14 +615,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppSamplers[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppSamplers[_i], args.ppSamplers[_i], NPT_OBJECT_TYPE_ID3D11SAMPLERSTATE);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppSamplers[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -9715,8 +9753,19 @@ npt_encode_ID3D11DeviceContext_VSGetShader_reply(struct npt_cs_encoder *enc,
+@@ -9715,8 +9739,19 @@ npt_encode_ID3D11DeviceContext_VSGetShader_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -586,8 +641,12 @@ index d23f7c98..7e1394f5 100644
      if (npt_encode_simple_pointer(enc, args->pNumClassInstances))
          npt_encode_UINT(enc, args->pNumClassInstances);
  }
-@@ -9796,9 +9845,14 @@ npt_dispatch_ID3D11DeviceContext_VSGetShader(struct npt_dispatch_context *ctx,
-         npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppVertexShader);
+@@ -9792,13 +9827,13 @@ npt_dispatch_ID3D11DeviceContext_VSGetShader(struct npt_dispatch_context *ctx,
+      * whose type is determined by the caller's riid. */
+     if (args.ppVertexShader && *args.ppVertexShader)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppVertexShader, *args.ppVertexShader, NPT_OBJECT_TYPE_ID3D11VERTEXSHADER);
+-    else if (args.ppVertexShader)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppVertexShader);
      if (args.ppClassInstances && args._guest_ids_ppClassInstances) {
          const uint32_t _n = args._guest_id_count_ppClassInstances;
 -        for (uint32_t _i = 0; _i < _n; _i++)
@@ -597,14 +656,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppClassInstances[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppClassInstances[_i], args.ppClassInstances[_i], NPT_OBJECT_TYPE_ID3D11CLASSINSTANCE);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppClassInstances[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -9870,7 +9924,14 @@ npt_encode_ID3D11DeviceContext_PSGetConstantBuffers_reply(struct npt_cs_encoder
+@@ -9870,7 +9905,14 @@ npt_encode_ID3D11DeviceContext_PSGetConstantBuffers_reply(struct npt_cs_encoder
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -620,7 +676,7 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -9944,9 +10005,14 @@ npt_dispatch_ID3D11DeviceContext_PSGetConstantBuffers(struct npt_dispatch_contex
+@@ -9944,9 +9986,11 @@ npt_dispatch_ID3D11DeviceContext_PSGetConstantBuffers(struct npt_dispatch_contex
       * whose type is determined by the caller's riid. */
      if (args.ppConstantBuffers && args._guest_ids_ppConstantBuffers) {
          const uint32_t _n = args._guest_id_count_ppConstantBuffers;
@@ -631,14 +687,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppConstantBuffers[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppConstantBuffers[_i], args.ppConstantBuffers[_i], NPT_OBJECT_TYPE_ID3D11BUFFER);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppConstantBuffers[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -10007,7 +10073,11 @@ npt_encode_ID3D11DeviceContext_IAGetInputLayout_reply(struct npt_cs_encoder *enc
+@@ -10007,7 +10051,11 @@ npt_encode_ID3D11DeviceContext_IAGetInputLayout_reply(struct npt_cs_encoder *enc
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -651,7 +704,16 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -10171,7 +10241,14 @@ npt_encode_ID3D11DeviceContext_IAGetVertexBuffers_reply(struct npt_cs_encoder *e
+@@ -10081,8 +10129,6 @@ npt_dispatch_ID3D11DeviceContext_IAGetInputLayout(struct npt_dispatch_context *c
+      * whose type is determined by the caller's riid. */
+     if (args.ppInputLayout && *args.ppInputLayout)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppInputLayout, *args.ppInputLayout, NPT_OBJECT_TYPE_ID3D11INPUTLAYOUT);
+-    else if (args.ppInputLayout)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppInputLayout);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
+@@ -10171,7 +10217,14 @@ npt_encode_ID3D11DeviceContext_IAGetVertexBuffers_reply(struct npt_cs_encoder *e
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -667,7 +729,7 @@ index d23f7c98..7e1394f5 100644
      if (args->pStrides) {
          npt_encode_array_count(enc, args->NumBuffers);
          npt_encode_UINT_array(enc, args->pStrides, args->NumBuffers);
-@@ -10257,9 +10334,14 @@ npt_dispatch_ID3D11DeviceContext_IAGetVertexBuffers(struct npt_dispatch_context
+@@ -10257,9 +10310,11 @@ npt_dispatch_ID3D11DeviceContext_IAGetVertexBuffers(struct npt_dispatch_context
       * whose type is determined by the caller's riid. */
      if (args.ppVertexBuffers && args._guest_ids_ppVertexBuffers) {
          const uint32_t _n = args._guest_id_count_ppVertexBuffers;
@@ -678,14 +740,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppVertexBuffers[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppVertexBuffers[_i], args.ppVertexBuffers[_i], NPT_OBJECT_TYPE_ID3D11BUFFER);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppVertexBuffers[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -10330,7 +10412,11 @@ npt_encode_ID3D11DeviceContext_IAGetIndexBuffer_reply(struct npt_cs_encoder *enc
+@@ -10330,7 +10385,11 @@ npt_encode_ID3D11DeviceContext_IAGetIndexBuffer_reply(struct npt_cs_encoder *enc
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -698,7 +757,16 @@ index d23f7c98..7e1394f5 100644
      if (npt_encode_simple_pointer(enc, args->Format))
          npt_encode_DXGI_FORMAT(enc, args->Format);
      if (npt_encode_simple_pointer(enc, args->Offset))
-@@ -10480,7 +10566,14 @@ npt_encode_ID3D11DeviceContext_GSGetConstantBuffers_reply(struct npt_cs_encoder
+@@ -10408,8 +10467,6 @@ npt_dispatch_ID3D11DeviceContext_IAGetIndexBuffer(struct npt_dispatch_context *c
+      * whose type is determined by the caller's riid. */
+     if (args.pIndexBuffer && *args.pIndexBuffer)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_pIndexBuffer, *args.pIndexBuffer, NPT_OBJECT_TYPE_ID3D11BUFFER);
+-    else if (args.pIndexBuffer)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_pIndexBuffer);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
+@@ -10480,7 +10537,14 @@ npt_encode_ID3D11DeviceContext_GSGetConstantBuffers_reply(struct npt_cs_encoder
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -714,7 +782,7 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -10554,9 +10647,14 @@ npt_dispatch_ID3D11DeviceContext_GSGetConstantBuffers(struct npt_dispatch_contex
+@@ -10554,9 +10618,11 @@ npt_dispatch_ID3D11DeviceContext_GSGetConstantBuffers(struct npt_dispatch_contex
       * whose type is determined by the caller's riid. */
      if (args.ppConstantBuffers && args._guest_ids_ppConstantBuffers) {
          const uint32_t _n = args._guest_id_count_ppConstantBuffers;
@@ -725,14 +793,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppConstantBuffers[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppConstantBuffers[_i], args.ppConstantBuffers[_i], NPT_OBJECT_TYPE_ID3D11BUFFER);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppConstantBuffers[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -10646,8 +10744,19 @@ npt_encode_ID3D11DeviceContext_GSGetShader_reply(struct npt_cs_encoder *enc,
+@@ -10646,8 +10712,19 @@ npt_encode_ID3D11DeviceContext_GSGetShader_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -754,8 +819,12 @@ index d23f7c98..7e1394f5 100644
      if (npt_encode_simple_pointer(enc, args->pNumClassInstances))
          npt_encode_UINT(enc, args->pNumClassInstances);
  }
-@@ -10727,9 +10836,14 @@ npt_dispatch_ID3D11DeviceContext_GSGetShader(struct npt_dispatch_context *ctx,
-         npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppGeometryShader);
+@@ -10723,13 +10800,13 @@ npt_dispatch_ID3D11DeviceContext_GSGetShader(struct npt_dispatch_context *ctx,
+      * whose type is determined by the caller's riid. */
+     if (args.ppGeometryShader && *args.ppGeometryShader)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppGeometryShader, *args.ppGeometryShader, NPT_OBJECT_TYPE_ID3D11GEOMETRYSHADER);
+-    else if (args.ppGeometryShader)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppGeometryShader);
      if (args.ppClassInstances && args._guest_ids_ppClassInstances) {
          const uint32_t _n = args._guest_id_count_ppClassInstances;
 -        for (uint32_t _i = 0; _i < _n; _i++)
@@ -765,14 +834,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppClassInstances[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppClassInstances[_i], args.ppClassInstances[_i], NPT_OBJECT_TYPE_ID3D11CLASSINSTANCE);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppClassInstances[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -10923,7 +11037,14 @@ npt_encode_ID3D11DeviceContext_VSGetShaderResources_reply(struct npt_cs_encoder
+@@ -10923,7 +11000,14 @@ npt_encode_ID3D11DeviceContext_VSGetShaderResources_reply(struct npt_cs_encoder
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -788,7 +854,7 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -10997,9 +11118,14 @@ npt_dispatch_ID3D11DeviceContext_VSGetShaderResources(struct npt_dispatch_contex
+@@ -10997,9 +11081,11 @@ npt_dispatch_ID3D11DeviceContext_VSGetShaderResources(struct npt_dispatch_contex
       * whose type is determined by the caller's riid. */
      if (args.ppShaderResourceViews && args._guest_ids_ppShaderResourceViews) {
          const uint32_t _n = args._guest_id_count_ppShaderResourceViews;
@@ -799,14 +865,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppShaderResourceViews[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppShaderResourceViews[_i], args.ppShaderResourceViews[_i], NPT_OBJECT_TYPE_ID3D11SHADERRESOURCEVIEW);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppShaderResourceViews[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -11071,7 +11197,14 @@ npt_encode_ID3D11DeviceContext_VSGetSamplers_reply(struct npt_cs_encoder *enc,
+@@ -11071,7 +11157,14 @@ npt_encode_ID3D11DeviceContext_VSGetSamplers_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -822,7 +885,7 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -11145,9 +11278,14 @@ npt_dispatch_ID3D11DeviceContext_VSGetSamplers(struct npt_dispatch_context *ctx,
+@@ -11145,9 +11238,11 @@ npt_dispatch_ID3D11DeviceContext_VSGetSamplers(struct npt_dispatch_context *ctx,
       * whose type is determined by the caller's riid. */
      if (args.ppSamplers && args._guest_ids_ppSamplers) {
          const uint32_t _n = args._guest_id_count_ppSamplers;
@@ -833,14 +896,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppSamplers[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppSamplers[_i], args.ppSamplers[_i], NPT_OBJECT_TYPE_ID3D11SAMPLERSTATE);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppSamplers[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -11213,7 +11351,11 @@ npt_encode_ID3D11DeviceContext_GetPredication_reply(struct npt_cs_encoder *enc,
+@@ -11213,7 +11308,11 @@ npt_encode_ID3D11DeviceContext_GetPredication_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -853,7 +913,16 @@ index d23f7c98..7e1394f5 100644
      if (npt_encode_simple_pointer(enc, args->pPredicateValue))
          npt_encode_BOOL(enc, args->pPredicateValue);
  }
-@@ -11361,7 +11503,14 @@ npt_encode_ID3D11DeviceContext_GSGetShaderResources_reply(struct npt_cs_encoder
+@@ -11289,8 +11388,6 @@ npt_dispatch_ID3D11DeviceContext_GetPredication(struct npt_dispatch_context *ctx
+      * whose type is determined by the caller's riid. */
+     if (args.ppPredicate && *args.ppPredicate)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppPredicate, *args.ppPredicate, NPT_OBJECT_TYPE_ID3D11PREDICATE);
+-    else if (args.ppPredicate)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppPredicate);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
+@@ -11361,7 +11458,14 @@ npt_encode_ID3D11DeviceContext_GSGetShaderResources_reply(struct npt_cs_encoder
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -869,7 +938,7 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -11435,9 +11584,14 @@ npt_dispatch_ID3D11DeviceContext_GSGetShaderResources(struct npt_dispatch_contex
+@@ -11435,9 +11539,11 @@ npt_dispatch_ID3D11DeviceContext_GSGetShaderResources(struct npt_dispatch_contex
       * whose type is determined by the caller's riid. */
      if (args.ppShaderResourceViews && args._guest_ids_ppShaderResourceViews) {
          const uint32_t _n = args._guest_id_count_ppShaderResourceViews;
@@ -880,14 +949,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppShaderResourceViews[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppShaderResourceViews[_i], args.ppShaderResourceViews[_i], NPT_OBJECT_TYPE_ID3D11SHADERRESOURCEVIEW);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppShaderResourceViews[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -11509,7 +11663,14 @@ npt_encode_ID3D11DeviceContext_GSGetSamplers_reply(struct npt_cs_encoder *enc,
+@@ -11509,7 +11615,14 @@ npt_encode_ID3D11DeviceContext_GSGetSamplers_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -903,7 +969,7 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -11583,9 +11744,14 @@ npt_dispatch_ID3D11DeviceContext_GSGetSamplers(struct npt_dispatch_context *ctx,
+@@ -11583,9 +11696,11 @@ npt_dispatch_ID3D11DeviceContext_GSGetSamplers(struct npt_dispatch_context *ctx,
       * whose type is determined by the caller's riid. */
      if (args.ppSamplers && args._guest_ids_ppSamplers) {
          const uint32_t _n = args._guest_id_count_ppSamplers;
@@ -914,14 +980,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppSamplers[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppSamplers[_i], args.ppSamplers[_i], NPT_OBJECT_TYPE_ID3D11SAMPLERSTATE);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppSamplers[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -11669,8 +11835,19 @@ npt_encode_ID3D11DeviceContext_OMGetRenderTargets_reply(struct npt_cs_encoder *e
+@@ -11669,8 +11784,19 @@ npt_encode_ID3D11DeviceContext_OMGetRenderTargets_reply(struct npt_cs_encoder *e
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -943,7 +1006,7 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -11744,9 +11921,14 @@ npt_dispatch_ID3D11DeviceContext_OMGetRenderTargets(struct npt_dispatch_context
+@@ -11744,14 +11870,14 @@ npt_dispatch_ID3D11DeviceContext_OMGetRenderTargets(struct npt_dispatch_context
       * whose type is determined by the caller's riid. */
      if (args.ppRenderTargetViews && args._guest_ids_ppRenderTargetViews) {
          const uint32_t _n = args._guest_id_count_ppRenderTargetViews;
@@ -954,14 +1017,16 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppRenderTargetViews[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppRenderTargetViews[_i], args.ppRenderTargetViews[_i], NPT_OBJECT_TYPE_ID3D11RENDERTARGETVIEW);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppRenderTargetViews[_i]);
 +        }
      }
      if (args.ppDepthStencilView && *args.ppDepthStencilView)
          npt_cs_handle_register_guest_id(ctx, args._guest_id_ppDepthStencilView, *args.ppDepthStencilView, NPT_OBJECT_TYPE_ID3D11DEPTHSTENCILVIEW);
-@@ -11860,9 +12042,27 @@ npt_encode_ID3D11DeviceContext_OMGetRenderTargetsAndUnorderedAccessViews_reply(s
+-    else if (args.ppDepthStencilView)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppDepthStencilView);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
+@@ -11860,9 +11986,27 @@ npt_encode_ID3D11DeviceContext_OMGetRenderTargetsAndUnorderedAccessViews_reply(s
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -992,7 +1057,7 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -11936,9 +12136,14 @@ npt_dispatch_ID3D11DeviceContext_OMGetRenderTargetsAndUnorderedAccessViews(struc
+@@ -11936,19 +12080,21 @@ npt_dispatch_ID3D11DeviceContext_OMGetRenderTargetsAndUnorderedAccessViews(struc
       * whose type is determined by the caller's riid. */
      if (args.ppRenderTargetViews && args._guest_ids_ppRenderTargetViews) {
          const uint32_t _n = args._guest_id_count_ppRenderTargetViews;
@@ -1003,15 +1068,12 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppRenderTargetViews[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppRenderTargetViews[_i], args.ppRenderTargetViews[_i], NPT_OBJECT_TYPE_ID3D11RENDERTARGETVIEW);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppRenderTargetViews[_i]);
 +        }
      }
      if (args.ppDepthStencilView && *args.ppDepthStencilView)
          npt_cs_handle_register_guest_id(ctx, args._guest_id_ppDepthStencilView, *args.ppDepthStencilView, NPT_OBJECT_TYPE_ID3D11DEPTHSTENCILVIEW);
-@@ -11946,9 +12151,14 @@ npt_dispatch_ID3D11DeviceContext_OMGetRenderTargetsAndUnorderedAccessViews(struc
-         npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppDepthStencilView);
+-    else if (args.ppDepthStencilView)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppDepthStencilView);
      if (args.ppUnorderedAccessViews && args._guest_ids_ppUnorderedAccessViews) {
          const uint32_t _n = args._guest_id_count_ppUnorderedAccessViews;
 -        for (uint32_t _i = 0; _i < _n; _i++)
@@ -1021,14 +1083,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppUnorderedAccessViews[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppUnorderedAccessViews[_i], args.ppUnorderedAccessViews[_i], NPT_OBJECT_TYPE_ID3D11UNORDEREDACCESSVIEW);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppUnorderedAccessViews[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -12019,7 +12229,11 @@ npt_encode_ID3D11DeviceContext_OMGetBlendState_reply(struct npt_cs_encoder *enc,
+@@ -12019,7 +12165,11 @@ npt_encode_ID3D11DeviceContext_OMGetBlendState_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1041,7 +1100,16 @@ index d23f7c98..7e1394f5 100644
      if (args->BlendFactor) {
          npt_encode_array_count(enc, 4);
          npt_encode_FLOAT_array(enc, (const FLOAT *)args->BlendFactor, 4);
-@@ -12167,7 +12381,11 @@ npt_encode_ID3D11DeviceContext_OMGetDepthStencilState_reply(struct npt_cs_encode
+@@ -12101,8 +12251,6 @@ npt_dispatch_ID3D11DeviceContext_OMGetBlendState(struct npt_dispatch_context *ct
+      * whose type is determined by the caller's riid. */
+     if (args.ppBlendState && *args.ppBlendState)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppBlendState, *args.ppBlendState, NPT_OBJECT_TYPE_ID3D11BLENDSTATE);
+-    else if (args.ppBlendState)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppBlendState);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
+@@ -12167,7 +12315,11 @@ npt_encode_ID3D11DeviceContext_OMGetDepthStencilState_reply(struct npt_cs_encode
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1054,7 +1122,16 @@ index d23f7c98..7e1394f5 100644
      if (npt_encode_simple_pointer(enc, args->pStencilRef))
          npt_encode_UINT(enc, args->pStencilRef);
  }
-@@ -12312,7 +12530,14 @@ npt_encode_ID3D11DeviceContext_SOGetTargets_reply(struct npt_cs_encoder *enc,
+@@ -12243,8 +12395,6 @@ npt_dispatch_ID3D11DeviceContext_OMGetDepthStencilState(struct npt_dispatch_cont
+      * whose type is determined by the caller's riid. */
+     if (args.ppDepthStencilState && *args.ppDepthStencilState)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppDepthStencilState, *args.ppDepthStencilState, NPT_OBJECT_TYPE_ID3D11DEPTHSTENCILSTATE);
+-    else if (args.ppDepthStencilState)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppDepthStencilState);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
+@@ -12312,7 +12462,14 @@ npt_encode_ID3D11DeviceContext_SOGetTargets_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1070,7 +1147,7 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -12386,9 +12611,14 @@ npt_dispatch_ID3D11DeviceContext_SOGetTargets(struct npt_dispatch_context *ctx,
+@@ -12386,9 +12543,11 @@ npt_dispatch_ID3D11DeviceContext_SOGetTargets(struct npt_dispatch_context *ctx,
       * whose type is determined by the caller's riid. */
      if (args.ppSOTargets && args._guest_ids_ppSOTargets) {
          const uint32_t _n = args._guest_id_count_ppSOTargets;
@@ -1081,14 +1158,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppSOTargets[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppSOTargets[_i], args.ppSOTargets[_i], NPT_OBJECT_TYPE_ID3D11BUFFER);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppSOTargets[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -12449,7 +12679,11 @@ npt_encode_ID3D11DeviceContext_RSGetState_reply(struct npt_cs_encoder *enc,
+@@ -12449,7 +12608,11 @@ npt_encode_ID3D11DeviceContext_RSGetState_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1101,7 +1175,16 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -12883,7 +13117,14 @@ npt_encode_ID3D11DeviceContext_HSGetShaderResources_reply(struct npt_cs_encoder
+@@ -12523,8 +12686,6 @@ npt_dispatch_ID3D11DeviceContext_RSGetState(struct npt_dispatch_context *ctx,
+      * whose type is determined by the caller's riid. */
+     if (args.ppRasterizerState && *args.ppRasterizerState)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppRasterizerState, *args.ppRasterizerState, NPT_OBJECT_TYPE_ID3D11RASTERIZERSTATE);
+-    else if (args.ppRasterizerState)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppRasterizerState);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
+@@ -12883,7 +13044,14 @@ npt_encode_ID3D11DeviceContext_HSGetShaderResources_reply(struct npt_cs_encoder
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1117,7 +1200,7 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -12957,9 +13198,14 @@ npt_dispatch_ID3D11DeviceContext_HSGetShaderResources(struct npt_dispatch_contex
+@@ -12957,9 +13125,11 @@ npt_dispatch_ID3D11DeviceContext_HSGetShaderResources(struct npt_dispatch_contex
       * whose type is determined by the caller's riid. */
      if (args.ppShaderResourceViews && args._guest_ids_ppShaderResourceViews) {
          const uint32_t _n = args._guest_id_count_ppShaderResourceViews;
@@ -1128,14 +1211,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppShaderResourceViews[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppShaderResourceViews[_i], args.ppShaderResourceViews[_i], NPT_OBJECT_TYPE_ID3D11SHADERRESOURCEVIEW);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppShaderResourceViews[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -13049,8 +13295,19 @@ npt_encode_ID3D11DeviceContext_HSGetShader_reply(struct npt_cs_encoder *enc,
+@@ -13049,8 +13219,19 @@ npt_encode_ID3D11DeviceContext_HSGetShader_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1157,8 +1237,12 @@ index d23f7c98..7e1394f5 100644
      if (npt_encode_simple_pointer(enc, args->pNumClassInstances))
          npt_encode_UINT(enc, args->pNumClassInstances);
  }
-@@ -13130,9 +13387,14 @@ npt_dispatch_ID3D11DeviceContext_HSGetShader(struct npt_dispatch_context *ctx,
-         npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppHullShader);
+@@ -13126,13 +13307,13 @@ npt_dispatch_ID3D11DeviceContext_HSGetShader(struct npt_dispatch_context *ctx,
+      * whose type is determined by the caller's riid. */
+     if (args.ppHullShader && *args.ppHullShader)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppHullShader, *args.ppHullShader, NPT_OBJECT_TYPE_ID3D11HULLSHADER);
+-    else if (args.ppHullShader)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppHullShader);
      if (args.ppClassInstances && args._guest_ids_ppClassInstances) {
          const uint32_t _n = args._guest_id_count_ppClassInstances;
 -        for (uint32_t _i = 0; _i < _n; _i++)
@@ -1168,14 +1252,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppClassInstances[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppClassInstances[_i], args.ppClassInstances[_i], NPT_OBJECT_TYPE_ID3D11CLASSINSTANCE);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppClassInstances[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -13204,7 +13466,14 @@ npt_encode_ID3D11DeviceContext_HSGetSamplers_reply(struct npt_cs_encoder *enc,
+@@ -13204,7 +13385,14 @@ npt_encode_ID3D11DeviceContext_HSGetSamplers_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1191,7 +1272,7 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -13278,9 +13547,14 @@ npt_dispatch_ID3D11DeviceContext_HSGetSamplers(struct npt_dispatch_context *ctx,
+@@ -13278,9 +13466,11 @@ npt_dispatch_ID3D11DeviceContext_HSGetSamplers(struct npt_dispatch_context *ctx,
       * whose type is determined by the caller's riid. */
      if (args.ppSamplers && args._guest_ids_ppSamplers) {
          const uint32_t _n = args._guest_id_count_ppSamplers;
@@ -1202,14 +1283,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppSamplers[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppSamplers[_i], args.ppSamplers[_i], NPT_OBJECT_TYPE_ID3D11SAMPLERSTATE);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppSamplers[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -13352,7 +13626,14 @@ npt_encode_ID3D11DeviceContext_HSGetConstantBuffers_reply(struct npt_cs_encoder
+@@ -13352,7 +13542,14 @@ npt_encode_ID3D11DeviceContext_HSGetConstantBuffers_reply(struct npt_cs_encoder
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1225,7 +1303,7 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -13426,9 +13707,14 @@ npt_dispatch_ID3D11DeviceContext_HSGetConstantBuffers(struct npt_dispatch_contex
+@@ -13426,9 +13623,11 @@ npt_dispatch_ID3D11DeviceContext_HSGetConstantBuffers(struct npt_dispatch_contex
       * whose type is determined by the caller's riid. */
      if (args.ppConstantBuffers && args._guest_ids_ppConstantBuffers) {
          const uint32_t _n = args._guest_id_count_ppConstantBuffers;
@@ -1236,14 +1314,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppConstantBuffers[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppConstantBuffers[_i], args.ppConstantBuffers[_i], NPT_OBJECT_TYPE_ID3D11BUFFER);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppConstantBuffers[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -13500,7 +13786,14 @@ npt_encode_ID3D11DeviceContext_DSGetShaderResources_reply(struct npt_cs_encoder
+@@ -13500,7 +13699,14 @@ npt_encode_ID3D11DeviceContext_DSGetShaderResources_reply(struct npt_cs_encoder
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1259,7 +1334,7 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -13574,9 +13867,14 @@ npt_dispatch_ID3D11DeviceContext_DSGetShaderResources(struct npt_dispatch_contex
+@@ -13574,9 +13780,11 @@ npt_dispatch_ID3D11DeviceContext_DSGetShaderResources(struct npt_dispatch_contex
       * whose type is determined by the caller's riid. */
      if (args.ppShaderResourceViews && args._guest_ids_ppShaderResourceViews) {
          const uint32_t _n = args._guest_id_count_ppShaderResourceViews;
@@ -1270,14 +1345,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppShaderResourceViews[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppShaderResourceViews[_i], args.ppShaderResourceViews[_i], NPT_OBJECT_TYPE_ID3D11SHADERRESOURCEVIEW);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppShaderResourceViews[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -13666,8 +13964,19 @@ npt_encode_ID3D11DeviceContext_DSGetShader_reply(struct npt_cs_encoder *enc,
+@@ -13666,8 +13874,19 @@ npt_encode_ID3D11DeviceContext_DSGetShader_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1299,8 +1371,12 @@ index d23f7c98..7e1394f5 100644
      if (npt_encode_simple_pointer(enc, args->pNumClassInstances))
          npt_encode_UINT(enc, args->pNumClassInstances);
  }
-@@ -13747,9 +14056,14 @@ npt_dispatch_ID3D11DeviceContext_DSGetShader(struct npt_dispatch_context *ctx,
-         npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppDomainShader);
+@@ -13743,13 +13962,13 @@ npt_dispatch_ID3D11DeviceContext_DSGetShader(struct npt_dispatch_context *ctx,
+      * whose type is determined by the caller's riid. */
+     if (args.ppDomainShader && *args.ppDomainShader)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppDomainShader, *args.ppDomainShader, NPT_OBJECT_TYPE_ID3D11DOMAINSHADER);
+-    else if (args.ppDomainShader)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppDomainShader);
      if (args.ppClassInstances && args._guest_ids_ppClassInstances) {
          const uint32_t _n = args._guest_id_count_ppClassInstances;
 -        for (uint32_t _i = 0; _i < _n; _i++)
@@ -1310,14 +1386,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppClassInstances[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppClassInstances[_i], args.ppClassInstances[_i], NPT_OBJECT_TYPE_ID3D11CLASSINSTANCE);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppClassInstances[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -13821,7 +14135,14 @@ npt_encode_ID3D11DeviceContext_DSGetSamplers_reply(struct npt_cs_encoder *enc,
+@@ -13821,7 +14040,14 @@ npt_encode_ID3D11DeviceContext_DSGetSamplers_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1333,7 +1406,7 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -13895,9 +14216,14 @@ npt_dispatch_ID3D11DeviceContext_DSGetSamplers(struct npt_dispatch_context *ctx,
+@@ -13895,9 +14121,11 @@ npt_dispatch_ID3D11DeviceContext_DSGetSamplers(struct npt_dispatch_context *ctx,
       * whose type is determined by the caller's riid. */
      if (args.ppSamplers && args._guest_ids_ppSamplers) {
          const uint32_t _n = args._guest_id_count_ppSamplers;
@@ -1344,14 +1417,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppSamplers[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppSamplers[_i], args.ppSamplers[_i], NPT_OBJECT_TYPE_ID3D11SAMPLERSTATE);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppSamplers[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -13969,7 +14295,14 @@ npt_encode_ID3D11DeviceContext_DSGetConstantBuffers_reply(struct npt_cs_encoder
+@@ -13969,7 +14197,14 @@ npt_encode_ID3D11DeviceContext_DSGetConstantBuffers_reply(struct npt_cs_encoder
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1367,7 +1437,7 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -14043,9 +14376,14 @@ npt_dispatch_ID3D11DeviceContext_DSGetConstantBuffers(struct npt_dispatch_contex
+@@ -14043,9 +14278,11 @@ npt_dispatch_ID3D11DeviceContext_DSGetConstantBuffers(struct npt_dispatch_contex
       * whose type is determined by the caller's riid. */
      if (args.ppConstantBuffers && args._guest_ids_ppConstantBuffers) {
          const uint32_t _n = args._guest_id_count_ppConstantBuffers;
@@ -1378,14 +1448,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppConstantBuffers[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppConstantBuffers[_i], args.ppConstantBuffers[_i], NPT_OBJECT_TYPE_ID3D11BUFFER);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppConstantBuffers[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -14117,7 +14455,14 @@ npt_encode_ID3D11DeviceContext_CSGetShaderResources_reply(struct npt_cs_encoder
+@@ -14117,7 +14354,14 @@ npt_encode_ID3D11DeviceContext_CSGetShaderResources_reply(struct npt_cs_encoder
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1401,7 +1468,7 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -14191,9 +14536,14 @@ npt_dispatch_ID3D11DeviceContext_CSGetShaderResources(struct npt_dispatch_contex
+@@ -14191,9 +14435,11 @@ npt_dispatch_ID3D11DeviceContext_CSGetShaderResources(struct npt_dispatch_contex
       * whose type is determined by the caller's riid. */
      if (args.ppShaderResourceViews && args._guest_ids_ppShaderResourceViews) {
          const uint32_t _n = args._guest_id_count_ppShaderResourceViews;
@@ -1412,14 +1479,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppShaderResourceViews[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppShaderResourceViews[_i], args.ppShaderResourceViews[_i], NPT_OBJECT_TYPE_ID3D11SHADERRESOURCEVIEW);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppShaderResourceViews[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -14265,7 +14615,14 @@ npt_encode_ID3D11DeviceContext_CSGetUnorderedAccessViews_reply(struct npt_cs_enc
+@@ -14265,7 +14511,14 @@ npt_encode_ID3D11DeviceContext_CSGetUnorderedAccessViews_reply(struct npt_cs_enc
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1435,7 +1499,7 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -14339,9 +14696,14 @@ npt_dispatch_ID3D11DeviceContext_CSGetUnorderedAccessViews(struct npt_dispatch_c
+@@ -14339,9 +14592,11 @@ npt_dispatch_ID3D11DeviceContext_CSGetUnorderedAccessViews(struct npt_dispatch_c
       * whose type is determined by the caller's riid. */
      if (args.ppUnorderedAccessViews && args._guest_ids_ppUnorderedAccessViews) {
          const uint32_t _n = args._guest_id_count_ppUnorderedAccessViews;
@@ -1446,14 +1510,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppUnorderedAccessViews[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppUnorderedAccessViews[_i], args.ppUnorderedAccessViews[_i], NPT_OBJECT_TYPE_ID3D11UNORDEREDACCESSVIEW);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppUnorderedAccessViews[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -14431,8 +14793,19 @@ npt_encode_ID3D11DeviceContext_CSGetShader_reply(struct npt_cs_encoder *enc,
+@@ -14431,8 +14686,19 @@ npt_encode_ID3D11DeviceContext_CSGetShader_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1475,8 +1536,12 @@ index d23f7c98..7e1394f5 100644
      if (npt_encode_simple_pointer(enc, args->pNumClassInstances))
          npt_encode_UINT(enc, args->pNumClassInstances);
  }
-@@ -14512,9 +14885,14 @@ npt_dispatch_ID3D11DeviceContext_CSGetShader(struct npt_dispatch_context *ctx,
-         npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppComputeShader);
+@@ -14508,13 +14774,13 @@ npt_dispatch_ID3D11DeviceContext_CSGetShader(struct npt_dispatch_context *ctx,
+      * whose type is determined by the caller's riid. */
+     if (args.ppComputeShader && *args.ppComputeShader)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppComputeShader, *args.ppComputeShader, NPT_OBJECT_TYPE_ID3D11COMPUTESHADER);
+-    else if (args.ppComputeShader)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppComputeShader);
      if (args.ppClassInstances && args._guest_ids_ppClassInstances) {
          const uint32_t _n = args._guest_id_count_ppClassInstances;
 -        for (uint32_t _i = 0; _i < _n; _i++)
@@ -1486,14 +1551,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppClassInstances[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppClassInstances[_i], args.ppClassInstances[_i], NPT_OBJECT_TYPE_ID3D11CLASSINSTANCE);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppClassInstances[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -14586,7 +14964,14 @@ npt_encode_ID3D11DeviceContext_CSGetSamplers_reply(struct npt_cs_encoder *enc,
+@@ -14586,7 +14852,14 @@ npt_encode_ID3D11DeviceContext_CSGetSamplers_reply(struct npt_cs_encoder *enc,
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1509,7 +1571,7 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -14660,9 +15045,14 @@ npt_dispatch_ID3D11DeviceContext_CSGetSamplers(struct npt_dispatch_context *ctx,
+@@ -14660,9 +14933,11 @@ npt_dispatch_ID3D11DeviceContext_CSGetSamplers(struct npt_dispatch_context *ctx,
       * whose type is determined by the caller's riid. */
      if (args.ppSamplers && args._guest_ids_ppSamplers) {
          const uint32_t _n = args._guest_id_count_ppSamplers;
@@ -1520,14 +1582,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppSamplers[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppSamplers[_i], args.ppSamplers[_i], NPT_OBJECT_TYPE_ID3D11SAMPLERSTATE);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppSamplers[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -14734,7 +15124,14 @@ npt_encode_ID3D11DeviceContext_CSGetConstantBuffers_reply(struct npt_cs_encoder
+@@ -14734,7 +15009,14 @@ npt_encode_ID3D11DeviceContext_CSGetConstantBuffers_reply(struct npt_cs_encoder
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1543,7 +1602,7 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -14808,9 +15205,14 @@ npt_dispatch_ID3D11DeviceContext_CSGetConstantBuffers(struct npt_dispatch_contex
+@@ -14808,9 +15090,11 @@ npt_dispatch_ID3D11DeviceContext_CSGetConstantBuffers(struct npt_dispatch_contex
       * whose type is determined by the caller's riid. */
      if (args.ppConstantBuffers && args._guest_ids_ppConstantBuffers) {
          const uint32_t _n = args._guest_id_count_ppConstantBuffers;
@@ -1554,14 +1613,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppConstantBuffers[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppConstantBuffers[_i], args.ppConstantBuffers[_i], NPT_OBJECT_TYPE_ID3D11BUFFER);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppConstantBuffers[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -16011,23 +16413,19 @@ npt_decode_ID3D11DeviceContext1_VSSetConstantBuffers1_args_temp(struct npt_cs_de
+@@ -16011,23 +16295,19 @@ npt_decode_ID3D11DeviceContext1_VSSetConstantBuffers1_args_temp(struct npt_cs_de
          args->ppConstantBuffers = NULL;
      }
      uint64_t _cnt_pFirstConstant = 0;
@@ -1589,7 +1645,7 @@ index d23f7c98..7e1394f5 100644
          args->pNumConstants = NULL;
      }
      /* A counted array must carry every element the callee will read. */
-@@ -16188,23 +16586,19 @@ npt_decode_ID3D11DeviceContext1_HSSetConstantBuffers1_args_temp(struct npt_cs_de
+@@ -16188,23 +16468,19 @@ npt_decode_ID3D11DeviceContext1_HSSetConstantBuffers1_args_temp(struct npt_cs_de
          args->ppConstantBuffers = NULL;
      }
      uint64_t _cnt_pFirstConstant = 0;
@@ -1617,7 +1673,7 @@ index d23f7c98..7e1394f5 100644
          args->pNumConstants = NULL;
      }
      /* A counted array must carry every element the callee will read. */
-@@ -16365,23 +16759,19 @@ npt_decode_ID3D11DeviceContext1_DSSetConstantBuffers1_args_temp(struct npt_cs_de
+@@ -16365,23 +16641,19 @@ npt_decode_ID3D11DeviceContext1_DSSetConstantBuffers1_args_temp(struct npt_cs_de
          args->ppConstantBuffers = NULL;
      }
      uint64_t _cnt_pFirstConstant = 0;
@@ -1645,7 +1701,7 @@ index d23f7c98..7e1394f5 100644
          args->pNumConstants = NULL;
      }
      /* A counted array must carry every element the callee will read. */
-@@ -16542,23 +16932,19 @@ npt_decode_ID3D11DeviceContext1_GSSetConstantBuffers1_args_temp(struct npt_cs_de
+@@ -16542,23 +16814,19 @@ npt_decode_ID3D11DeviceContext1_GSSetConstantBuffers1_args_temp(struct npt_cs_de
          args->ppConstantBuffers = NULL;
      }
      uint64_t _cnt_pFirstConstant = 0;
@@ -1673,7 +1729,7 @@ index d23f7c98..7e1394f5 100644
          args->pNumConstants = NULL;
      }
      /* A counted array must carry every element the callee will read. */
-@@ -16719,23 +17105,19 @@ npt_decode_ID3D11DeviceContext1_PSSetConstantBuffers1_args_temp(struct npt_cs_de
+@@ -16719,23 +16987,19 @@ npt_decode_ID3D11DeviceContext1_PSSetConstantBuffers1_args_temp(struct npt_cs_de
          args->ppConstantBuffers = NULL;
      }
      uint64_t _cnt_pFirstConstant = 0;
@@ -1701,7 +1757,7 @@ index d23f7c98..7e1394f5 100644
          args->pNumConstants = NULL;
      }
      /* A counted array must carry every element the callee will read. */
-@@ -16896,23 +17278,19 @@ npt_decode_ID3D11DeviceContext1_CSSetConstantBuffers1_args_temp(struct npt_cs_de
+@@ -16896,23 +17160,19 @@ npt_decode_ID3D11DeviceContext1_CSSetConstantBuffers1_args_temp(struct npt_cs_de
          args->ppConstantBuffers = NULL;
      }
      uint64_t _cnt_pFirstConstant = 0;
@@ -1729,7 +1785,7 @@ index d23f7c98..7e1394f5 100644
          args->pNumConstants = NULL;
      }
      /* A counted array must carry every element the callee will read. */
-@@ -17115,7 +17493,14 @@ npt_encode_ID3D11DeviceContext1_VSGetConstantBuffers1_reply(struct npt_cs_encode
+@@ -17115,7 +17375,14 @@ npt_encode_ID3D11DeviceContext1_VSGetConstantBuffers1_reply(struct npt_cs_encode
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1745,7 +1801,7 @@ index d23f7c98..7e1394f5 100644
      if (args->pFirstConstant) {
          npt_encode_array_count(enc, args->NumBuffers);
          npt_encode_UINT_array(enc, args->pFirstConstant, args->NumBuffers);
-@@ -17201,9 +17586,14 @@ npt_dispatch_ID3D11DeviceContext1_VSGetConstantBuffers1(struct npt_dispatch_cont
+@@ -17201,9 +17468,11 @@ npt_dispatch_ID3D11DeviceContext1_VSGetConstantBuffers1(struct npt_dispatch_cont
       * whose type is determined by the caller's riid. */
      if (args.ppConstantBuffers && args._guest_ids_ppConstantBuffers) {
          const uint32_t _n = args._guest_id_count_ppConstantBuffers;
@@ -1756,14 +1812,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppConstantBuffers[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppConstantBuffers[_i], args.ppConstantBuffers[_i], NPT_OBJECT_TYPE_ID3D11BUFFER);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppConstantBuffers[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -17293,7 +17683,14 @@ npt_encode_ID3D11DeviceContext1_HSGetConstantBuffers1_reply(struct npt_cs_encode
+@@ -17293,7 +17562,14 @@ npt_encode_ID3D11DeviceContext1_HSGetConstantBuffers1_reply(struct npt_cs_encode
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1779,7 +1832,7 @@ index d23f7c98..7e1394f5 100644
      if (args->pFirstConstant) {
          npt_encode_array_count(enc, args->NumBuffers);
          npt_encode_UINT_array(enc, args->pFirstConstant, args->NumBuffers);
-@@ -17379,9 +17776,14 @@ npt_dispatch_ID3D11DeviceContext1_HSGetConstantBuffers1(struct npt_dispatch_cont
+@@ -17379,9 +17655,11 @@ npt_dispatch_ID3D11DeviceContext1_HSGetConstantBuffers1(struct npt_dispatch_cont
       * whose type is determined by the caller's riid. */
      if (args.ppConstantBuffers && args._guest_ids_ppConstantBuffers) {
          const uint32_t _n = args._guest_id_count_ppConstantBuffers;
@@ -1790,14 +1843,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppConstantBuffers[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppConstantBuffers[_i], args.ppConstantBuffers[_i], NPT_OBJECT_TYPE_ID3D11BUFFER);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppConstantBuffers[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -17471,7 +17873,14 @@ npt_encode_ID3D11DeviceContext1_DSGetConstantBuffers1_reply(struct npt_cs_encode
+@@ -17471,7 +17749,14 @@ npt_encode_ID3D11DeviceContext1_DSGetConstantBuffers1_reply(struct npt_cs_encode
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1813,7 +1863,7 @@ index d23f7c98..7e1394f5 100644
      if (args->pFirstConstant) {
          npt_encode_array_count(enc, args->NumBuffers);
          npt_encode_UINT_array(enc, args->pFirstConstant, args->NumBuffers);
-@@ -17557,9 +17966,14 @@ npt_dispatch_ID3D11DeviceContext1_DSGetConstantBuffers1(struct npt_dispatch_cont
+@@ -17557,9 +17842,11 @@ npt_dispatch_ID3D11DeviceContext1_DSGetConstantBuffers1(struct npt_dispatch_cont
       * whose type is determined by the caller's riid. */
      if (args.ppConstantBuffers && args._guest_ids_ppConstantBuffers) {
          const uint32_t _n = args._guest_id_count_ppConstantBuffers;
@@ -1824,14 +1874,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppConstantBuffers[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppConstantBuffers[_i], args.ppConstantBuffers[_i], NPT_OBJECT_TYPE_ID3D11BUFFER);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppConstantBuffers[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -17649,7 +18063,14 @@ npt_encode_ID3D11DeviceContext1_GSGetConstantBuffers1_reply(struct npt_cs_encode
+@@ -17649,7 +17936,14 @@ npt_encode_ID3D11DeviceContext1_GSGetConstantBuffers1_reply(struct npt_cs_encode
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1847,7 +1894,7 @@ index d23f7c98..7e1394f5 100644
      if (args->pFirstConstant) {
          npt_encode_array_count(enc, args->NumBuffers);
          npt_encode_UINT_array(enc, args->pFirstConstant, args->NumBuffers);
-@@ -17735,9 +18156,14 @@ npt_dispatch_ID3D11DeviceContext1_GSGetConstantBuffers1(struct npt_dispatch_cont
+@@ -17735,9 +18029,11 @@ npt_dispatch_ID3D11DeviceContext1_GSGetConstantBuffers1(struct npt_dispatch_cont
       * whose type is determined by the caller's riid. */
      if (args.ppConstantBuffers && args._guest_ids_ppConstantBuffers) {
          const uint32_t _n = args._guest_id_count_ppConstantBuffers;
@@ -1858,14 +1905,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppConstantBuffers[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppConstantBuffers[_i], args.ppConstantBuffers[_i], NPT_OBJECT_TYPE_ID3D11BUFFER);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppConstantBuffers[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -17827,7 +18253,14 @@ npt_encode_ID3D11DeviceContext1_PSGetConstantBuffers1_reply(struct npt_cs_encode
+@@ -17827,7 +18123,14 @@ npt_encode_ID3D11DeviceContext1_PSGetConstantBuffers1_reply(struct npt_cs_encode
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1881,7 +1925,7 @@ index d23f7c98..7e1394f5 100644
      if (args->pFirstConstant) {
          npt_encode_array_count(enc, args->NumBuffers);
          npt_encode_UINT_array(enc, args->pFirstConstant, args->NumBuffers);
-@@ -17913,9 +18346,14 @@ npt_dispatch_ID3D11DeviceContext1_PSGetConstantBuffers1(struct npt_dispatch_cont
+@@ -17913,9 +18216,11 @@ npt_dispatch_ID3D11DeviceContext1_PSGetConstantBuffers1(struct npt_dispatch_cont
       * whose type is determined by the caller's riid. */
      if (args.ppConstantBuffers && args._guest_ids_ppConstantBuffers) {
          const uint32_t _n = args._guest_id_count_ppConstantBuffers;
@@ -1892,14 +1936,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppConstantBuffers[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppConstantBuffers[_i], args.ppConstantBuffers[_i], NPT_OBJECT_TYPE_ID3D11BUFFER);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppConstantBuffers[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -18005,7 +18443,14 @@ npt_encode_ID3D11DeviceContext1_CSGetConstantBuffers1_reply(struct npt_cs_encode
+@@ -18005,7 +18310,14 @@ npt_encode_ID3D11DeviceContext1_CSGetConstantBuffers1_reply(struct npt_cs_encode
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1915,7 +1956,7 @@ index d23f7c98..7e1394f5 100644
      if (args->pFirstConstant) {
          npt_encode_array_count(enc, args->NumBuffers);
          npt_encode_UINT_array(enc, args->pFirstConstant, args->NumBuffers);
-@@ -18091,9 +18536,14 @@ npt_dispatch_ID3D11DeviceContext1_CSGetConstantBuffers1(struct npt_dispatch_cont
+@@ -18091,9 +18403,11 @@ npt_dispatch_ID3D11DeviceContext1_CSGetConstantBuffers1(struct npt_dispatch_cont
       * whose type is determined by the caller's riid. */
      if (args.ppConstantBuffers && args._guest_ids_ppConstantBuffers) {
          const uint32_t _n = args._guest_id_count_ppConstantBuffers;
@@ -1926,14 +1967,11 @@ index d23f7c98..7e1394f5 100644
 +            if (args.ppConstantBuffers[_i])
 +                npt_cs_handle_register_guest_id(ctx,
 +                    args._guest_ids_ppConstantBuffers[_i], args.ppConstantBuffers[_i], NPT_OBJECT_TYPE_ID3D11BUFFER);
-+            else
-+                npt_cs_handle_register_failed_guest_id(ctx,
-+                    args._guest_ids_ppConstantBuffers[_i]);
 +        }
      }
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
-@@ -18162,7 +18612,11 @@ npt_encode_ID3D11DeviceContext1_SwapDeviceContextState_reply(struct npt_cs_encod
+@@ -18162,7 +18476,11 @@ npt_encode_ID3D11DeviceContext1_SwapDeviceContextState_reply(struct npt_cs_encod
          .cmd_return = 0,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -1946,7 +1984,16 @@ index d23f7c98..7e1394f5 100644
  }
  
  static inline void
-@@ -18278,14 +18732,12 @@ npt_decode_ID3D11DeviceContext1_ClearView_args_temp(struct npt_cs_decoder *dec,
+@@ -18236,8 +18554,6 @@ npt_dispatch_ID3D11DeviceContext1_SwapDeviceContextState(struct npt_dispatch_con
+      * whose type is determined by the caller's riid. */
+     if (args.ppPreviousState && *args.ppPreviousState)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppPreviousState, *args.ppPreviousState, NPT_OBJECT_TYPE_ID3DDEVICECONTEXTSTATE);
+-    else if (args.ppPreviousState)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppPreviousState);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
+@@ -18278,14 +18594,12 @@ npt_decode_ID3D11DeviceContext1_ClearView_args_temp(struct npt_cs_decoder *dec,
      if (!args->Color) return;
      npt_decode_FLOAT_array(dec, (FLOAT *)args->Color, 4);
      uint64_t _cnt_pRect = 0;
@@ -1963,7 +2010,7 @@ index d23f7c98..7e1394f5 100644
          args->pRect = NULL;
      }
      npt_decode_UINT(dec, &args->NumRects);
-@@ -18423,14 +18875,12 @@ npt_decode_ID3D11DeviceContext1_DiscardView1_args_temp(struct npt_cs_decoder *de
+@@ -18423,14 +18737,12 @@ npt_decode_ID3D11DeviceContext1_DiscardView1_args_temp(struct npt_cs_decoder *de
          args->pResourceView = (ID3D11View *)npt_object_from_id(_id);
      }
      uint64_t _cnt_pRects = 0;
@@ -1980,7 +2027,7 @@ index d23f7c98..7e1394f5 100644
          args->pRects = NULL;
      }
      npt_decode_UINT(dec, &args->NumRects);
-@@ -18576,25 +19026,21 @@ npt_decode_ID3D11DeviceContext2_UpdateTileMappings_args_temp(struct npt_cs_decod
+@@ -18576,25 +18888,21 @@ npt_decode_ID3D11DeviceContext2_UpdateTileMappings_args_temp(struct npt_cs_decod
      }
      npt_decode_UINT(dec, &args->NumTiledResourceRegions);
      uint64_t _cnt_pTiledResourceRegionStartCoordinates = 0;
@@ -2010,7 +2057,7 @@ index d23f7c98..7e1394f5 100644
          args->pTiledResourceRegionSizes = NULL;
      }
      {
-@@ -18604,33 +19050,27 @@ npt_decode_ID3D11DeviceContext2_UpdateTileMappings_args_temp(struct npt_cs_decod
+@@ -18604,33 +18912,27 @@ npt_decode_ID3D11DeviceContext2_UpdateTileMappings_args_temp(struct npt_cs_decod
      }
      npt_decode_UINT(dec, &args->NumRanges);
      uint64_t _cnt_pRangeFlags = 0;
@@ -2192,7 +2239,7 @@ index 0402273a..b2ac0647 100644
      }
      /* A counted array must carry every element the callee will read. */
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d11view.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d11view.h
-index afb7a828..5221fa43 100644
+index afb7a828..61a58022 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_id3d11view.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d11view.h
 @@ -63,7 +63,11 @@ npt_encode_ID3D11View_GetResource_reply(struct npt_cs_encoder *enc,
@@ -2208,6 +2255,15 @@ index afb7a828..5221fa43 100644
  }
  
  static inline void
+@@ -137,8 +141,6 @@ npt_dispatch_ID3D11View_GetResource(struct npt_dispatch_context *ctx,
+      * whose type is determined by the caller's riid. */
+     if (args.ppResource && *args.ppResource)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppResource, *args.ppResource, NPT_OBJECT_TYPE_ID3D11RESOURCE);
+-    else if (args.ppResource)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppResource);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d12commandqueue.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d12commandqueue.h
 index 083afbb8..d973dc2e 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_id3d12commandqueue.h
@@ -2876,7 +2932,7 @@ index 25a1c7e7..086a6060 100644
      }
      /* A counted array must carry every element the callee will read. */
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_idxgiadapter.h b/src/neptune/neptune-protocol/npt_protocol_host_idxgiadapter.h
-index 834061eb..9e8c29cc 100644
+index 834061eb..12b57208 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_idxgiadapter.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_idxgiadapter.h
 @@ -67,7 +67,11 @@ npt_encode_IDXGIAdapter_EnumOutputs_reply(struct npt_cs_encoder *enc,
@@ -2892,6 +2948,15 @@ index 834061eb..9e8c29cc 100644
  }
  
  static inline void
+@@ -141,8 +145,6 @@ npt_dispatch_IDXGIAdapter_EnumOutputs(struct npt_dispatch_context *ctx,
+      * whose type is determined by the caller's riid. */
+     if (args.ppOutput && *args.ppOutput)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppOutput, *args.ppOutput, NPT_OBJECT_TYPE_IDXGIOUTPUT);
+-    else if (args.ppOutput)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppOutput);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_idxgidevice.h b/src/neptune/neptune-protocol/npt_protocol_host_idxgidevice.h
 index a3f4fd86..3e561c5a 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_idxgidevice.h
@@ -2915,7 +2980,7 @@ index a3f4fd86..3e561c5a 100644
  
      if (cmd_flags & NPT_CMD_FLAG_REPLY) {
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_idxgifactory.h b/src/neptune/neptune-protocol/npt_protocol_host_idxgifactory.h
-index 71e532d7..a1ee911a 100644
+index 71e532d7..638c59e0 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_idxgifactory.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_idxgifactory.h
 @@ -67,7 +67,11 @@ npt_encode_IDXGIFactory_EnumAdapters_reply(struct npt_cs_encoder *enc,
@@ -2931,7 +2996,16 @@ index 71e532d7..a1ee911a 100644
  }
  
  static inline void
-@@ -756,7 +760,11 @@ npt_encode_IDXGIFactory1_EnumAdapters1_reply(struct npt_cs_encoder *enc,
+@@ -141,8 +145,6 @@ npt_dispatch_IDXGIFactory_EnumAdapters(struct npt_dispatch_context *ctx,
+      * whose type is determined by the caller's riid. */
+     if (args.ppAdapter && *args.ppAdapter)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppAdapter, *args.ppAdapter, NPT_OBJECT_TYPE_IDXGIADAPTER);
+-    else if (args.ppAdapter)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppAdapter);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
+@@ -756,7 +758,11 @@ npt_encode_IDXGIFactory1_EnumAdapters1_reply(struct npt_cs_encoder *enc,
          .cmd_return = (uint32_t)args->ret,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -2944,7 +3018,16 @@ index 71e532d7..a1ee911a 100644
  }
  
  static inline void
-@@ -2665,7 +2673,11 @@ npt_encode_IDXGIFactory4_EnumAdapterByLuid_reply(struct npt_cs_encoder *enc,
+@@ -830,8 +836,6 @@ npt_dispatch_IDXGIFactory1_EnumAdapters1(struct npt_dispatch_context *ctx,
+      * whose type is determined by the caller's riid. */
+     if (args.ppAdapter && *args.ppAdapter)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppAdapter, *args.ppAdapter, NPT_OBJECT_TYPE_IDXGIADAPTER1);
+-    else if (args.ppAdapter)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppAdapter);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
+@@ -2665,7 +2669,11 @@ npt_encode_IDXGIFactory4_EnumAdapterByLuid_reply(struct npt_cs_encoder *enc,
          .cmd_return = (uint32_t)args->ret,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -2957,7 +3040,16 @@ index 71e532d7..a1ee911a 100644
  }
  
  static inline void
-@@ -3107,7 +3119,11 @@ npt_encode_IDXGIFactory6_EnumAdapterByGpuPreference_reply(struct npt_cs_encoder
+@@ -2740,8 +2748,6 @@ npt_dispatch_IDXGIFactory4_EnumAdapterByLuid(struct npt_dispatch_context *ctx,
+     if (args.ppvAdapter && *args.ppvAdapter)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppvAdapter, *args.ppvAdapter,
+             npt_object_type_from_iid(args.riid));
+-    else if (args.ppvAdapter)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppvAdapter);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
+@@ -3107,7 +3113,11 @@ npt_encode_IDXGIFactory6_EnumAdapterByGpuPreference_reply(struct npt_cs_encoder
          .cmd_return = (uint32_t)args->ret,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -2970,6 +3062,15 @@ index 71e532d7..a1ee911a 100644
  }
  
  static inline void
+@@ -3182,8 +3192,6 @@ npt_dispatch_IDXGIFactory6_EnumAdapterByGpuPreference(struct npt_dispatch_contex
+     if (args.ppvAdapter && *args.ppvAdapter)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppvAdapter, *args.ppvAdapter,
+             npt_object_type_from_iid(args.riid));
+-    else if (args.ppvAdapter)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppvAdapter);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_idxgioutput.h b/src/neptune/neptune-protocol/npt_protocol_host_idxgioutput.h
 index c538d8bf..519a40b1 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_idxgioutput.h
@@ -2991,7 +3092,7 @@ index c538d8bf..519a40b1 100644
      }
      {
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_idxgioutputduplication.h b/src/neptune/neptune-protocol/npt_protocol_host_idxgioutputduplication.h
-index 64fba667..5007044a 100644
+index 64fba667..9000918a 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_idxgioutputduplication.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_idxgioutputduplication.h
 @@ -196,7 +196,11 @@ npt_encode_IDXGIOutputDuplication_AcquireNextFrame_reply(struct npt_cs_encoder *
@@ -3007,8 +3108,17 @@ index 64fba667..5007044a 100644
  }
  
  static inline void
+@@ -270,8 +274,6 @@ npt_dispatch_IDXGIOutputDuplication_AcquireNextFrame(struct npt_dispatch_context
+      * whose type is determined by the caller's riid. */
+     if (args.ppDesktopResource && *args.ppDesktopResource)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppDesktopResource, *args.ppDesktopResource, NPT_OBJECT_TYPE_IDXGIRESOURCE);
+-    else if (args.ppDesktopResource)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppDesktopResource);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_idxgisurface.h b/src/neptune/neptune-protocol/npt_protocol_host_idxgisurface.h
-index 844a58c3..e3d0a711 100644
+index 844a58c3..f07dbbb4 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_idxgisurface.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_idxgisurface.h
 @@ -696,7 +696,11 @@ npt_encode_IDXGISurface2_GetResource_reply(struct npt_cs_encoder *enc,
@@ -3024,8 +3134,17 @@ index 844a58c3..e3d0a711 100644
      if (npt_encode_simple_pointer(enc, args->pSubresourceIndex))
          npt_encode_UINT(enc, args->pSubresourceIndex);
  }
+@@ -773,8 +777,6 @@ npt_dispatch_IDXGISurface2_GetResource(struct npt_dispatch_context *ctx,
+     if (args.ppParentResource && *args.ppParentResource)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppParentResource, *args.ppParentResource,
+             npt_object_type_from_iid(args.riid));
+-    else if (args.ppParentResource)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppParentResource);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_idxgiswapchain.h b/src/neptune/neptune-protocol/npt_protocol_host_idxgiswapchain.h
-index 7c3f0ab3..ee388460 100644
+index 7c3f0ab3..3dc74ac1 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_idxgiswapchain.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_idxgiswapchain.h
 @@ -471,7 +471,11 @@ npt_encode_IDXGISwapChain_GetFullscreenState_reply(struct npt_cs_encoder *enc,
@@ -3041,7 +3160,16 @@ index 7c3f0ab3..ee388460 100644
  }
  
  static inline void
-@@ -3967,13 +3971,11 @@ npt_decode_IDXGISwapChain3_ResizeBuffers1_args_temp(struct npt_cs_decoder *dec,
+@@ -545,8 +549,6 @@ npt_dispatch_IDXGISwapChain_GetFullscreenState(struct npt_dispatch_context *ctx,
+      * whose type is determined by the caller's riid. */
+     if (args.ppTarget && *args.ppTarget)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppTarget, *args.ppTarget, NPT_OBJECT_TYPE_IDXGIOUTPUT);
+-    else if (args.ppTarget)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppTarget);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
+@@ -3967,13 +3969,11 @@ npt_decode_IDXGISwapChain3_ResizeBuffers1_args_temp(struct npt_cs_decoder *dec,
      npt_decode_DXGI_FORMAT(dec, &args->Format);
      npt_decode_UINT(dec, &args->SwapChainFlags);
      uint64_t _cnt_pCreationNodeMask = 0;
@@ -4370,7 +4498,7 @@ index 0158b5a6..4165a32d 100644
      }
  }
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_toplevel.h b/src/neptune/neptune-protocol/npt_protocol_host_toplevel.h
-index fbd0f130..0420da31 100644
+index fbd0f130..8a06d3e7 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_toplevel.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_toplevel.h
 @@ -487,13 +487,11 @@ npt_decode_D3D11CreateDevice_args_temp(struct npt_cs_decoder *dec,
@@ -4410,7 +4538,20 @@ index fbd0f130..0420da31 100644
  }
  
  static inline void
-@@ -663,13 +669,11 @@ npt_decode_D3D11CreateDeviceAndSwapChain_args_temp(struct npt_cs_decoder *dec,
+@@ -600,12 +606,8 @@ npt_dispatch_D3D11CreateDevice(struct npt_dispatch_context *ctx,
+      * get runtime type resolution via npt_object_type_from_iid. */
+     if (args.ppDevice && *args.ppDevice)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppDevice, *args.ppDevice, NPT_OBJECT_TYPE_ID3D11DEVICE);
+-    else if (args.ppDevice)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppDevice);
+     if (args.ppImmediateContext && *args.ppImmediateContext)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppImmediateContext, *args.ppImmediateContext, NPT_OBJECT_TYPE_ID3D11DEVICECONTEXT);
+-    else if (args.ppImmediateContext)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppImmediateContext);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
+@@ -663,13 +665,11 @@ npt_decode_D3D11CreateDeviceAndSwapChain_args_temp(struct npt_cs_decoder *dec,
      }
      npt_decode_UINT(dec, &args->Flags);
      uint64_t _cnt_pFeatureLevels = 0;
@@ -4426,7 +4567,7 @@ index fbd0f130..0420da31 100644
          args->pFeatureLevels = NULL;
      }
      npt_decode_UINT(dec, &args->FeatureLevels);
-@@ -746,11 +750,23 @@ npt_encode_D3D11CreateDeviceAndSwapChain_reply(struct npt_cs_encoder *enc,
+@@ -746,11 +746,23 @@ npt_encode_D3D11CreateDeviceAndSwapChain_reply(struct npt_cs_encoder *enc,
          .cmd_return = (uint32_t)args->ret,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -4453,7 +4594,24 @@ index fbd0f130..0420da31 100644
  }
  
  static inline void
-@@ -854,13 +870,11 @@ npt_decode_D3D11On12CreateDevice_args_temp(struct npt_cs_decoder *dec,
+@@ -797,16 +809,10 @@ npt_dispatch_D3D11CreateDeviceAndSwapChain(struct npt_dispatch_context *ctx,
+      * get runtime type resolution via npt_object_type_from_iid. */
+     if (args.ppSwapChain && *args.ppSwapChain)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppSwapChain, *args.ppSwapChain, NPT_OBJECT_TYPE_IDXGISWAPCHAIN);
+-    else if (args.ppSwapChain)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppSwapChain);
+     if (args.ppDevice && *args.ppDevice)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppDevice, *args.ppDevice, NPT_OBJECT_TYPE_ID3D11DEVICE);
+-    else if (args.ppDevice)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppDevice);
+     if (args.ppImmediateContext && *args.ppImmediateContext)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppImmediateContext, *args.ppImmediateContext, NPT_OBJECT_TYPE_ID3D11DEVICECONTEXT);
+-    else if (args.ppImmediateContext)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppImmediateContext);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
+@@ -854,13 +860,11 @@ npt_decode_D3D11On12CreateDevice_args_temp(struct npt_cs_decoder *dec,
      }
      npt_decode_UINT(dec, &args->Flags);
      uint64_t _cnt_pFeatureLevels = 0;
@@ -4469,7 +4627,7 @@ index fbd0f130..0420da31 100644
          args->pFeatureLevels = NULL;
      }
      npt_decode_UINT(dec, &args->FeatureLevels);
-@@ -939,8 +953,16 @@ npt_encode_D3D11On12CreateDevice_reply(struct npt_cs_encoder *enc,
+@@ -939,8 +943,16 @@ npt_encode_D3D11On12CreateDevice_reply(struct npt_cs_encoder *enc,
          .cmd_return = (uint32_t)args->ret,
      };
      npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
@@ -4488,3 +4646,16 @@ index fbd0f130..0420da31 100644
      if (npt_encode_simple_pointer(enc, args->pChosenFeatureLevel))
          npt_encode_D3D_FEATURE_LEVEL(enc, args->pChosenFeatureLevel);
  }
+@@ -988,12 +1000,8 @@ npt_dispatch_D3D11On12CreateDevice(struct npt_dispatch_context *ctx,
+      * get runtime type resolution via npt_object_type_from_iid. */
+     if (args.ppDevice && *args.ppDevice)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppDevice, *args.ppDevice, NPT_OBJECT_TYPE_ID3D11DEVICE);
+-    else if (args.ppDevice)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppDevice);
+     if (args.ppImmediateContext && *args.ppImmediateContext)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppImmediateContext, *args.ppImmediateContext, NPT_OBJECT_TYPE_ID3D11DEVICECONTEXT);
+-    else if (args.ppImmediateContext)
+-        npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppImmediateContext);
+ 
+     if (cmd_flags & NPT_CMD_FLAG_REPLY) {
+         if (!npt_cs_decoder_get_fatal(ctx->decoder)) {
