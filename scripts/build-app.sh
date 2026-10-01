@@ -27,6 +27,7 @@ DXMT_PATCHES=(
   "$ROOT/patches/dxmt/0002-add-neptune-d3d11-dynamic-buffer-zerocopy.patch"
   "$ROOT/patches/dxmt/0003-add-neptune-r10-bgra8-present-conversion.patch"
   "$ROOT/patches/dxmt/0004-fix-dxmt-occlusion-query-empty-tail.patch"
+  "$ROOT/patches/dxmt/0005-fix-d3d11-event-repeated-stall.patch"
 )
 D3DMETAL_PATCHES=(
   "$ROOT/patches/d3dmetal-native/0001-fix-macos-shm-open-cloexec.patch"
