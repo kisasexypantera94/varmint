@@ -182,25 +182,25 @@ setup_desktop() {
 }
 
 install_steam() {
-    dpkg-query -W -f='${Status}\n' steam-launcher 2>/dev/null \
-        | grep -Fx 'install ok installed' >/dev/null \
-        && return
+    if ! dpkg-query -W -f='${Status}\n' steam-launcher 2>/dev/null \
+        | grep -Fx 'install ok installed' >/dev/null; then
 
-    printf '\nInstalling the Steam launcher...\n'
-    cache_dir=/var/cache/varmint
-    steam_deb=$cache_dir/steam-launcher_latest_all.deb
-    install -d -m 0755 "$cache_dir"
+        printf '\nInstalling the Steam launcher...\n'
+        cache_dir=/var/cache/varmint
+        steam_deb=$cache_dir/steam-launcher_latest_all.deb
+        install -d -m 0755 "$cache_dir"
 
-    if [ ! -s "$steam_deb" ]; then
-        partial=$steam_deb.partial.$$
-        curl --fail --location --retry 3 --retry-delay 2 \
-            --output "$partial" "$STEAM_URL"
-        mv "$partial" "$steam_deb"
-        partial=
+        if [ ! -s "$steam_deb" ]; then
+            partial=$steam_deb.partial.$$
+            curl --fail --location --retry 3 --retry-delay 2 \
+                --output "$partial" "$STEAM_URL"
+            mv "$partial" "$steam_deb"
+            partial=
+        fi
+
+        apt-get update
+        DEBIAN_FRONTEND=noninteractive apt-get install -y "$steam_deb"
     fi
-
-    apt-get update
-    DEBIAN_FRONTEND=noninteractive apt-get install -y "$steam_deb"
 
     # steam-launcher installs Valve's apt source, but Steam updates itself.
     # Keeping the source can break every later apt update when Valve's key
@@ -214,6 +214,29 @@ install_steam() {
             printf 'Steam launcher package was not installed successfully.\n' >&2
             exit 1
         }
+
+    [ -x /usr/lib/steam/bin_steam.sh ] || {
+        printf 'Steam launcher script is missing.\n' >&2
+        exit 1
+    }
+
+    # Make /usr/bin/steam the FEX boundary for Steam and Steam-generated
+    # shortcuts while preserving Valve's package-owned launcher.
+    if [ "$(dpkg-divert --truename /usr/bin/steam)" = /usr/bin/steam ]; then
+        dpkg-divert \
+            --local \
+            --rename \
+            --add \
+            --divert /usr/bin/steam.distrib \
+            /usr/bin/steam
+    fi
+
+    [ "$(dpkg-divert --truename /usr/bin/steam)" = /usr/bin/steam.distrib ] || {
+        printf 'Unexpected diversion for /usr/bin/steam.\n' >&2
+        exit 1
+    }
+
+    ln -sfn /usr/local/bin/varmint-steam /usr/bin/steam
 }
 
 verify_setup() {
@@ -222,7 +245,7 @@ verify_setup() {
         printf 'FEX verification failed: expected x86_64, got %s.\n' "$arch" >&2
         exit 1
     }
-    run_as_user FEXBash -c 'test -x /usr/bin/steam' || {
+    run_as_user FEXBash -c 'test -x /usr/lib/steam/bin_steam.sh' || {
         printf 'Steam launcher is not available inside FEX.\n' >&2
         exit 1
     }
