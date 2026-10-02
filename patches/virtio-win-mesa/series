@@ -7,3 +7,4 @@
 0009-convert-neptune-r10-present-to-bgra8.patch
 0010-isolate-neptune-r10-present-source.patch
 0011-scale-neptune-x11-present.patch
+0012-fix-neptune-immutable-texture-initial-upload.patch
