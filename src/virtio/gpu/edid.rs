@@ -330,7 +330,7 @@ pub fn build(
             break;
         }
 
-        if !extension_modes.iter().any(|(existing, _)| *existing == mode) {
+        if !base_modes.contains(&mode) && !extension_modes.iter().any(|(existing, _)| *existing == mode) {
             extension_modes.push((mode, preferred));
         }
     }
