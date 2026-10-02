@@ -3,3 +3,8 @@
 0005-disable-neptune-xcb-explicit-sync.patch
 0006-fix-neptune-d3d11-view-getresource-type.patch
 0007-refuse-unsupported-neptune-d3d11-texture-formats.patch
+0008-fix-neptune-dxgi-factory-vtable-width.patch
+0009-convert-neptune-r10-present-to-bgra8.patch
+0010-isolate-neptune-r10-present-source.patch
+0011-scale-neptune-x11-present.patch
+0012-fix-neptune-immutable-texture-initial-upload.patch

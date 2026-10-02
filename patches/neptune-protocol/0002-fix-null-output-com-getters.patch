@@ -1,0 +1,516 @@
+diff --git a/templates/commands.h b/templates/commands.h
+index e3bddf8..729fb19 100644
+--- a/templates/commands.h
++++ b/templates/commands.h
+@@ -212,7 +212,8 @@ void\
+     cmd_size += ${GEN.reply_payload_size_expr(method.return_type)};
+ % endif
+ % for p in all_params:
+-${GEN.sizeof_output_param(p, '', 'cmd_size')}
++${GEN.sizeof_output_param(p, '', 'cmd_size',
++                           reply_output_handles=GEN.method_reply_output_handles(method))}
+ % endfor
+ % endif
+     return cmd_size;
+@@ -283,12 +284,14 @@ ${' ' * (len('npt_encode_') + len(fname) + len('_reply') + 1)}const struct npt_c
+      * failure the host may have written the required count but left the
+      * array contents unpopulated, so only encode elements on success. */
+     if ((HRESULT)args->ret >= 0) {
+-    ${GEN.encode_output_param(p, 'args->')}
++    ${GEN.encode_output_param(p, 'args->',
++                           reply_output_handles=GEN.method_reply_output_handles(method))}
+     } else {
+         npt_encode_array_count(enc, 0);
+     }
+ % else:
+-${GEN.encode_output_param(p, 'args->')}
++${GEN.encode_output_param(p, 'args->',
++                           reply_output_handles=GEN.method_reply_output_handles(method))}
+ % endif
+ % endfor
+ % endif
+@@ -447,7 +450,8 @@ ${' ' * (len('npt_decode_') + len(fname) + len('_reply') + 1)}${method.return_ty
+     if (ret) npt_decode_${method.return_type}(dec, ret);
+ % endif
+ % for p in output_params:
+-${GEN.decode_output_param(p, '')}
++${GEN.decode_output_param(p, '',
++                           reply_output_handles=GEN.method_reply_output_handles(method))}
+ % endfor
+ }
+ 
+@@ -676,7 +680,8 @@ void\
+     cmd_size += ${GEN.reply_payload_size_expr(func.return_type)};
+ % endif
+ % for p in all_params:
+-${GEN.sizeof_output_param(p, '', 'cmd_size')}
++${GEN.sizeof_output_param(p, '', 'cmd_size',
++                           reply_output_handles=GEN.method_reply_output_handles(func))}
+ % endfor
+ % endif
+     return cmd_size;
+@@ -744,12 +749,14 @@ ${' ' * (len('npt_encode_') + len(fname) + len('_reply') + 1)}const struct npt_c
+      * failure the host may have written the required count but left the
+      * array contents unpopulated, so only encode elements on success. */
+     if ((HRESULT)args->ret >= 0) {
+-    ${GEN.encode_output_param(p, 'args->')}
++    ${GEN.encode_output_param(p, 'args->',
++                           reply_output_handles=GEN.method_reply_output_handles(func))}
+     } else {
+         npt_encode_array_count(enc, 0);
+     }
+ % else:
+-${GEN.encode_output_param(p, 'args->')}
++${GEN.encode_output_param(p, 'args->',
++                           reply_output_handles=GEN.method_reply_output_handles(func))}
+ % endif
+ % endfor
+ % endif
+@@ -857,7 +864,8 @@ ${' ' * (len('npt_decode_') + len(fname) + len('_reply') + 1)}${func.return_type
+     if (ret) npt_decode_${func.return_type}(dec, ret);
+ % endif
+ % for p in output_params:
+-${GEN.decode_output_param(p, '')}
++${GEN.decode_output_param(p, '',
++                           reply_output_handles=GEN.method_reply_output_handles(func))}
+ % endfor
+ }
+ 
+diff --git a/tests/test_roundtrip_manual.c b/tests/test_roundtrip_manual.c
+index 7c21004..f753c8e 100644
+--- a/tests/test_roundtrip_manual.c
++++ b/tests/test_roundtrip_manual.c
+@@ -955,8 +955,12 @@ static int test_manual_dispatch_OMGetBlendState(void)
+     npt_encode_ID3D11DeviceContext_OMGetBlendState_reply(&renc, &args);
+     size_t reply_size = npt_test_encoder_written(&renc, reply_buf);
+ 
+-    /* reply header (16) + array_count(8) + 4*FLOAT(16) + simple_pointer(8) + UINT(4) */
+-    const size_t expected = sizeof(struct npt_reply_header) + 8 + 16 + 8 + 4;
++    /* reply header (16)
++     * + ppBlendState presence guest_id (8)
++     * + BlendFactor array_count (8) + 4*FLOAT (16)
++     * + pSampleMask simple_pointer (8) + UINT (4) */
++    const size_t expected =
++        sizeof(struct npt_reply_header) + 8 + 8 + 16 + 8 + 4;
+     int result = (reply_size == expected) ? 0 : -1;
+     if (result) {
+         fprintf(stderr, "FAIL: OMGetBlendState reply size %zu != %zu\n",
+diff --git a/tools/npt_codegen.py b/tools/npt_codegen.py
+index 202f2d7..3e59fc4 100644
+--- a/tools/npt_codegen.py
++++ b/tools/npt_codegen.py
+@@ -317,31 +317,47 @@ class Gen:
+         Whether the guest thunk must wait for a reply.
+ 
+         Output COM handles are marshaled as guest-allocated ids in the
+-        command body, so they are not outputs for this decision: the id
+-        is minted guest-side, and a use of the new object that reaches
+-        the host before the Create has registered the id waits for the
+-        registration there (the host object table blocks such lookups on
+-        ring threads), so Create-then-Use is race-free without a round
+-        trip.  A failed Create leaves a failed-object record under the
+-        id; the first use surfaces it (deferred-fatal model).
+-
+-        HRESULT-only returns are async-eligible under that same model.
++        command body, so HRESULT-only creators keep the existing async
++        deferred-fatal model.  Methods with no return value must wait for
++        output presence so NULL vs non-NULL is visible before return.
++
++        HRESULT-only returns are otherwise async-eligible under that model.
+         Other scalar returns (BOOL, UINT, ...) and struct returns need a
+-        sync reply to deliver the value.
+-
+-        force_sync (registry annotation) is for methods whose HRESULT
+-        carries control-flow meaning rather than fatal-error semantics --
+-        enumeration terminators like EnumOutputs / EnumAdapters signal
+-        end-of-iteration with DXGI_ERROR_NOT_FOUND, and the deferred-fatal
+-        path would mask that into a fake S_OK and make the caller loop
+-        forever.
++        reply.  Non-handle output parameters also require a reply.
++        force_sync covers methods whose HRESULT has immediate control-flow
++        meaning, such as enumeration terminators.
+         """
+         has_non_handle_output = any(
+             p.output and not self.is_output_com_handle(p)
+             for p in method.params)
++
++        has_output_com = any(
++            self.is_output_com_handle(p)
++            for p in method.params)
++
+         has_ret = self.has_return(method.return_type)
+         has_sync_ret = has_ret and method.return_type != 'HRESULT'
+-        return has_non_handle_output or has_sync_ret or method.force_sync
++
++        # void GetFoo(IFoo **out): NULL/non-NULL must be known on return.
++        # HRESULT CreateFoo(..., IFoo **out): keep the guest-id/deferred-fatal
++        # fast path unless another rule independently requires synchronization.
++        has_no_return_com_output = has_output_com and not has_ret
++
++        return (has_non_handle_output
++                or has_sync_ret
++                or has_no_return_com_output
++                or getattr(method, 'force_sync', False))
++
++    def method_reply_output_handles(self, method) -> bool:
++        """Whether a synchronous reply carries COM-output presence ids.
++
++        For a synchronous call, a materialized object is represented by the
++        original guest id and NULL by zero.  Async HRESULT-only creators keep
++        the normal deferred output-handle model and carry no reply payload.
++        """
++        return (self.method_always_sync(method)
++                and any(self.is_output_com_handle(p)
++                        for p in method.params))
+ 
+     def method_is_staged(self, iface, method) -> bool:
+         """
+@@ -477,34 +493,94 @@ class Gen:
+             return ''
+         return self._decode_output_alloc(field, prefix, indent)
+ 
+-    def sizeof_output_param(self, field: NptField, prefix: str, dst: str) -> str:
++    def sizeof_output_param(self, field: NptField, prefix: str, dst: str,
++                            reply_output_handles: bool = False) -> str:
+         """Sizeof for a reply output parameter.
+ 
+-        Uses for_output=True so that simple pointers are assumed non-NULL
+-        (the host always allocates output storage, even when the guest
+-        caller passed NULL for an optional param).  Output COM handles
+-        are registered on the host under their pre-allocated guest_id
+-        and do NOT ride along in the reply.
++        Output COM handles are registered host-side under a
++        guest-preallocated id.  Synchronous COM-output methods also carry
++        a tiny presence reply: the host returns the original guest id for
++        a non-NULL output and 0 for a NULL output.  This is required for
++        synchronous getters and other calls that already require a reply.
+         """
+         if self.is_output_com_handle(field):
++            if reply_output_handles:
++                acc = self._acc(field, prefix)
++                count_expr = self._get_count_expr(field, prefix)
++                if count_expr:
++                    wire_count = f'({acc} ? {count_expr} : 0)'
++                    return (f'{dst} += npt_sizeof_array_count({wire_count});\n'
++                            f'    {dst} += sizeof(uint64_t) * {wire_count};')
++                return f'{dst} += sizeof(uint64_t);'
+             return (f'/* skip {prefix}{field.name} (guest-allocated id, '
+                     f'registered host-side; not in reply) */')
+         if not field.output:
+             return f'/* skip {prefix}{field.name} (input only) */'
+         return self.sizeof_field(field, prefix, dst, for_output=True)
+ 
+-    def encode_output_param(self, field: NptField, prefix: str) -> str:
++    def encode_output_param(self, field: NptField, prefix: str,
++                            reply_output_handles: bool = False) -> str:
+         """Encode a reply output parameter (host-side)."""
+         if self.is_output_com_handle(field):
++            if reply_output_handles:
++                acc = self._acc(field, prefix)
++                count_expr = self._get_count_expr(field, prefix)
++                if count_expr:
++                    return '\n'.join([
++                        f'    {{',
++                        f'        const uint64_t _cnt = '
++                        f'{prefix}_guest_id_count_{field.name};',
++                        f'        npt_encode_array_count(enc, _cnt);',
++                        f'        for (uint64_t _i = 0; _i < _cnt; _i++) {{',
++                        f'            const uint64_t _gid = '
++                        f'({acc} && {acc}[_i]) '
++                        f'? {prefix}_guest_ids_{field.name}[_i] : 0;',
++                        f'            npt_encode_uint64_t(enc, &_gid);',
++                        f'        }}',
++                        f'    }}',
++                    ])
++                return '\n'.join([
++                    f'    {{',
++                    f'        const uint64_t _gid = ({acc} && *{acc})',
++                    f'            ? {prefix}_guest_id_{field.name} : 0;',
++                    f'        npt_encode_uint64_t(enc, &_gid);',
++                    f'    }}',
++                ])
+             return (f'/* skip {prefix}{field.name} (guest-allocated id, '
+                     f'registered host-side; not in reply) */')
+         if not field.output:
+             return f'/* skip {prefix}{field.name} (input only) */'
+         return self.encode_field(field, prefix, for_output=True)
+ 
+-    def decode_output_param(self, field: NptField, prefix: str) -> str:
++    def decode_output_param(self, field: NptField, prefix: str,
++                            reply_output_handles: bool = False) -> str:
+         """Decode a reply output parameter (guest-side)."""
+         if self.is_output_com_handle(field):
++            if reply_output_handles:
++                acc = self._acc(field, prefix)
++                count_expr = self._get_count_expr(field, prefix)
++                if count_expr:
++                    return '\n'.join([
++                        f'    {{',
++                        f'        const uint64_t _count = '
++                        f'npt_decode_array_count_unchecked(dec);',
++                        f'        for (uint64_t _i = 0; _i < _count; _i++) {{',
++                        f'            uint64_t _gid;',
++                        f'            npt_decode_uint64_t(dec, &_gid);',
++                        f'            if ({acc})',
++                        f'                {acc}[_i] = '
++                        f'({field.type_name} *)(uintptr_t)_gid;',
++                        f'        }}',
++                        f'    }}',
++                    ])
++                return '\n'.join([
++                    f'    {{',
++                    f'        uint64_t _gid;',
++                    f'        npt_decode_uint64_t(dec, &_gid);',
++                    f'        if ({acc})',
++                    f'            *{acc} = ({field.type_name} *)(uintptr_t)_gid;',
++                    f'    }}',
++                ])
+             return (f'/* skip {prefix}{field.name} (guest-allocated id, '
+                     f'wrapper built on client thunk; not in reply) */')
+         if not field.output:
+@@ -2156,10 +2232,15 @@ class Gen:
+                 return (f'{ind}if ({acc} && {prefix}_guest_ids_{field.name}) {{\n'
+                         f'{ind}    const uint32_t _n = '
+                         f'{prefix}_guest_id_count_{field.name};\n'
+-                        f'{ind}    for (uint32_t _i = 0; _i < _n; _i++)\n'
+-                        f'{ind}        npt_cs_handle_register_guest_id(ctx,\n'
+-                        f'{ind}            {prefix}_guest_ids_{field.name}[_i], '
++                        f'{ind}    for (uint32_t _i = 0; _i < _n; _i++) {{\n'
++                        f'{ind}        if ({acc}[_i])\n'
++                        f'{ind}            npt_cs_handle_register_guest_id(ctx,\n'
++                        f'{ind}                {prefix}_guest_ids_{field.name}[_i], '
+                         f'{acc}[_i], {obj_type});\n'
++                        f'{ind}        else\n'
++                        f'{ind}            npt_cs_handle_register_failed_guest_id(ctx,\n'
++                        f'{ind}                {prefix}_guest_ids_{field.name}[_i]);\n'
++                        f'{ind}    }}\n'
+                         f'{ind}}}')
+             return (f'{ind}if ({acc} && *{acc})\n'
+                     f'{ind}    npt_cs_handle_register_guest_id(ctx, '
+diff --git a/tools/npt_testgen.py b/tools/npt_testgen.py
+index 336e175..158d425 100644
+--- a/tools/npt_testgen.py
++++ b/tools/npt_testgen.py
+@@ -165,7 +165,7 @@ class Field:
+ 
+ class Method:
+     __slots__ = ('name', 'return_type', 'params', 'wire_index', 'id',
+-                 'skip_default')
++                 'skip_default', 'force_sync')
+ 
+     def __init__(self, raw, index):
+         self.name = raw['name']
+@@ -174,6 +174,7 @@ class Method:
+                        for i, p in enumerate(raw.get('params', []))]
+         self.wire_index = raw.get('index', index)
+         self.id = raw.get('id')
++        self.force_sync = raw.get('force_sync', False)
+ 
+ 
+ class TypeInfo:
+@@ -1265,6 +1266,38 @@ def method_has_output(method):
+     return False
+ 
+ 
++def method_reply_output_handles(method):
++    """Mirror synchronous COM-output presence replies from npt_codegen."""
++
++    def is_output_com(p):
++        return (
++            p.handle == 'com'
++            and p.indirection == 2
++            and p.output
++            and not p.input
++        )
++
++    has_output_com = any(is_output_com(p) for p in method.params)
++    if not has_output_com:
++        return False
++
++    has_non_handle_output = any(
++        p.output and not is_output_com(p)
++        for p in method.params
++    )
++
++    has_ret = has_return(method.return_type)
++    has_sync_ret = has_ret and method.return_type != 'HRESULT'
++    has_no_return_com_output = not has_ret
++
++    return (
++        has_non_handle_output
++        or has_sync_ret
++        or has_no_return_com_output
++        or getattr(method, 'force_sync', False)
++    )
++
++
+ # ---------------------------------------------------------------------------
+ # Collect struct dependencies for init functions
+ # ---------------------------------------------------------------------------
+@@ -1543,6 +1576,47 @@ def _gen_host_encode_reply(out, reg, iface, method, fname, is_toplevel, idx):
+     _gen_method_param_init(out, reg, params, fields_map, 'args.',
+                            output_only=True, for_reply=True)
+ 
++    # A synchronous COM-output call reaches encode_reply after its command has
++    # already supplied guest-allocated ids. host_encode_REPLY_* is built
++    # in isolation, so synthesize those shadow ids here.
++    if method_reply_output_handles(method):
++        for _pi, p in enumerate(output_params):
++            cls = classify_field(reg, p)
++
++            if cls in ('COM_HANDLE', 'INTERFACE_REF') \
++                    and p.indirection == 2:
++                base = 1 + _pi * 0x100
++                out.write(
++                    f'    if (args.{p.name} && *args.{p.name})\n'
++                    f'        args._guest_id_{p.name} = '
++                    f'0x100000000ULL + '
++                    f'((uint64_t)NPT_TEST_METHOD_{fname} << 16) + '
++                    f'{base};\n')
++
++            elif cls == 'COM_HANDLE_ARRAY' \
++                    and p.output and p.indirection == 2:
++                cnt = get_count_expr(p, 'args.', fields_map)
++                if cnt:
++                    base = 1 + _pi * 0x100
++                    out.write(
++                        f'    if (args.{p.name}) {{\n'
++                        f'        const uint32_t _n_{p.name} = '
++                        f'(uint32_t)({cnt});\n'
++                        f'        args._guest_id_count_{p.name} = '
++                        f'_n_{p.name};\n'
++                        f'        if (_n_{p.name}) {{\n'
++                        f'            args._guest_ids_{p.name} = '
++                        f'npt_test_alloc(sizeof(uint64_t) * '
++                        f'_n_{p.name});\n'
++                        f'            for (uint32_t _i = 0; '
++                        f'_i < _n_{p.name}; _i++)\n'
++                        f'                args._guest_ids_{p.name}[_i] = '
++                        f'0x100000000ULL + '
++                        f'((uint64_t)NPT_TEST_METHOD_{fname} << 16) + '
++                        f'{base} + _i;\n'
++                        f'        }}\n'
++                        f'    }}\n')
++
+     # Handle count_output styles
+     _gen_count_output_styles(out, reg, params, fields_map)
+ 
+@@ -1830,7 +1904,7 @@ def _gen_count_output_styles(out, reg, params, fields_map):
+ 
+ 
+ def _gen_reencode_param(out, reg, field, prefix, fields_map, for_output=False,
+-                        indent=1):
++                        indent=1, reply_output_handles=False):
+     """Generate re-encode code for a single param."""
+     ind = '    ' * indent
+     acc = f'{prefix}{field.name}'
+@@ -1851,8 +1925,10 @@ def _gen_reencode_param(out, reg, field, prefix, fields_map, for_output=False,
+         t2 = reg.types.get(field.type_name)
+         if t2:
+             for inner in t2.fields:
+-                _gen_reencode_param(out, reg, inner, prefix, fields_map,
+-                                    for_output, indent)
++                _gen_reencode_param(
++                    out, reg, inner, prefix, fields_map,
++                    for_output, indent,
++                    reply_output_handles=reply_output_handles)
+         return
+ 
+     if cls in ('COM_HANDLE', 'INTERFACE_REF'):
+@@ -1866,7 +1942,21 @@ def _gen_reencode_param(out, reg, field, prefix, fields_map, for_output=False,
+             # knows it.  The test harness must mirror the wire layout.
+             cnt = get_count_expr(field, prefix, fields_map)
+             if for_output:
+-                # Reply side: no data on the wire for output COM handles.
++                if not reply_output_handles:
++                    # Normal deferred-output model: no reply payload.
++                    return
++
++                # Presence reply: decode left the raw guest id cast as a
++                # pointer in the caller's output slot. Re-encode that id
++                # directly; do not run it through npt_object_get_id().
++                out.write(f'{ind}{{\n')
++                out.write(
++                    f'{ind}    const uint64_t _gid = '
++                    f'({acc} && *{acc}) '
++                    f'? (uint64_t)(uintptr_t)*{acc} : 0;\n')
++                out.write(
++                    f'{ind}    npt_encode_uint64_t(&enc, &_gid);\n')
++                out.write(f'{ind}}}\n')
+                 return
+             # Command side: re-encode the guest-allocated id(s) that
+             # the decoder read into the args struct's shadow fields.
+@@ -1910,9 +2000,29 @@ def _gen_reencode_param(out, reg, field, prefix, fields_map, for_output=False,
+     if cls == 'COM_HANDLE_ARRAY':
+         cnt = get_count_expr(field, prefix, fields_map)
+         if for_output and field.output and field.indirection == 2:
+-            # Phase-1 refactor: output COM handle arrays carry their
+-            # guest-allocated ids in the COMMAND body, not the reply.
+-            # The reply-side re-encoder emits nothing for them.
++            if not reply_output_handles:
++                # Normal deferred-output model.
++                return
++
++            # Presence reply: array elements are raw guest ids (or NULL)
++            # after the generated guest decoder has consumed the reply.
++            if cnt:
++                out.write(f'{ind}if ({acc}) {{\n')
++                out.write(
++                    f'{ind}    npt_encode_array_count(&enc, {cnt});\n')
++                out.write(
++                    f'{ind}    for (uint32_t _i = 0; '
++                    f'_i < (uint32_t)({cnt}); _i++) {{\n')
++                out.write(
++                    f'{ind}        const uint64_t _gid = {acc}[_i] '
++                    f'? (uint64_t)(uintptr_t){acc}[_i] : 0;\n')
++                out.write(
++                    f'{ind}        npt_encode_uint64_t(&enc, &_gid);\n')
++                out.write(f'{ind}    }}\n')
++                out.write(f'{ind}}} else {{\n')
++                out.write(
++                    f'{ind}    npt_encode_array_count(&enc, 0);\n')
++                out.write(f'{ind}}}\n')
+             return
+         if not for_output and field.output and field.indirection == 2:
+             # Command-side re-encode of an output COM handle array:
+@@ -2367,15 +2477,20 @@ def _gen_guest_verify_reply(out, reg, iface, method, fname, is_toplevel, idx):
+         out.write(f'    npt_encode_{ret_type}(&enc, &ret_val);\n')
+ 
+     # Re-encode output params
++    reply_output_handles = method_reply_output_handles(method)
+     for p in output_params:
+         if p.count_output and ret_type == 'HRESULT':
+             out.write(f'    if ((HRESULT)ret_val >= 0) {{\n')
+-            _gen_reencode_reply_param(out, reg, p, 'p_', fields_map, indent=2)
++            _gen_reencode_reply_param(
++                out, reg, p, 'p_', fields_map, indent=2,
++                reply_output_handles=reply_output_handles)
+             out.write(f'    }} else {{\n')
+             out.write(f'        npt_encode_array_count(&enc, 0);\n')
+             out.write(f'    }}\n')
+         else:
+-            _gen_reencode_reply_param(out, reg, p, 'p_', fields_map, indent=1)
++            _gen_reencode_reply_param(
++                out, reg, p, 'p_', fields_map, indent=1,
++                reply_output_handles=reply_output_handles)
+ 
+     out.write(f'\n    size_t w2_actual = npt_test_encoder_written(&enc, w2);\n')
+     out.write(f'    int result = npt_wire_compare("REPLY_{fname}", buf, size, w2, w2_actual);\n')
+@@ -2385,11 +2500,13 @@ def _gen_guest_verify_reply(out, reg, iface, method, fname, is_toplevel, idx):
+     out.write(f'}}\n\n')
+ 
+ 
+-def _gen_reencode_reply_param(out, reg, field, prefix, fields_map, indent=1):
++def _gen_reencode_reply_param(out, reg, field, prefix, fields_map, indent=1,
++                              reply_output_handles=False):
+     """Re-encode an output param for reply verification."""
+-    # Same logic as _gen_reencode_param but with for_output=True
+-    _gen_reencode_param(out, reg, field, prefix, fields_map,
+-                        for_output=True, indent=indent)
++    _gen_reencode_param(
++        out, reg, field, prefix, fields_map,
++        for_output=True, indent=indent,
++        reply_output_handles=reply_output_handles)
+ 
+ 
+ def _c_type_for_param(p):

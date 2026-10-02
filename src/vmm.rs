@@ -4,7 +4,7 @@ use crate::{
     devices::{HostBackends, Runtime, RuntimeEvent},
     display::{DisplayBuffer, DisplayEvent},
     machine::*,
-    memory, net, stdio, virtio,
+    macos_ui, memory, net, stdio, virtio,
 };
 use applevisor::prelude::*;
 use std::{
@@ -156,7 +156,10 @@ fn validate_boot_layout(memory_size: usize, image_size: usize, initrd: Option<&[
 }
 
 pub fn run(config_path: &Path) -> Result<()> {
-    let config = VmConfig::load(config_path);
+    let mut config = VmConfig::load(config_path);
+
+    let ui_scale = macos_ui::backing_scale_factor();
+    config.kernel_args.push_str(&format!(" varmint.ui_scale={ui_scale}"));
 
     for (name, value) in &config.host_environment {
         if std::env::var_os(name).is_none() {

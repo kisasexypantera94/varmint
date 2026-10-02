@@ -1,0 +1,66 @@
+diff --git a/src/dxmt/dxmt_context.cpp b/src/dxmt/dxmt_context.cpp
+index c51bb23..5fd3c27 100644
+--- a/src/dxmt/dxmt_context.cpp
++++ b/src/dxmt/dxmt_context.cpp
+@@ -896,11 +896,22 @@ ArgumentEncodingContext::flushCommands(WMT::CommandBuffer cmdbuf, uint64_t seqId
+ 
+   QueryReadbacks readbacks{};
+ 
+-  if (auto count = vro_state_.reset()) {
++  const auto visibility_count = vro_state_.reset();
++
++  bool has_ending_visibility_query = false;
++  for (const auto &query : pending_queries_) {
++    if (query->queryEndAt() == seqId) {
++      has_ending_visibility_query = true;
++      break;
++    }
++  }
++
++  if (visibility_count || has_ending_visibility_query) {
+     readbacks.visibility = std::make_unique<VisibilityResultReadback>(
+-        device_, seqId, count, pending_queries_
++        device_, seqId, visibility_count, pending_queries_
+     );
+   }
++
+   std::erase_if(pending_queries_, [=](auto &query) -> bool { return query->queryEndAt() == seqId; });
+ 
+   readbacks.timestamp = timestamp_state_.flush(cmdbuf);
+diff --git a/src/dxmt/dxmt_occlusion_query.hpp b/src/dxmt/dxmt_occlusion_query.hpp
+index 56e9e76..a7ba78a 100644
+--- a/src/dxmt/dxmt_occlusion_query.hpp
++++ b/src/dxmt/dxmt_occlusion_query.hpp
+@@ -117,6 +117,17 @@ public:
+   issue(uint64_t seqId, uint64_t const *readbackBuffer, unsigned numResults) {
+     assert(seqId >= seq_id_begin);
+     assert(seqId <= seq_id_end);
++
++    /*
++     * A query may span multiple command chunks and end in a chunk with
++     * no visibility-result samples. The completion-only chunk must still
++     * advance seq_id_issued once that command buffer has completed.
++     */
++    if (numResults == 0) {
++      seq_id_issued = seqId;
++      return;
++    }
++
+     uint64_t const *start = seqId == seq_id_begin ? readbackBuffer + occlusion_counter_begin : readbackBuffer;
+     uint64_t const *end = seqId == seq_id_end ? readbackBuffer + occlusion_counter_end : readbackBuffer + numResults;
+     assert(start <= end);
+@@ -167,10 +178,12 @@ public:
+         visibility_result_heap_info.options = WMTResourceHazardTrackingModeUntracked;
+         visibility_result_heap_info.memory.set(nullptr);
+ #ifdef __i386__
+-        visibility_result_heap_info.memory.set(wsi::aligned_malloc(num_results * sizeof(uint64_t), DXMT_PAGE_SIZE));
++        if (num_results)
++          visibility_result_heap_info.memory.set(wsi::aligned_malloc(num_results * sizeof(uint64_t), DXMT_PAGE_SIZE));
+ #endif
+         visibility_result_heap_info.length = num_results * sizeof(uint64_t);
+-        visibility_result_heap = device.newBuffer(visibility_result_heap_info);
++        if (num_results)
++          visibility_result_heap = device.newBuffer(visibility_result_heap_info);
+       }
+   ~VisibilityResultReadback() {
+     for (auto query : queries) {

@@ -19,6 +19,13 @@ use winit::{
     window::{CursorGrabMode, Fullscreen, Window, WindowId},
 };
 
+fn display_refresh_millihertz(window: &Window) -> u32 {
+    window
+        .current_monitor()
+        .and_then(|monitor| monitor.refresh_rate_millihertz())
+        .unwrap_or(60_000)
+}
+
 fn winit_to_linux_key(key: winit::keyboard::KeyCode) -> Option<u16> {
     use winit::keyboard::KeyCode::*;
     Some(match key {
@@ -307,8 +314,11 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
         }
 
         let _ = self.host_tx.send(RuntimeEvent::DisplayResized {
-            width: logical_size.width,
-            height: logical_size.height,
+            physical_width: width,
+            physical_height: height,
+            logical_width: logical_size.width,
+            logical_height: logical_size.height,
+            refresh_millihertz: display_refresh_millihertz(self.presenter.as_ref().unwrap().window()),
         });
 
         if self.poll_display() || self.frame_pending {
@@ -339,8 +349,11 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
 
                 let logical_size = PhysicalSize::new(width, height).to_logical::<u32>(scale_factor);
                 let _ = self.host_tx.send(RuntimeEvent::DisplayResized {
-                    width: logical_size.width,
-                    height: logical_size.height,
+                    physical_width: width,
+                    physical_height: height,
+                    logical_width: logical_size.width,
+                    logical_height: logical_size.height,
+                    refresh_millihertz: display_refresh_millihertz(self.presenter.as_ref().unwrap().window()),
                 });
 
                 self.present(PresentMode::Redraw);

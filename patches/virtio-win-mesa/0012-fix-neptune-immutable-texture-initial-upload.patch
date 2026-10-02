@@ -1,0 +1,170 @@
+--- a/src/virtio/neptune/npt_overrides_d3d11_device.c
++++ b/src/virtio/neptune/npt_overrides_d3d11_device.c
+@@ -377,15 +377,31 @@
+    struct npt_device *dev = npt_com_self_device(self);
+    uint64_t self_id = npt_com_self_id(self);
+ 
++   /*
++    * Neptune: immutable initial data is uploaded after host CreateTexture.
++    * Creating the host resource as IMMUTABLE would make
++    * DXMT mark it GpuReadonly before RESOURCE_UPDATE supplies the real
++    * contents.  Create the host backing as DEFAULT, while keeping the
++    * original IMMUTABLE description in the guest wrapper.
++    */
++   D3D11_TEXTURE1D_DESC host_desc;
++   const D3D11_TEXTURE1D_DESC *host_desc_arg = pDesc;
++   if (pDesc && pInitialData &&
++       pDesc->Usage == D3D11_USAGE_IMMUTABLE) {
++      host_desc = *pDesc;
++      host_desc.Usage = D3D11_USAGE_DEFAULT;
++      host_desc_arg = &host_desc;
++   }
++
+    /* Sync/async policy: see dev_CreateBuffer_override. */
+    ID3D11Texture1D *raw = NULL;
+    HRESULT hr;
+    if (dev->multi_ring_enabled) {
+       hr = npt_call_ID3D11Device_CreateTexture1D(
+-         npt_device_method_ring(dev), self_id, pDesc, NULL, &raw);
++         npt_device_method_ring(dev), self_id, host_desc_arg, NULL, &raw);
+    } else {
+       npt_async_ID3D11Device_CreateTexture1D(
+-         npt_device_method_ring(dev), self_id, pDesc, NULL, &raw);
++         npt_device_method_ring(dev), self_id, host_desc_arg, NULL, &raw);
+       hr = (HRESULT)0;
+    }
+ 
+@@ -430,15 +446,31 @@
+    struct npt_device *dev = npt_com_self_device(self);
+    uint64_t self_id = npt_com_self_id(self);
+ 
++   /*
++    * Neptune: immutable initial data is uploaded after host CreateTexture.
++    * Creating the host resource as IMMUTABLE would make
++    * DXMT mark it GpuReadonly before RESOURCE_UPDATE supplies the real
++    * contents.  Create the host backing as DEFAULT, while keeping the
++    * original IMMUTABLE description in the guest wrapper.
++    */
++   D3D11_TEXTURE2D_DESC host_desc;
++   const D3D11_TEXTURE2D_DESC *host_desc_arg = pDesc;
++   if (pDesc && pInitialData &&
++       pDesc->Usage == D3D11_USAGE_IMMUTABLE) {
++      host_desc = *pDesc;
++      host_desc.Usage = D3D11_USAGE_DEFAULT;
++      host_desc_arg = &host_desc;
++   }
++
+    /* Sync/async policy: see dev_CreateBuffer_override. */
+    ID3D11Texture2D *raw = NULL;
+    HRESULT hr;
+    if (dev->multi_ring_enabled) {
+       hr = npt_call_ID3D11Device_CreateTexture2D(
+-         npt_device_method_ring(dev), self_id, pDesc, NULL, &raw);
++         npt_device_method_ring(dev), self_id, host_desc_arg, NULL, &raw);
+    } else {
+       npt_async_ID3D11Device_CreateTexture2D(
+-         npt_device_method_ring(dev), self_id, pDesc, NULL, &raw);
++         npt_device_method_ring(dev), self_id, host_desc_arg, NULL, &raw);
+       hr = (HRESULT)0;
+    }
+ 
+@@ -483,15 +515,31 @@
+    struct npt_device *dev = npt_com_self_device(self);
+    uint64_t self_id = npt_com_self_id(self);
+ 
++   /*
++    * Neptune: immutable initial data is uploaded after host CreateTexture.
++    * Creating the host resource as IMMUTABLE would make
++    * DXMT mark it GpuReadonly before RESOURCE_UPDATE supplies the real
++    * contents.  Create the host backing as DEFAULT, while keeping the
++    * original IMMUTABLE description in the guest wrapper.
++    */
++   D3D11_TEXTURE3D_DESC host_desc;
++   const D3D11_TEXTURE3D_DESC *host_desc_arg = pDesc;
++   if (pDesc && pInitialData &&
++       pDesc->Usage == D3D11_USAGE_IMMUTABLE) {
++      host_desc = *pDesc;
++      host_desc.Usage = D3D11_USAGE_DEFAULT;
++      host_desc_arg = &host_desc;
++   }
++
+    /* Sync/async policy: see dev_CreateBuffer_override. */
+    ID3D11Texture3D *raw = NULL;
+    HRESULT hr;
+    if (dev->multi_ring_enabled) {
+       hr = npt_call_ID3D11Device_CreateTexture3D(
+-         npt_device_method_ring(dev), self_id, pDesc, NULL, &raw);
++         npt_device_method_ring(dev), self_id, host_desc_arg, NULL, &raw);
+    } else {
+       npt_async_ID3D11Device_CreateTexture3D(
+-         npt_device_method_ring(dev), self_id, pDesc, NULL, &raw);
++         npt_device_method_ring(dev), self_id, host_desc_arg, NULL, &raw);
+       hr = (HRESULT)0;
+    }
+ 
+@@ -537,14 +585,30 @@
+    struct npt_device *dev = npt_com_self_device(self);
+    uint64_t self_id = npt_com_self_id(self);
+ 
++   /*
++    * Neptune: immutable initial data is uploaded after host CreateTexture.
++    * Creating the host resource as IMMUTABLE would make
++    * DXMT mark it GpuReadonly before RESOURCE_UPDATE supplies the real
++    * contents.  Create the host backing as DEFAULT, while keeping the
++    * original IMMUTABLE description in the guest wrapper.
++    */
++   D3D11_TEXTURE2D_DESC1 host_desc;
++   const D3D11_TEXTURE2D_DESC1 *host_desc_arg = pDesc1;
++   if (pDesc1 && pInitialData &&
++       pDesc1->Usage == D3D11_USAGE_IMMUTABLE) {
++      host_desc = *pDesc1;
++      host_desc.Usage = D3D11_USAGE_DEFAULT;
++      host_desc_arg = &host_desc;
++   }
++
+    ID3D11Texture2D1 *raw = NULL;
+    HRESULT hr;
+    if (dev->multi_ring_enabled) {
+       hr = npt_call_ID3D11Device3_CreateTexture2D1(
+-         npt_device_method_ring(dev), self_id, pDesc1, NULL, &raw);
++         npt_device_method_ring(dev), self_id, host_desc_arg, NULL, &raw);
+    } else {
+       npt_async_ID3D11Device3_CreateTexture2D1(
+-         npt_device_method_ring(dev), self_id, pDesc1, NULL, &raw);
++         npt_device_method_ring(dev), self_id, host_desc_arg, NULL, &raw);
+       hr = (HRESULT)0;
+    }
+ 
+@@ -589,14 +653,30 @@
+    struct npt_device *dev = npt_com_self_device(self);
+    uint64_t self_id = npt_com_self_id(self);
+ 
++   /*
++    * Neptune: immutable initial data is uploaded after host CreateTexture.
++    * Creating the host resource as IMMUTABLE would make
++    * DXMT mark it GpuReadonly before RESOURCE_UPDATE supplies the real
++    * contents.  Create the host backing as DEFAULT, while keeping the
++    * original IMMUTABLE description in the guest wrapper.
++    */
++   D3D11_TEXTURE3D_DESC1 host_desc;
++   const D3D11_TEXTURE3D_DESC1 *host_desc_arg = pDesc1;
++   if (pDesc1 && pInitialData &&
++       pDesc1->Usage == D3D11_USAGE_IMMUTABLE) {
++      host_desc = *pDesc1;
++      host_desc.Usage = D3D11_USAGE_DEFAULT;
++      host_desc_arg = &host_desc;
++   }
++
+    ID3D11Texture3D1 *raw = NULL;
+    HRESULT hr;
+    if (dev->multi_ring_enabled) {
+       hr = npt_call_ID3D11Device3_CreateTexture3D1(
+-         npt_device_method_ring(dev), self_id, pDesc1, NULL, &raw);
++         npt_device_method_ring(dev), self_id, host_desc_arg, NULL, &raw);
+    } else {
+       npt_async_ID3D11Device3_CreateTexture3D1(
+-         npt_device_method_ring(dev), self_id, pDesc1, NULL, &raw);
++         npt_device_method_ring(dev), self_id, host_desc_arg, NULL, &raw);
+       hr = (HRESULT)0;
+    }
+ 

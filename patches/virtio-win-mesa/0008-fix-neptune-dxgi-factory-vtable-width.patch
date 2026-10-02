@@ -1,0 +1,100 @@
+diff --git a/src/virtio/neptune/npt_com.c b/src/virtio/neptune/npt_com.c
+--- a/src/virtio/neptune/npt_com.c
++++ b/src/virtio/neptune/npt_com.c
+@@ -164,8 +164,9 @@ npt_com_qi_memo_flush(struct npt_com_base *com)
+    }
+ }
+ 
+-/* Override families patch vtbls in place rather than registering a
+- * different ctor, so existing entries are left alone. */
++/* Default registration is insert-only.  Most override families patch vtbls
++ * in place; exceptional ABI cases may replace an existing ctor explicitly
++ * after the generated ctor table has been populated. */
+ void
+ npt_com_register_default_ctor(const GUID *iid, npt_com_ctor_fn ctor)
+ {
+@@ -181,7 +182,22 @@ npt_com_register_default_ctor(const GUID *iid, npt_com_ctor_fn ctor)
+    }
+ }
+ 
++void
++npt_com_replace_ctor(const GUID *iid, npt_com_ctor_fn ctor)
++{
++   if (!iid || !ctor)
++      return;
++
++   struct npt_com_ctor_entry *e = npt_com_table_lookup_entry_mut(iid);
++   if (!e || e->iid == NULL) {
++      npt_log("npt_com_replace_ctor: no default ctor registered for IID");
++      return;
++   }
++
++   e->ctor = ctor;
++}
++
+ 
+ void
+ npt_com_register_family(const GUID *const *tier_iids,
+                         size_t aux_size,
+diff --git a/src/virtio/neptune/npt_com.h b/src/virtio/neptune/npt_com.h
+--- a/src/virtio/neptune/npt_com.h
++++ b/src/virtio/neptune/npt_com.h
+@@ -219,6 +219,12 @@ typedef void *(*npt_com_ctor_fn)(struct npt_device *dev, uint64_t object_id);
+ void
+ npt_com_register_default_ctor(const GUID *iid, npt_com_ctor_fn ctor);
+ 
++/* Replace a ctor installed by the generated default-ctor table.  Intended for
++ * exceptional ABI cases where the wrapper needs different physical vtable
++ * storage while keeping the generated interface implementation. */
++void
++npt_com_replace_ctor(const GUID *iid, npt_com_ctor_fn ctor);
++
+ /*
+  * Aux state: runtime-allocated per-wrapper side data.  A family
+  * declares aux_size and aux_init via npt_com_register_family; on
+diff --git a/src/virtio/neptune/npt_overrides_dxgi_factory.c b/src/virtio/neptune/npt_overrides_dxgi_factory.c
+--- a/src/virtio/neptune/npt_overrides_dxgi_factory.c
++++ b/src/virtio/neptune/npt_overrides_dxgi_factory.c
+@@ -285,6 +285,24 @@ static const GUID *const factory_tiers[] = {
+    &NPT_IID_IDXGIFactory6, &NPT_IID_IDXGIFactory7, NULL,
+ };
+ 
++/*
++ * IDXGIFactory1 must tolerate callers reaching newer factory slots through
++ * the original pointer after probing a higher tier.  Keep Factory1's COM
++ * identity/QI implementation, but back it with storage wide enough for the
++ * complete Factory7 method table.
++ */
++static struct npt_idxgifactory7_client_vtbl factory1_wide_vtbl;
++
++static void *
++factory1_wide_ctor(struct npt_device *dev, uint64_t host_id)
++{
++   struct npt_com_base *com =
++      npt_idxgifactory1_client_create(dev, host_id);
++   if (com)
++      com->lpVtbl = (const void **)&factory1_wide_vtbl;
++   return com;
++}
++
+ void
+ npt_overrides_dxgi_factory_init(void)
+ {
+@@ -323,5 +347,17 @@ npt_overrides_dxgi_factory_init(void)
+    NPT_REGISTER_OVERRIDE_DXGI_FACTORY2(CreateSwapChainForComposition,
+                                        fac2_CreateSwapChainForComposition_override);
+ 
++   /* Clone only after every factory override above has been installed, so the
++    * wide table contains the same hand-written methods as Factory7. */
++   factory1_wide_vtbl = npt_idxgifactory7_default_vtbl_storage;
++   factory1_wide_vtbl.QueryInterface =
++      npt_idxgifactory1_default_QueryInterface;
++   factory1_wide_vtbl.AddRef =
++      npt_idxgifactory1_default_AddRef;
++   factory1_wide_vtbl.Release =
++      npt_idxgifactory1_default_Release;
++
++   npt_com_replace_ctor(&NPT_IID_IDXGIFactory1, factory1_wide_ctor);
++
+    npt_com_register_family(factory_tiers, 0, NULL);
+ }

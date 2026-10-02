@@ -7,7 +7,7 @@ EXE_REL="${3:-}"
 
 usage() {
     cat >&2 <<EOF_USAGE
-usage: $(basename "$0") <steam-appid> <status|venus|neptune> [relative/path/to/Game.exe]
+usage: $(basename "$0") <steam-appid> <status|venus|neptune|neptune-dx12> [relative/path/to/Game.exe]
 EOF_USAGE
 }
 
@@ -94,17 +94,95 @@ resolve_target_dir() {
     dirname "$exe"
 }
 
+pe_valid() {
+    local path="$1"
+    local off sig
+
+    [ -s "$path" ] || return 1
+
+    [ "$(LC_ALL=C dd if="$path" bs=1 count=2 2>/dev/null)" = "MZ" ] ||
+        return 1
+
+    off="$(
+        od -An -tu4 -j60 -N4 "$path" 2>/dev/null |
+        tr -d '[:space:]'
+    )"
+
+    case "$off" in
+        ""|*[!0-9]*)
+            return 1
+            ;;
+    esac
+
+    sig="$(
+        dd if="$path" bs=1 skip="$off" count=4 2>/dev/null |
+        od -An -tx1 |
+        tr -d '[:space:]'
+    )"
+
+    [ "$sig" = "50450000" ]
+}
+
+elf_valid() {
+    local path="$1"
+    local sig
+
+    [ -s "$path" ] || return 1
+
+    sig="$(
+        dd if="$path" bs=1 count=4 2>/dev/null |
+        od -An -tx1 |
+        tr -d '[:space:]'
+    )"
+
+    [ "$sig" = "7f454c46" ]
+}
+
+require_pe() {
+    pe_valid "$1" || {
+        echo "invalid or zero-byte PE artifact: $1" >&2
+        exit 1
+    }
+}
+
+require_elf() {
+    elf_valid "$1" || {
+        echo "invalid or zero-byte ELF artifact: $1" >&2
+        exit 1
+    }
+}
+
 source_paths() {
-    if [ -f "$BUILD/d3d11.dll" ] &&
-       [ -f "$BUILD/dxgi.dll" ] &&
-       [ -f "$BUILD/nptunix/nptunix.dll" ] &&
-       [ -f "$BUILD/nptunix/nptunix.so" ]; then
+    local primary
+
+    case "$MODE" in
+        neptune)
+            primary="d3d11.dll"
+            ;;
+        neptune-dx12)
+            primary="d3d12.dll"
+            ;;
+        *)
+            echo "internal error: source_paths called for mode $MODE" >&2
+            exit 1
+            ;;
+    esac
+
+    if pe_valid "$BUILD/$primary" &&
+       pe_valid "$BUILD/dxgi.dll" &&
+       pe_valid "$BUILD/nptunix/nptunix.dll" &&
+       elf_valid "$BUILD/nptunix/nptunix.so"; then
+
+        ARTIFACT_SOURCE="BUILD ($BUILD)"
+
         D3D11="$BUILD/d3d11.dll"
         D3D12="$BUILD/d3d12.dll"
         DXGI="$BUILD/dxgi.dll"
         NPTDLL="$BUILD/nptunix/nptunix.dll"
         NPTSO="$BUILD/nptunix/nptunix.so"
     else
+        ARTIFACT_SOURCE="PREBUILT ($PREBUILT)"
+
         D3D11="$PREBUILT/x86_64-windows/d3d11.dll"
         D3D12="$PREBUILT/x86_64-windows/d3d12.dll"
         DXGI="$PREBUILT/x86_64-windows/dxgi.dll"
@@ -265,12 +343,12 @@ case "$MODE" in
         ;;
 esac
 
-for source in "${SOURCES[@]}" "$NPTSO"; do
-    test -f "$source" || {
-        echo "missing Neptune artifact: $source" >&2
-        exit 1
-    }
+for source in "${SOURCES[@]}"; do
+    require_pe "$source"
 done
+require_elf "$NPTSO"
+
+echo "Neptune artifact source: $ARTIFACT_SOURCE"
 
 # Validate the destination before removing a previous managed installation.
 ensure_target_is_safe "$TARGET_DIR" "${REQUIRED[@]}"

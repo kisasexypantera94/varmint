@@ -444,8 +444,9 @@ enum ScanoutSource {
         rect: Rect,
     },
     Blob {
-        width: u32,
-        height: u32,
+        rect: Rect,
+        framebuffer_width: u32,
+        framebuffer_height: u32,
         stride: u32,
         offset: u64,
     },
@@ -556,6 +557,7 @@ pub struct Gpu<'a> {
     scanout: Option<Scanout>,
     display_width: u32,
     display_height: u32,
+    display_refresh_millihertz: u32,
     edid_compatibility_mode: Option<(u32, u32)>,
     events_read: u32,
     pending_fences: Vec<PendingFence>,
@@ -574,6 +576,7 @@ impl<'a> Gpu<'a> {
             scanout: None,
             display_width: 0,
             display_height: 0,
+            display_refresh_millihertz: 60_000,
             edid_compatibility_mode: None,
             events_read: 0,
             pending_fences: Vec::new(),
@@ -733,7 +736,12 @@ impl<'a> Gpu<'a> {
 
         let width = self.display_width.max(32);
         let height = self.display_height.max(32);
-        let Some(edid) = edid::build(width, height, self.edid_compatibility_mode) else {
+        let Some(edid) = edid::build(
+            width,
+            height,
+            self.edid_compatibility_mode,
+            self.display_refresh_millihertz,
+        ) else {
             eprintln!("virtio-gpu: cannot build EDID for {}x{}", width, height);
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         };
@@ -1338,13 +1346,33 @@ impl<'a> Gpu<'a> {
         if resource_id == 0 {
             self.scanout = None;
         } else {
-            if !self.resources.contains_key(&resource_id) {
+            let Some(resource) = self.resources.get(&resource_id) else {
                 return Gpu::err(chain, CtrlType::RespErrInvalidResourceId, hdr, mem);
+            };
+
+            let rect = val.r;
+            let rect_x = rect.x;
+            let rect_y = rect.y;
+            let rect_width = rect.width;
+            let rect_height = rect.height;
+            let resource_width = resource.width;
+            let resource_height = resource.height;
+
+            if rect_width == 0
+                || rect_height == 0
+                || rect_x.checked_add(rect_width).is_none_or(|end| end > resource_width)
+                || rect_y.checked_add(rect_height).is_none_or(|end| end > resource_height)
+            {
+                eprintln!(
+                    "virtio-gpu: SET_SCANOUT invalid rect={}x{}+{},{} resource={}x{} resource_id={}",
+                    rect_width, rect_height, rect_x, rect_y, resource_width, resource_height, resource_id,
+                );
+                return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
             }
 
             self.scanout = Some(Scanout {
                 resource_id,
-                source: ScanoutSource::Resource { rect: val.r },
+                source: ScanoutSource::Resource { rect },
             });
             self.configure_presentation();
         }
@@ -1424,8 +1452,19 @@ impl<'a> Gpu<'a> {
 
         let resource_id = val.resource_id;
         let scanout_id = val.scanout_id;
-        let width = val.width;
-        let height = val.height;
+        let framebuffer_width = val.width;
+        let framebuffer_height = val.height;
+        let rect = val.r;
+        let rect_x = rect.x;
+        let rect_y = rect.y;
+        let rect_width = rect.width;
+        let rect_height = rect.height;
+        let stride = if val.strides[0] != 0 {
+            val.strides[0]
+        } else {
+            framebuffer_width.saturating_mul(BYTES_PER_PIXEL as u32)
+        };
+        let offset = val.offsets[0] as u64;
 
         if scanout_id != 0 {
             return Gpu::err(chain, CtrlType::RespErrInvalidScanoutId, hdr, mem);
@@ -1436,7 +1475,21 @@ impl<'a> Gpu<'a> {
             return Gpu::ok(chain, hdr, mem);
         }
 
-        if width == 0 || height == 0 || width > 16384 || height > 16384 {
+        if framebuffer_width == 0
+            || framebuffer_height == 0
+            || framebuffer_width > 16384
+            || framebuffer_height > 16384
+            || rect_width == 0
+            || rect_height == 0
+            || rect_x.checked_add(rect_width).is_none_or(|end| end > framebuffer_width)
+            || rect_y
+                .checked_add(rect_height)
+                .is_none_or(|end| end > framebuffer_height)
+        {
+            eprintln!(
+                "virtio-gpu: SET_SCANOUT_BLOB invalid rect={}x{}+{},{} framebuffer={}x{} resource_id={}",
+                rect_width, rect_height, rect_x, rect_y, framebuffer_width, framebuffer_height, resource_id,
+            );
             return Gpu::err(chain, CtrlType::RespErrInvalidParameter, hdr, mem);
         }
 
@@ -1447,14 +1500,11 @@ impl<'a> Gpu<'a> {
         self.scanout = Some(Scanout {
             resource_id,
             source: ScanoutSource::Blob {
-                width,
-                height,
-                stride: if val.strides[0] != 0 {
-                    val.strides[0]
-                } else {
-                    width.saturating_mul(BYTES_PER_PIXEL as u32)
-                },
-                offset: val.offsets[0] as u64,
+                rect,
+                framebuffer_width,
+                framebuffer_height,
+                stride,
+                offset,
             },
         });
         self.configure_presentation();
@@ -1467,10 +1517,11 @@ impl<'a> Gpu<'a> {
             resource_id: scanout_resource_id,
             source:
                 ScanoutSource::Blob {
-                    width,
-                    height,
+                    framebuffer_width,
+                    framebuffer_height,
                     stride,
                     offset,
+                    ..
                 },
             ..
         }) = self.scanout.as_ref()
@@ -1482,8 +1533,8 @@ impl<'a> Gpu<'a> {
             return false;
         }
 
-        let width = *width as usize;
-        let height = *height as usize;
+        let width = *framebuffer_width as usize;
+        let height = *framebuffer_height as usize;
         let src_stride = *stride as usize;
         let base = *offset as usize;
 
@@ -1552,7 +1603,7 @@ impl<'a> Gpu<'a> {
 
         let (width, height) = match &scanout.source {
             ScanoutSource::Resource { rect } => (rect.width, rect.height),
-            ScanoutSource::Blob { width, height, .. } => (*width, *height),
+            ScanoutSource::Blob { rect, .. } => (rect.width, rect.height),
         };
 
         (self.on_present)(Presentation::Configure { width, height });
@@ -1577,14 +1628,19 @@ impl<'a> Gpu<'a> {
                 },
                 None,
             ),
-            ScanoutSource::Blob { width, height, .. } => (
+            ScanoutSource::Blob {
+                rect,
+                framebuffer_width,
+                framebuffer_height,
+                ..
+            } => (
                 PresentRect {
-                    x: 0,
-                    y: 0,
-                    width: *width,
-                    height: *height,
+                    x: rect.x,
+                    y: rect.y,
+                    width: rect.width,
+                    height: rect.height,
                 },
-                Some((*width, *height)),
+                Some((*framebuffer_width, *framebuffer_height)),
             ),
         };
 
@@ -1862,8 +1918,11 @@ impl<'a> Gpu<'a> {
 
 pub enum ExternalEvent {
     DisplayResized {
-        width: u32,
-        height: u32,
+        physical_width: u32,
+        physical_height: u32,
+        logical_width: u32,
+        logical_height: u32,
+        refresh_millihertz: u32,
     },
     FenceSignaled {
         ctx_id: u32,
@@ -1878,14 +1937,21 @@ impl<'a> ExternalEventHandler for Gpu<'a> {
 
     fn on_event(&mut self, event: ExternalEvent, ctx: &mut DeviceContext<'_>) {
         match event {
-            ExternalEvent::DisplayResized { width, height } => {
-                if width == 0 || height == 0 {
+            ExternalEvent::DisplayResized {
+                physical_width,
+                physical_height,
+                logical_width,
+                logical_height,
+                refresh_millihertz,
+            } => {
+                if physical_width == 0 || physical_height == 0 || logical_width == 0 || logical_height == 0 {
                     return;
                 }
 
-                self.edid_compatibility_mode.get_or_insert((width, height));
-                self.display_width = width;
-                self.display_height = height;
+                self.display_width = physical_width;
+                self.display_height = physical_height;
+                self.display_refresh_millihertz = refresh_millihertz;
+                self.edid_compatibility_mode = Some((logical_width, logical_height));
                 self.events_read |= EVENT_DISPLAY;
                 ctx.config_changed();
             }

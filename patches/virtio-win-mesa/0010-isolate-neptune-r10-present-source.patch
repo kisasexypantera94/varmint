@@ -1,0 +1,114 @@
+diff --git a/src/virtio/neptune/npt_swapchain.c b/src/virtio/neptune/npt_swapchain.c
+--- a/src/virtio/neptune/npt_swapchain.c
++++ b/src/virtio/neptune/npt_swapchain.c
+@@ -80,6 +80,11 @@ struct npt_guest_swapchain {
+    void *backbuffer;             /* ID3D11Texture2D* */
+    uint64_t backbuffer_id;
+ 
++   /* Private R10 copy that separates the app render-target resource from the
++    * shader-readable source consumed by the present conversion. */
++   void *r10_stage;              /* ID3D11Texture2D* */
++   uint64_t r10_stage_id;
++
+    /* Pool rotation cursor; the pool itself lives in the common state. */
+    uint32_t next_image;
+ 
+@@ -246,10 +253,22 @@ gsc_present_common(void *self, UINT SyncInterval, UINT Flags)
+    npt_gsc_reuse_gate(c, i);
+ 
+    struct npt_ring *ring = npt_com_self_ring(s->dc);
++
++   ID3D11Resource *present_source = (ID3D11Resource *)s->backbuffer;
++
++   if (s->r10_stage) {
++      npt_async_ID3D11DeviceContext_CopyResource(
++         ring, s->dc_id,
++         (ID3D11Resource *)s->r10_stage,
++         (ID3D11Resource *)s->backbuffer);
++
++      present_source = (ID3D11Resource *)s->r10_stage;
++   }
++
+    npt_async_ID3D11DeviceContext_CopyResource(
+       ring, s->dc_id,
+       (ID3D11Resource *)c->present_tex[i],
+-      (ID3D11Resource *)s->backbuffer);
++      present_source);
+ 
+    /* GPU-done fence: signal the fence on the DC after the copy, then
+     * arm a fresh event token on its completion value and turn that
+@@ -385,6 +404,41 @@ gsc_create_backbuffer(struct npt_guest_swapchain *s)
+    return NPT_S_OK;
+ }
+ 
++static HRESULT
++gsc_create_r10_stage(struct npt_guest_swapchain *s)
++{
++   struct npt_guest_swapchain_common *c = &s->base;
++
++   if (c->desc.Format != DXGI_FORMAT_R10G10B10A2_UNORM)
++      return NPT_S_OK;
++
++   D3D11_TEXTURE2D_DESC d;
++   memset(&d, 0, sizeof(d));
++   d.Width = c->desc.Width;
++   d.Height = c->desc.Height;
++   d.MipLevels = 1;
++   d.ArraySize = 1;
++   d.Format = DXGI_FORMAT_R10G10B10A2_UNORM;
++   d.SampleDesc = c->desc.SampleDesc;
++   d.Usage = D3D11_USAGE_DEFAULT;
++
++   /* The stage is only a CopyResource destination and shader-readable source;
++    * it is deliberately not part of the app's render-target lineage. */
++   d.BindFlags = D3D11_BIND_SHADER_RESOURCE;
++
++   const struct npt_id3d11device_client_vtbl *v =
++      (const void *)((struct npt_com_base *)s->device)->lpVtbl;
++
++   ID3D11Texture2D *tex = NULL;
++   HRESULT hr = v->CreateTexture2D(s->device, &d, NULL, &tex);
++   if (NPT_FAILED(hr) || !tex)
++      return NPT_FAILED(hr) ? hr : NPT_E_FAIL;
++
++   s->r10_stage = tex;
++   s->r10_stage_id = npt_com_self_id(tex);
++   return NPT_S_OK;
++}
++
+ static HRESULT
+ gsc_resize_common(void *self, UINT BufferCount, UINT Width, UINT Height,
+                   DXGI_FORMAT NewFormat, UINT SwapChainFlags)
+@@ -416,8 +471,11 @@ gsc_resize_common(void *self, UINT BufferCount, UINT Width, UINT Height,
+ 
+    /* DXGI requires the app to have dropped its buffer refs; be
+     * lenient (refcounting keeps a straggler alive) but recreate. */
++   npt_gsc_release_held(dev, &s->r10_stage, &s->r10_stage_id);
+    npt_gsc_release_held(dev, &s->backbuffer, &s->backbuffer_id);
+    HRESULT hr = gsc_create_backbuffer(s);
++   if (NPT_SUCCEEDED(hr))
++      hr = gsc_create_r10_stage(s);
+ 
+    mtx_unlock(&c->present_mutex);
+    return hr;
+@@ -852,6 +910,7 @@ gsc_aux_destroy(void *aux)
+ 
+    npt_gsc_release_outputs(c);
+ 
++   npt_gsc_release_held(dev, &s->r10_stage, &s->r10_stage_id);
+    npt_gsc_release_held(dev, &s->backbuffer, &s->backbuffer_id);
+    npt_gsc_release_held(dev, &s->fence, &s->fence_id);
+    npt_gsc_release_held(dev, &s->dc4, &s->dc4_id);
+@@ -1005,6 +1064,12 @@ npt_guest_swapchain_create(void *device_unknown,
+       return hr;
+    }
+ 
++   hr = gsc_create_r10_stage(s);
++   if (NPT_FAILED(hr)) {
++      npt_com_default_release(com);
++      return hr;
++   }
++
+    npt_log("guest swapchain: created %ux%u fmt=%u buffers=%u hwnd=%p",
+            s->base.desc.Width, s->base.desc.Height, s->base.desc.Format,
+            s->base.desc.BufferCount, (void *)hwnd);

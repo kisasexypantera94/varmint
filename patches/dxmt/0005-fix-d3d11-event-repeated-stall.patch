@@ -1,0 +1,22 @@
+diff --git a/src/d3d11/d3d11_query.hpp b/src/d3d11/d3d11_query.hpp
+index 9b7f2c2..0a0dd2f 100644
+--- a/src/d3d11/d3d11_query.hpp
++++ b/src/d3d11/d3d11_query.hpp
+@@ -149,9 +149,16 @@ public:
+         stall_counter++;
+         return EventState::Pending;
+       }
++      /*
++       * Force progress once after a prolonged poll loop. After that,
++       * keep honoring DONOTFLUSH until the event actually signals
++       * instead of forcing Flush() again on every subsequent poll.
++       */
+       stall_counter = ~0u;
++      return EventState::Stall;
+     }
+-    return EventState::Stall;
++
++    return EventState::Pending;
+   };
+ 
+ private:

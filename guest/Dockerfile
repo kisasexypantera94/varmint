@@ -1,4 +1,4 @@
-ARG FEX_COMMIT=99662b70ffbf24a9ad50f0317f75166e0822f5a4
+ARG FEX_COMMIT=0df84d3844bcdb87bb7d3f5b8fb0959cd009c038
 
 FROM debian:trixie-slim AS fex-builder
 
@@ -9,6 +9,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         clang \
+        clang-tools \
         cmake \
         git \
         libasound2-dev \
@@ -112,6 +113,7 @@ COPY patches/virtio-win-mesa /opt/varmint/rootfs/usr/local/share/varmint/neptune
 RUN install -Dm0755 /opt/varmint/source/build-image-container.sh /usr/local/bin/build-varmint-guest && \
     install -Dm0755 /opt/varmint/source/varmint-gpu-check /opt/varmint/rootfs/usr/local/bin/varmint-gpu-check && \
     install -Dm0755 /opt/varmint/source/varmint-steam /opt/varmint/rootfs/usr/local/bin/varmint-steam && \
+    ln -s varmint-steam /opt/varmint/rootfs/usr/local/bin/steam && \
     install -Dm0755 /opt/varmint/source/neptune/build.sh /opt/varmint/rootfs/usr/local/bin/varmint-neptune-build && \
     install -Dm0755 /opt/varmint/source/neptune/game-graphics.sh /opt/varmint/rootfs/usr/local/bin/varmint-game-graphics && \
     install -Dm0755 /opt/varmint/source/neptune/dev-setup.sh /opt/varmint/rootfs/usr/local/bin/varmint-neptune-dev-setup && \

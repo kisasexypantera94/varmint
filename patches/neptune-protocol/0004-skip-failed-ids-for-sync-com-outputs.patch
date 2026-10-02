@@ -1,0 +1,129 @@
+diff --git a/templates/commands.h b/templates/commands.h
+index 729fb19..8a95cad 100644
+--- a/templates/commands.h
++++ b/templates/commands.h
+@@ -387,7 +387,7 @@ ${GEN.register_failed_output_handles(method.params, 'args.')}
+      * whose type is determined by the caller's riid. */
+ <% _riid = GEN._riid_expr_for(method.params, 'args.') %>\
+ % for p in method.params:
+-<% _reg = GEN.register_output_handle_field(p, 'args.', riid_expr=_riid) %>\
++<% _reg = GEN.register_output_handle_field(p, 'args.', riid_expr=_riid, register_failed_on_null=not GEN.method_reply_output_handles(method)) %>\
+ % if _reg.strip():
+ ${_reg}
+ % endif
+@@ -808,7 +808,7 @@ ${GEN.register_failed_output_handles(func.params, 'args.')}
+      * get runtime type resolution via npt_object_type_from_iid. */
+ <% _riid = GEN._riid_expr_for(func.params, 'args.') %>\
+ % for p in func.params:
+-<% _reg = GEN.register_output_handle_field(p, 'args.', riid_expr=_riid) %>\
++<% _reg = GEN.register_output_handle_field(p, 'args.', riid_expr=_riid, register_failed_on_null=not GEN.method_reply_output_handles(func)) %>\
+ % if _reg.strip():
+ ${_reg}
+ % endif
+diff --git a/tools/npt_codegen.py b/tools/npt_codegen.py
+index d372ac0..4763431 100644
+--- a/tools/npt_codegen.py
++++ b/tools/npt_codegen.py
+@@ -2180,7 +2180,8 @@ class Gen:
+ 
+     def register_output_handle_field(self, field: NptField, prefix: str,
+                                      indent: int = 1,
+-                                     riid_expr: Optional[str] = None) -> str:
++                                     riid_expr: Optional[str] = None,
++                                     register_failed_on_null: bool = True) -> str:
+         """
+         Generate handle registration code for an output COM handle field.
+         Called on host side after the dispatched method returns so the
+@@ -2203,7 +2204,8 @@ class Gen:
+         if inner is not None:
+             return '\n'.join(p for p in
+                              (self.register_output_handle_field(
+-                                 f, prefix, indent, riid_expr)
++                                 f, prefix, indent, riid_expr,
++                                 register_failed_on_null)
+                               for f in inner) if p)
+ 
+         acc = self._acc(field, prefix)
+@@ -2218,15 +2220,19 @@ class Gen:
+                 return ''
+             if field.indirection != 2:
+                 return ''
+-            return (
++            registration = (
+                 f'{ind}if ({acc} && *{acc})\n'
+                 f'{ind}    npt_cs_handle_register_guest_id(ctx, '
+                 f'{prefix}_guest_id_{field.name}, *{acc},\n'
+-                f'{ind}        npt_object_type_from_iid({riid_expr}));\n'
+-                f'{ind}else if ({acc})\n'
+-                f'{ind}    npt_cs_handle_register_failed_guest_id(ctx, '
+-                f'{prefix}_guest_id_{field.name});'
++                f'{ind}        npt_object_type_from_iid({riid_expr}));'
+             )
++            if register_failed_on_null:
++                registration += (
++                    f'\n{ind}else if ({acc})\n'
++                    f'{ind}    npt_cs_handle_register_failed_guest_id(ctx, '
++                    f'{prefix}_guest_id_{field.name});'
++                )
++            return registration
+ 
+         obj_type = self._object_type_for_field(field)
+ 
+@@ -2235,25 +2241,39 @@ class Gen:
+         if field.indirection == 2:
+             count_expr = self._get_count_expr(field, prefix)
+             if count_expr:
+-                return (f'{ind}if ({acc} && {prefix}_guest_ids_{field.name}) {{\n'
+-                        f'{ind}    const uint32_t _n = '
+-                        f'{prefix}_guest_id_count_{field.name};\n'
+-                        f'{ind}    for (uint32_t _i = 0; _i < _n; _i++) {{\n'
+-                        f'{ind}        if ({acc}[_i])\n'
+-                        f'{ind}            npt_cs_handle_register_guest_id(ctx,\n'
+-                        f'{ind}                {prefix}_guest_ids_{field.name}[_i], '
+-                        f'{acc}[_i], {obj_type});\n'
+-                        f'{ind}        else\n'
+-                        f'{ind}            npt_cs_handle_register_failed_guest_id(ctx,\n'
+-                        f'{ind}                {prefix}_guest_ids_{field.name}[_i]);\n'
+-                        f'{ind}    }}\n'
+-                        f'{ind}}}')
+-            return (f'{ind}if ({acc} && *{acc})\n'
+-                    f'{ind}    npt_cs_handle_register_guest_id(ctx, '
+-                    f'{prefix}_guest_id_{field.name}, *{acc}, {obj_type});\n'
+-                    f'{ind}else if ({acc})\n'
++                lines = [
++                    f'{ind}if ({acc} && {prefix}_guest_ids_{field.name}) {{\n',
++                    f'{ind}    const uint32_t _n = '
++                    f'{prefix}_guest_id_count_{field.name};\n',
++                    f'{ind}    for (uint32_t _i = 0; _i < _n; _i++) {{\n',
++                    f'{ind}        if ({acc}[_i])\n',
++                    f'{ind}            npt_cs_handle_register_guest_id(ctx,\n',
++                    f'{ind}                {prefix}_guest_ids_{field.name}[_i], '
++                    f'{acc}[_i], {obj_type});\n',
++                ]
++                if register_failed_on_null:
++                    lines.extend([
++                        f'{ind}        else\n',
++                        f'{ind}            npt_cs_handle_register_failed_guest_id(ctx,\n',
++                        f'{ind}                {prefix}_guest_ids_{field.name}[_i]);\n',
++                    ])
++                lines.extend([
++                    f'{ind}    }}\n',
++                    f'{ind}}}',
++                ])
++                return ''.join(lines)
++            registration = (
++                f'{ind}if ({acc} && *{acc})\n'
++                f'{ind}    npt_cs_handle_register_guest_id(ctx, '
++                f'{prefix}_guest_id_{field.name}, *{acc}, {obj_type});'
++            )
++            if register_failed_on_null:
++                registration += (
++                    f'\n{ind}else if ({acc})\n'
+                     f'{ind}    npt_cs_handle_register_failed_guest_id(ctx, '
+-                    f'{prefix}_guest_id_{field.name});')
++                    f'{prefix}_guest_id_{field.name});'
++                )
++            return registration
+ 
+         return ''
+ 
