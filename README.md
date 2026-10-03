@@ -58,6 +58,8 @@ DirectX 12 support is experimental and has not been tested extensively yet.
 
 See [Running games in Varmint](docs/games/common.md) for general setup and troubleshooting.
 
+The games below have been tested. Click a game name for its tested configuration and game-specific setup notes.
+
 | Game                                                                                    | Status | Setup Difficulty |
 | --------------------------------------------------------------------------------------- | -----: | ---------------: |
 | [The Witcher 3: Wild Hunt](docs/games/the-witcher-3.md)                                 |      ✅ |               🟢 |
@@ -83,9 +85,14 @@ See [Running games in Varmint](docs/games/common.md) for general setup and troub
 | [Assassin's Creed II](docs/games/assassins-creed-2.md)                                  |      ✅ |               🟢 |
 | [SnowRunner](docs/games/snowrunner.md)                                                  |      ✅ |               🟢 |
 | [Grand Theft Auto IV](docs/games/grand-theft-auto-iv.md)                                |      ✅ |               🟡 |
-
-<!-- | [Subnautica: Below Zero](docs/games/subnautica-below-zero.md)                              |      ✅ |    🟢 | -->
-<!-- | [Age of Empires II: Definitive Edition](docs/games/age-of-empires-2-definitive-edition.md) |      ✅ |    🟠 | -->
+| [SAND: Raiders of Sophie](docs/games/sand-raiders-of-sophie.md)                         |      ✅ |               🟢 |
+| [Muck](docs/games/muck.md)                                                              |      ✅ |               🟢 |
+| [Burglin' Gnomes](docs/games/burglin-gnomes.md)                                         |      ✅ |               🟢 |
+| [Grounded](docs/games/grounded.md)                                                      |      ✅ |               🟢 |
+| [Deep Rock Galactic](docs/games/deep-rock-galactic.md)                                  |      ✅ |               🟢 |
+| [DARK SOULS II: Scholar of the First Sin](docs/games/dark-souls-2-sotfs.md)             |      ✅ |               🟢 |
+| [Assassin's Creed Odyssey](docs/games/assassins-creed-odyssey.md)                       |      ✅ |               🟢 |
+| [The Elder Scrolls V: Skyrim Special Edition](docs/games/skyrim-special-edition.md)     |      ✅ |               🟢 |
 
 ## Demos
 |                                                       The Witcher 3: Wild Hunt                                                       |                                                       Dragon's Dogma: Dark Arisen                                                       |

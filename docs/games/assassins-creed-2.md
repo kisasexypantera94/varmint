@@ -31,3 +31,15 @@ If the launcher says it could not verify the game, click **Stop**, then start th
 
 No additional launch options or configuration is required for the tested setup.
 
+## Known issues
+
+### White screen after startup
+
+If the game gets stuck on a white screen after startup, verify the installed game files in Steam:
+
+1. Open **Properties** for Assassin's Creed II.
+2. Open **Installed Files**.
+3. Click **Verify integrity of game files**.
+
+A corrupted or incomplete game installation can cause this symptom and may look like a graphics or compatibility issue.
+

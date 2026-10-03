@@ -42,10 +42,10 @@ sudo apt-get install -y firefox-esr
 
 ### 3. Download the Unofficial Patch
 
-Open the Unofficial Patch 11.5 page:
+Open the Unofficial Patch page:
 
 ```bash
-firefox-esr 'https://www.moddb.com/mods/vtmb-unofficial-patch/downloads/bloodlines-unofficial-patch-115'
+firefox-esr 'https://www.moddb.com/mods/vtmb-unofficial-patch/downloads'
 ```
 
 Download the Windows installer to your `Downloads` directory.
