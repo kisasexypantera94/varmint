@@ -99,7 +99,7 @@ impl Presenter {
         layer.removeAllAnimations();
 
         layer.setPresentsWithTransaction(false);
-        layer.setDisplaySyncEnabled(false);
+        layer.setDisplaySyncEnabled(true);
         layer.setDrawableSize(NSSize::new(width.max(1) as f64, height.max(1) as f64));
 
         Self {
