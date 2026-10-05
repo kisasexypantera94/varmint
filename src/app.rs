@@ -148,6 +148,8 @@ struct AppState<'a> {
     iosurface_id: Option<u32>,
     last_seq: u64,
     frame_pending: bool,
+    present_interval: Duration,
+    next_present: Instant,
     next_keepalive: Instant,
 
     last_mouse_pos: Option<(f64, f64)>,
@@ -173,6 +175,8 @@ impl<'a> AppState<'a> {
             iosurface_id: None,
             last_seq: 0,
             frame_pending: false,
+            present_interval: Duration::from_nanos(16_666_667),
+            next_present: Instant::now(),
             next_keepalive: Instant::now(),
             last_mouse_pos: None,
             mouse_captured: false,
@@ -218,6 +222,30 @@ impl<'a> AppState<'a> {
         }
 
         presented
+    }
+
+    fn set_present_refresh_millihertz(&mut self, refresh_millihertz: u32) {
+        let refresh_millihertz = u64::from(refresh_millihertz.max(1));
+        self.present_interval = Duration::from_nanos(1_000_000_000_000u64 / refresh_millihertz);
+    }
+
+    fn present_pending_if_due(&mut self) {
+        if !self.frame_pending {
+            return;
+        }
+
+        let now = Instant::now();
+        if now < self.next_present {
+            return;
+        }
+
+        self.present(PresentMode::NewFrame);
+        self.next_present += self.present_interval;
+
+        let now = Instant::now();
+        if self.next_present <= now {
+            self.next_present = now + self.present_interval;
+        }
     }
 
     fn poll_display(&mut self) -> bool {
@@ -313,17 +341,20 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
             presenter.set_stats_visible(self.stats_visible);
         }
 
+        let refresh_millihertz = display_refresh_millihertz(self.presenter.as_ref().unwrap().window());
+        self.set_present_refresh_millihertz(refresh_millihertz);
+        self.next_present = Instant::now();
+
         let _ = self.host_tx.send(RuntimeEvent::DisplayResized {
             physical_width: width,
             physical_height: height,
             logical_width: logical_size.width,
             logical_height: logical_size.height,
-            refresh_millihertz: display_refresh_millihertz(self.presenter.as_ref().unwrap().window()),
+            refresh_millihertz,
         });
 
-        if self.poll_display() || self.frame_pending {
-            self.present(PresentMode::NewFrame);
-        }
+        self.poll_display();
+        self.present_pending_if_due();
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {
@@ -348,19 +379,26 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
                 }
 
                 let logical_size = PhysicalSize::new(width, height).to_logical::<u32>(scale_factor);
+                let refresh_millihertz = display_refresh_millihertz(self.presenter.as_ref().unwrap().window());
+                self.set_present_refresh_millihertz(refresh_millihertz);
+
                 let _ = self.host_tx.send(RuntimeEvent::DisplayResized {
                     physical_width: width,
                     physical_height: height,
                     logical_width: logical_size.width,
                     logical_height: logical_size.height,
-                    refresh_millihertz: display_refresh_millihertz(self.presenter.as_ref().unwrap().window()),
+                    refresh_millihertz,
                 });
 
                 self.present(PresentMode::Redraw);
             }
 
             WindowEvent::RedrawRequested => {
-                self.present(PresentMode::Redraw);
+                if self.frame_pending {
+                    self.present_pending_if_due();
+                } else {
+                    self.present(PresentMode::Redraw);
+                }
             }
 
             WindowEvent::Focused(focused) => {
@@ -445,9 +483,8 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: DisplayEvent) {
         match event {
             DisplayEvent::Changed => {
-                if self.poll_display() || self.frame_pending {
-                    self.present(PresentMode::NewFrame);
-                }
+                self.poll_display();
+                self.present_pending_if_due();
             }
         }
     }
@@ -481,11 +518,18 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
             macos_ui::show_about();
         }
 
-        if Instant::now() >= self.next_keepalive {
+        self.present_pending_if_due();
+
+        if !self.frame_pending && Instant::now() >= self.next_keepalive {
             self.present(PresentMode::Redraw);
         }
 
-        event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_keepalive));
+        let deadline = if self.frame_pending {
+            self.next_present
+        } else {
+            self.next_keepalive
+        };
+        event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
     }
 }
 
