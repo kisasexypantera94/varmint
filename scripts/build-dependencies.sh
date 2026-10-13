@@ -150,9 +150,21 @@ build_moltenvk() {
   for patch in "${MOLTENVK_PATCHES[@]}"; do
     apply_dependency_patch "$source" "$patch"
   done
+  # Build MoltenVK against our explicitly pinned and patched SPIRV-Cross.
+  local spirv_cross="$DEPS_SRC/SPIRV-Cross"
+
+  checkout_repo \
+    "$SPIRV_CROSS_REPOSITORY" \
+    "$SPIRV_CROSS_COMMIT" \
+    "$spirv_cross"
+
+  for patch in "${SPIRV_CROSS_PATCHES[@]}"; do
+    apply_dependency_patch "$spirv_cross" "$patch"
+  done
   (
     cd "$source"
-    clean_env ./fetchDependencies --macos -v
+    clean_env ./fetchDependencies --macos -v \
+      --spirv-cross-root "$spirv_cross"
     rm -rf "Package/$CONFIGURATION"
     clean_env xcodebuild build \
       -project MoltenVKPackaging.xcodeproj \
@@ -380,6 +392,7 @@ dependency_recipe_hash() {
   cat \
     "$MANIFEST" \
     "${MOLTENVK_PATCHES[@]}" \
+    "${SPIRV_CROSS_PATCHES[@]}" \
     "$VIRGL_GENERATED_PATCH" \
     "$VIRGL_PATCH_SERIES"
 
@@ -402,6 +415,7 @@ build_dependencies() {
 
   for patch in \
     "${MOLTENVK_PATCHES[@]}" \
+    "${SPIRV_CROSS_PATCHES[@]}" \
     "$VIRGL_GENERATED_PATCH" \
     "$VIRGL_PATCH_SERIES" \
     "${D3DMETAL_PATCHES[@]}" \

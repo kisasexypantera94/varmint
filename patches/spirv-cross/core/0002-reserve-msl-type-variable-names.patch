@@ -1,0 +1,34 @@
+From 77f207b61dcd7afc18c72f6a47002f0e05f9f0b7 Mon Sep 17 00:00:00 2001
+From: steamac <steamac@localhost>
+Date: Sat, 3 Oct 2026 22:18:10 +0300
+Subject: [PATCH 08/15] MSL: Rename variables named after MSL types (sampler,
+ array)
+
+A variable named 'sampler' (Xwayland's glamor shaders through zink name their
+texture that) produced 'texture2d<float> sampler' followed by
+'sampler samplerSmplr', where the variable hides the type: 'must use struct tag
+to refer to type sampler'. 'array' breaks the array<T, N> declarations the
+same way. Add both to the reserved keyword set so that they get renamed
+(sampler0, array0).
+---
+ spirv_msl.cpp | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/spirv_msl.cpp b/spirv_msl.cpp
+index fae51c64..34cdcaae 100644
+--- a/spirv_msl.cpp
++++ b/spirv_msl.cpp
+@@ -18263,6 +18263,10 @@ const std::unordered_set<std::string> &CompilerMSL::get_reserved_keyword_set()
+ 		"gradient3d",
+ 		"min_lod_clamp",
+ 		"assert",
++		// MSL type names: a variable with one of these names hides the type for the rest of the
++		// scope (e.g. 'texture2d<float> sampler' followed by 'sampler samplerSmplr').
++		"sampler",
++		"array",
+ 		"VARIABLE_TRACEPOINT",
+ 		"STATIC_DATA_TRACEPOINT",
+ 		"STATIC_DATA_TRACEPOINT_V",
+-- 
+2.50.1 (Apple Git-155)
+

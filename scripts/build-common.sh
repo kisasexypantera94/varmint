@@ -54,6 +54,8 @@ values = {
     "MOLTENVK_REPOSITORY": dependencies["moltenvk"]["repository"],
     "MOLTENVK_COMMIT": dependencies["moltenvk"]["commit"],
     "MOLTENVK_VERSION": dependencies["moltenvk"]["version"],
+    "SPIRV_CROSS_REPOSITORY": dependencies["spirv_cross"]["repository"],
+    "SPIRV_CROSS_COMMIT": dependencies["spirv_cross"]["commit"],
     "VIRGL_REPOSITORY": dependencies["virglrenderer"]["repository"],
     "VIRGL_COMMIT": dependencies["virglrenderer"]["commit"],
     "DXMT_REPOSITORY": dependencies["dxmt"]["repository"],

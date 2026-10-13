@@ -22,8 +22,13 @@ commit = "5014658f79e4d6872a1ad6754da9098ccd9d4fc5"
 
 [dependencies.moltenvk]
 repository = "https://github.com/utmapp/MoltenVK.git"
-commit = "ef1c5461774f5fbd224ddcfd91fd2c0ea23f0384"
-version = "1.4.2-utm-geometry"
+commit = "0790efd55b6b302e19487e5654f7fc30f0bdf3df"
+version = "1.4.1-utm-geometry"
+
+
+[dependencies.spirv_cross]
+repository = "https://github.com/utmapp/SPIRV-Cross.git"
+commit = "939b40b33a44443c404c4078823c406e3c94866f"
 
 [dependencies.virglrenderer]
 repository = "https://github.com/utmapp/virglrenderer.git"

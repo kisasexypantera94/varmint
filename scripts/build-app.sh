@@ -14,11 +14,13 @@ DEPS_VENV="$BUILD_ROOT/deps/venv"
 APP_BUNDLE="$ROOT/dist/Varmint.app"
 MANIFEST="$ROOT/runtime/manifest.toml"
 MOLTENVK_PATCHES=(
-  "$ROOT/patches/moltenvk/0001-guard-null-multisample-state-in-mesh-pipeline.patch"
-  "$ROOT/patches/moltenvk/0002-fix-query-device-available-range.patch"
-  "$ROOT/patches/moltenvk/0003-fix-query-copy-availability-offset.patch"
-  "$ROOT/patches/moltenvk/0004-handle-null-descriptor-sets.patch"
-  "$ROOT/patches/moltenvk/0005-defer-temp-buffer-pool-destruction.patch"
+  "$ROOT/patches/moltenvk/core/0001-handle-null-descriptor-sets.patch"
+  "$ROOT/patches/moltenvk/core/0002-fix-geometry-shader-vertex-fetch.patch"
+  "$ROOT/patches/moltenvk/core/0003-honor-explicit-linear-dmabuf-row-pitch.patch"
+)
+SPIRV_CROSS_PATCHES=(
+  "$ROOT/patches/spirv-cross/core/0001-fix-geometry-shader-vertex-fetch.patch"
+  "$ROOT/patches/spirv-cross/core/0002-reserve-msl-type-variable-names.patch"
 )
 VIRGL_GENERATED_PATCH="$ROOT/patches/neptune-generated/virglrenderer.patch"
 VIRGL_PATCH_SERIES="$ROOT/patches/virglrenderer/series"
