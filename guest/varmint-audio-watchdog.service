@@ -1,0 +1,12 @@
+[Unit]
+Description=Varmint virtio-snd recovery watchdog
+After=pulseaudio.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/libexec/varmint-audio-watchdog
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=default.target

@@ -238,6 +238,37 @@ pub fn show_about() {
     }
 }
 
+pub fn time_zone_identifier() -> Option<String> {
+    unsafe {
+        let zone: *mut AnyObject = msg_send![class!(NSTimeZone), localTimeZone];
+        if zone.is_null() {
+            return None;
+        }
+
+        let name: *mut AnyObject = msg_send![zone, name];
+        if name.is_null() {
+            return None;
+        }
+
+        let utf8: *const c_char = msg_send![name, UTF8String];
+        if utf8.is_null() {
+            return None;
+        }
+
+        let value = std::ffi::CStr::from_ptr(utf8).to_str().ok()?.to_owned();
+
+        if value.is_empty()
+            || !value
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'/' | b'_' | b'-' | b'+'))
+        {
+            return None;
+        }
+
+        Some(value)
+    }
+}
+
 pub fn backing_scale_factor() -> u32 {
     unsafe {
         let screen: *mut AnyObject = msg_send![class!(NSScreen), mainScreen];

@@ -15,17 +15,23 @@ work_image="$work_dir/varmint-debian.raw"
 stage="$work_dir/stage"
 mkdir -p "$OUTPUT_DIR" "$stage"
 
-qemu-img convert -p -O raw "$SOURCE_IMAGE" "$work_image"
+# The Debian nocloud image is only 3 GiB. Varmint now bakes the FEX rootfs
+# and ARM64 Steam bootstrap into the image, so expand the build-time root
+# filesystem before provisioning. Free zero-filled space compresses very well
+# in the published .raw.zst.
+truncate -s 8G "$work_image"
+virt-resize     --expand /dev/sda1     "$SOURCE_IMAGE"     "$work_image"
 
 virt-customize --network -a "$work_image" \
-    --copy-in "$SCRIPT_DIR/fex-install:/tmp" \
     --copy-in "$SCRIPT_DIR/rootfs:/tmp" \
-    --run-command 'cp -a /tmp/fex-install/. / && cp -a /tmp/rootfs/. / && rm -rf /tmp/fex-install /tmp/rootfs' \
+    --run-command 'cp -a /tmp/rootfs/. / && rm -rf /tmp/rootfs' \
     --run-command '/usr/local/libexec/varmint-provision' \
-    --run-command 'missing=""; for command in FEXBash FEXRootFSFetcher curl e2fsck fsck growpart resize2fs sgdisk sudo glxinfo pactl pulseaudio python3 unsquashfs update-initramfs vulkaninfo xclip; do command -v "$command" >/dev/null 2>&1 || missing="$missing $command"; done; [ -z "$missing" ] || { echo "missing required guest commands:$missing" >&2; exit 1; }' \
+    --run-command 'missing=""; for command in curl e2fsck fsck growpart resize2fs sgdisk sudo glxinfo pactl pulseaudio python3 update-initramfs vulkaninfo xclip; do command -v "$command" >/dev/null 2>&1 || missing="$missing $command"; done; [ -z "$missing" ] || { echo "missing required guest commands:$missing" >&2; exit 1; }' \
     --run-command 'for initrd in /boot/initrd.img-*; do listing="$(lsinitramfs "$initrd")"; printf "%s\n" "$listing" | grep -Eq "(^|/)sbin/fsck$" && printf "%s\n" "$listing" | grep -Eq "(^|/)sbin/e2fsck$" && printf "%s\n" "$listing" | grep -Eq "(^|/)sbin/fsck.ext4$" || { echo "initramfs is missing ext4 fsck tools: $initrd" >&2; exit 1; }; done' \
-    --run-command 'test -f /usr/share/fex-emu/GuestThunks/libvulkan-guest.so && test -f /usr/lib/aarch64-linux-gnu/fex-emu/HostThunks/libvulkan-host.so && test -f /usr/lib/aarch64-linux-gnu/fex-emu/HostThunks_32/libvulkan-host.so' \
-    --run-command 'systemctl enable varmint-grow-root.service varmint-firstboot.service' \
+    --run-command 'test -f /usr/share/guestos/fex-mesa/graphics_provider.json' \
+    --run-command 'test -x /usr/local/share/varmint/steam-bootstrap/steamrtarm64/steam && test -L /usr/local/share/varmint/steam-bootstrap/steamrt64 && test -f /usr/local/share/varmint/steam-bootstrap/.steam-enable-steamrt64-client && grep -Fx publicbeta /usr/local/share/varmint/steam-bootstrap/package/beta >/dev/null' \
+    --run-command 'test -x /usr/local/bin/steam-edge-resize && test -x /usr/local/bin/varmint-steam && test -x /usr/local/bin/varmint-display-scale && test -f /etc/xdg/autostart/varmint-display-scale.desktop && test -x /usr/local/libexec/varmint-host-time' \
+    --run-command 'systemctl enable varmint-grow-root.service varmint-host-time.service varmint-firstboot.service' \
     --run-command 'passwd -l root' \
     --run-command 'printf "varmint\n" > /etc/hostname' \
     --run-command 'truncate -s 0 /etc/machine-id' \

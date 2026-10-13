@@ -1,8 +1,9 @@
 [Desktop Entry]
 Type=Application
 Name=Steam
-Comment=Launch Steam through FEX
+Comment=Launch native ARM64 Steam
 Exec=/usr/bin/steam %U
 Icon=steam
 Terminal=false
 Categories=Game;
+MimeType=x-scheme-handler/steam;

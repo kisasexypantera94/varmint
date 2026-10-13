@@ -16,36 +16,46 @@ Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
 EOF_BACKPORTS
 
 apt-get update
-apt-get purge -y \
-    pipewire-alsa \
-    pipewire-audio \
-    pipewire-pulse \
-    wireplumber
-
 apt-get install -y --no-install-recommends \
     adwaita-icon-theme \
     ca-certificates \
     cloud-guest-utils \
     curl \
     dbus-user-session \
+    dolphin \
+    konsole \
+    kwin-wayland \
+    kscreen \
+    plasma-desktop \
+    plasma-pa \
+    plasma-workspace \
+    sddm \
+    systemsettings \
+    wl-clipboard \
+    xwayland \
     e2fsprogs \
     fonts-dejavu-core \
     fonts-liberation \
     gdisk \
     librsvg2-common \
-    lightdm \
-    lightdm-gtk-greeter \
+    locales \
+    lsof \
     libasound2-plugins \
     libasound2t64 \
     libdrm2 \
     libegl1 \
     libfmt10 \
     libgl1 \
+    libgtk2.0-0 \
+    libopenal1 \
     libssl3t64 \
     libstdc++6 \
     libvulkan1 \
     libwayland-client0 \
+    libnm0 \
+    libnotify-bin \
     libx11-6 \
+    libxi6 \
     libxcb1 \
     libxrandr2 \
     libxrender1 \
@@ -61,13 +71,11 @@ apt-get install -y --no-install-recommends \
     squashfs-tools \
     sudo \
     systemd-timesyncd \
+    unzip \
     vulkan-tools \
     x11-xserver-utils \
     xclip \
     xdg-user-dirs \
-    xfce4 \
-    xfce4-power-manager \
-    xfce4-terminal \
     xserver-xorg \
     xserver-xorg-input-libinput
 
@@ -77,6 +85,21 @@ apt-get install -y --no-install-recommends -t trixie-backports \
     libgl1-mesa-dri \
     libglx-mesa0 \
     mesa-vulkan-drivers
+
+# Varmint uses PulseAudio directly for virtio-snd. Plasma installation may
+# pull parts of PipeWire back in, so enforce the final audio stack only after
+# all desktop packages have been installed.
+apt-get purge -y \
+    pipewire \
+    pipewire-alsa \
+    pipewire-audio \
+    pipewire-pulse \
+    wireplumber
+
+# Steam and several games expect this locale to exist.
+sed -i 's/^# *\(en_US.UTF-8 UTF-8\)$/\1/' /etc/locale.gen
+locale-gen
+update-locale LANG=en_US.UTF-8
 
 # The stock cloud initramfs may not contain fsck even though e2fsprogs is
 # installed in the root filesystem. Rebuild it with the Varmint hook so a
@@ -120,32 +143,32 @@ Section "Device"
 EndSection
 EOF_XORG
 
-install -d -m 0755 /usr/local/libexec
-cat > /usr/local/libexec/varmint-greeter-wrapper <<'EOF_GREETER'
-#!/bin/sh
+# Stable entry point used by the desktop file and Steam-created shortcuts.
+ln -sfn /usr/local/bin/varmint-steam /usr/bin/steam
 
-scale=1
-if [ -r /etc/varmint/ui-scale ]; then
-    IFS= read -r configured_scale < /etc/varmint/ui-scale || true
-    case "$configured_scale" in
-        1|2) scale=$configured_scale ;;
-    esac
-fi
+install -m 0755 /usr/local/share/varmint/varmint-display-scale /usr/local/bin/varmint-display-scale
+install -d -m 0755 /etc/xdg/autostart
+install -m 0644 /usr/local/share/varmint/varmint-display-scale.desktop /etc/xdg/autostart/varmint-display-scale.desktop
 
-export GDK_SCALE="$scale"
-export XCURSOR_SIZE="$((24 * scale))"
+python3 - <<'PY_TASKMANAGER'
+from pathlib import Path
 
-exec "$@"
-EOF_GREETER
-chmod 0755 /usr/local/libexec/varmint-greeter-wrapper
+p = Path("/usr/share/plasma/plasmoids/org.kde.plasma.taskmanager/contents/config/main.xml")
+s = p.read_text()
 
-install -d -m 0755 /etc/lightdm/lightdm.conf.d
-cat > /etc/lightdm/lightdm.conf.d/50-varmint.conf <<'EOF_LIGHTDM'
-[Seat:*]
-greeter-session=lightdm-gtk-greeter
-greeter-wrapper=/usr/local/libexec/varmint-greeter-wrapper
-user-session=xfce
-EOF_LIGHTDM
+old = "<default>applications:systemsettings.desktop,applications:org.kde.discover.desktop,preferred://filemanager,preferred://browser</default>"
+new = "<default>preferred://filemanager,applications:steam.desktop</default>"
+
+if old not in s:
+    raise SystemExit("Plasma task manager default launcher list not found")
+
+p.write_text(s.replace(old, new, 1))
+PY_TASKMANAGER
+
+install -d -m 0755 /etc/environment.d
+cat > /etc/environment.d/90-varmint-kwin.conf <<'EOF_KWIN_ENV'
+KWIN_FORCE_SW_CURSOR=1
+EOF_KWIN_ENV
 
 install -d -m 0755 /etc/sysctl.d
 cat > /etc/sysctl.d/60-varmint-gaming.conf <<'EOF_SYSCTL'
@@ -170,8 +193,20 @@ EOF_SSH
 
 systemctl enable openssh-server.service >/dev/null 2>&1 || true
 systemctl enable avahi-daemon.service >/dev/null 2>&1 || true
+# Guest-side suspend is intentionally disabled. Varmint's VM lifecycle is
+# controlled by the macOS host; a Plasma idle suspend leaves the virtual
+# machine in s2idle with no reliable host wake path.
+systemctl mask \
+    sleep.target \
+    suspend.target \
+    hibernate.target \
+    hybrid-sleep.target \
+    suspend-then-hibernate.target \
+    >/dev/null 2>&1 || true
+
 systemctl enable systemd-timesyncd.service >/dev/null 2>&1 || true
-systemctl disable lightdm.service >/dev/null 2>&1 || true
+systemctl --global enable varmint-audio-watchdog.service >/dev/null 2>&1 || true
+systemctl disable sddm.service >/dev/null 2>&1 || true
 systemctl set-default multi-user.target
 
 apt-get clean

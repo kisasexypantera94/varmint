@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Varmint Display Scale
+Comment=Apply host-selected display scaling
+Exec=/usr/local/bin/varmint-display-scale
+OnlyShowIn=KDE;
+NoDisplay=true
+StartupNotify=false
+Terminal=false
+X-KDE-autostart-after=panel

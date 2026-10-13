@@ -98,10 +98,16 @@ fn vmm_thread(
         let end = checked_end(INITRD_START, data.len(), "initrd");
         (INITRD_START, end)
     });
+
+    let mut kernel_args = config.kernel_args.clone();
+    if let Ok(since_epoch) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        kernel_args.push_str(&format!(" varmint.host_time={}", since_epoch.as_secs()));
+    }
+
     let dtb = build_fdt(
         config.memory_size as u64,
         config.vcpus,
-        &config.kernel_args,
+        &kernel_args,
         initrd_range,
         gicd_size,
         gicr_size,
@@ -160,6 +166,10 @@ pub fn run(config_path: &Path) -> Result<()> {
 
     let ui_scale = macos_ui::backing_scale_factor();
     config.kernel_args.push_str(&format!(" varmint.ui_scale={ui_scale}"));
+
+    if let Some(time_zone) = macos_ui::time_zone_identifier() {
+        config.kernel_args.push_str(&format!(" varmint.tz={time_zone}"));
+    }
 
     for (name, value) in &config.host_environment {
         if std::env::var_os(name).is_none() {
