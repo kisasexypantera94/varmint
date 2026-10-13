@@ -1,0 +1,15 @@
+diff --git a/src/virtio/neptune/nptunix/meson.build b/src/virtio/neptune/nptunix/meson.build
+--- a/src/virtio/neptune/nptunix/meson.build
++++ b/src/virtio/neptune/nptunix/meson.build
+@@ -81,6 +81,11 @@
+ if npt_have_explicit_sync
+   npt_nptunix_c_args += '-DNPT_HAVE_XCB_DRI3_SYNCOBJ'
+ endif
+
++# The Wine PE cross-build also produces a Linux ELF through native:true.
++# Explicitly initialize the build-machine compiler for that target.
++# On ARM64 development guests, binfmt/QEMU handles Meson sanity checks.
++add_languages('c', native : true)
++
+ libnptunix = shared_library(
+   'nptunix',

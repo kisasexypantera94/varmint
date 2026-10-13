@@ -9,7 +9,13 @@ git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
     exit 1
 }
 
-if [ ! -d "$BUILD" ]; then
+# A failed meson setup may leave a directory without build.ninja.
+# Preserve it for diagnostics rather than deleting it.
+if [ -d "$BUILD" ] && [ ! -f "$BUILD/build.ninja" ]; then
+    mv "$BUILD" "${BUILD}.incomplete-$(date +%s)-$$"
+fi
+
+if [ ! -f "$BUILD/build.ninja" ]; then
     SHARE="${VARMINT_NEPTUNE_SHARE:-$HOME/.local/share/varmint/neptune}"
 
     mkdir -p "$SHARE"

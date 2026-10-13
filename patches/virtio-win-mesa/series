@@ -8,3 +8,4 @@
 0010-isolate-neptune-r10-present-source.patch
 0011-scale-neptune-x11-present.patch
 0012-fix-neptune-immutable-texture-initial-upload.patch
+0013-register-neptune-native-compiler.patch

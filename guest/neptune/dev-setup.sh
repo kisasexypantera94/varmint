@@ -14,6 +14,14 @@ sudo apt-get update
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     $(cat "$SHARE/deps.txt")
 
+# Meson's build-machine compiler produces x86_64 Linux ELF.
+# On ARM64, its sanity checks need binfmt/QEMU. Development-only.
+if [ "$(dpkg --print-architecture)" = "arm64" ]; then
+    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        --no-install-recommends qemu-user-binfmt
+    sudo systemctl restart systemd-binfmt
+fi
+
 prepare_repo() {
     local url="$1"
     local dir="$2"
@@ -108,7 +116,13 @@ cpu = 'x86_64'
 endian = 'little'
 EOF_NATIVE
 
-if [ ! -d "$BUILD" ]; then
+# A failed meson setup may leave a directory without build.ninja.
+# Preserve it for diagnostics rather than deleting it.
+if [ -d "$BUILD" ] && [ ! -f "$BUILD/build.ninja" ]; then
+    mv "$BUILD" "${BUILD}.incomplete-$(date +%s)-$$"
+fi
+
+if [ ! -f "$BUILD/build.ninja" ]; then
     meson setup "$BUILD" "$VIRTIO_DIR" \
         --cross-file "$DEV_SHARE/build-win64.txt" \
         --native-file "$DEV_SHARE/native-x86_64.ini" \
