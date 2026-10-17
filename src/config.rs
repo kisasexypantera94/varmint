@@ -8,8 +8,7 @@ use std::{
     process::Command,
 };
 
-const DEFAULT_MEMORY_MIB: u64 = 16 * 1024;
-const DEFAULT_VCPUS: usize = 12;
+const DEFAULT_DATA_DISK_CAPACITY_GIB: u64 = 128;
 const DEFAULT_KERNEL_ARGS: &str = "console=ttyAMA0 earlycon=pl011,mmio32,0x09000000 root=LABEL=varmint-root rw";
 const MIB: u64 = 1024 * 1024;
 const GIB: u64 = 1024 * MIB;
@@ -74,9 +73,8 @@ pub struct VmConfig {
     pub memory_size: usize,
     pub vcpus: usize,
     pub disk: PathBuf,
-    pub disk_size: u64,
     pub data_disk: PathBuf,
-    pub data_disk_size: u64,
+    pub data_disk_capacity: u64,
     pub base_image: PathBuf,
     pub kernel: PathBuf,
     pub initrd: Option<PathBuf>,
@@ -93,10 +91,9 @@ struct VmConfigFile {
     memory_mib: u64,
     #[serde(default = "default_vcpus")]
     vcpus: usize,
-    disk: PathBuf,
-    disk_size_gib: u64,
-    data_disk: PathBuf,
-    data_disk_size_gib: u64,
+    storage_dir: Option<PathBuf>,
+    #[serde(default = "default_data_disk_capacity_gib")]
+    data_disk_capacity_gib: u64,
     base_image: Option<PathBuf>,
     kernel: Option<PathBuf>,
     initrd: Option<PathBuf>,
@@ -127,11 +124,8 @@ impl VmConfig {
         if config.memory_mib < 256 {
             panic!("memory_mib must be at least 256");
         }
-        if config.disk_size_gib == 0 {
-            panic!("disk_size_gib must be greater than zero");
-        }
-        if config.data_disk_size_gib == 0 {
-            panic!("data_disk_size_gib must be greater than zero");
+        if config.data_disk_capacity_gib == 0 {
+            panic!("data_disk_capacity_gib must be greater than zero");
         }
         if config.kernel.is_none() && config.initrd.is_some() {
             panic!("initrd requires a custom kernel");
@@ -139,9 +133,17 @@ impl VmConfig {
 
         let base = path.parent().unwrap_or_else(|| Path::new("."));
         let resources = bundle_resources();
-        let disk = resolve_path(base, config.disk);
-        let data_disk = resolve_path(base, config.data_disk);
-        assert_ne!(disk, data_disk, "system and data disk paths must differ");
+        let storage_dir = config
+            .storage_dir
+            .map(|path| resolve_path(base, path))
+            .unwrap_or_else(|| {
+                let name = path
+                    .file_stem()
+                    .unwrap_or_else(|| panic!("VM config path has no file name: {}", path.display()));
+                base.join(name)
+            });
+        let disk = storage_dir.join("system.raw");
+        let data_disk = storage_dir.join("data.raw");
         let base_image = config
             .base_image
             .map(|path| resolve_path(base, path))
@@ -153,14 +155,10 @@ impl VmConfig {
                 )
             });
         let memory_size = bytes_from_units(config.memory_mib, MIB, "memory_mib");
-        let disk_size = config
-            .disk_size_gib
+        let data_disk_capacity = config
+            .data_disk_capacity_gib
             .checked_mul(GIB)
-            .unwrap_or_else(|| panic!("disk_size_gib is too large"));
-        let data_disk_size = config
-            .data_disk_size_gib
-            .checked_mul(GIB)
-            .unwrap_or_else(|| panic!("data_disk_size_gib is too large"));
+            .unwrap_or_else(|| panic!("data_disk_capacity_gib is too large"));
 
         let (kernel, initrd) = match config.kernel {
             Some(kernel) => (
@@ -183,9 +181,8 @@ impl VmConfig {
             memory_size,
             vcpus: config.vcpus,
             disk,
-            disk_size,
             data_disk,
-            data_disk_size,
+            data_disk_capacity,
             base_image,
             kernel,
             initrd,
@@ -197,11 +194,28 @@ impl VmConfig {
 }
 
 fn default_memory_mib() -> u64 {
-    DEFAULT_MEMORY_MIB
+    let host_bytes = Command::new("/usr/sbin/sysctl")
+        .args(["-n", "hw.memsize"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(32 * GIB);
+
+    (host_bytes / 2 / MIB).max(256)
 }
 
 fn default_vcpus() -> usize {
-    DEFAULT_VCPUS
+    let host = std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(8);
+    let target = (host * 3 / 4).max(1);
+    target.min(host.saturating_sub(2).max(1))
+}
+
+fn default_data_disk_capacity_gib() -> u64 {
+    DEFAULT_DATA_DISK_CAPACITY_GIB
 }
 
 fn bytes_from_units(value: u64, unit: u64, name: &str) -> usize {

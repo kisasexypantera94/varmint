@@ -17,17 +17,18 @@ Windows games can use the Vulkan-based Venus graphics path or the experimental N
 2. Create a VM configuration:
    ```bash
    cat > "$HOME/fresh.varmint" <<'EOF'
-   format_version = 1
+   format_version = 2
 
-   memory_mib = 16384
-   vcpus = 8
-
-   disk = "fresh.raw"
-   disk_size_gib = 24 # can be increased later
+   # memory_mib = 16384              # Guest RAM. Defaults to half of host memory.
+   # vcpus = 8                       # Guest CPUs. Defaults to about 3/4 of host CPUs.
+   # data_disk_capacity_gib = 128    # Persistent /home capacity. Sparse, so only used data consumes host space.
+   # storage_dir = "fresh"           # VM files. Defaults to a directory named after this config.
    EOF
    ```
 
-   The disk image will be created next to the configuration file. To expand it later, stop the VM and increase `disk_size_gib` before the next launch. Disk shrinking is not supported.
+   By default, Varmint stores VM files in a directory next to the config with the same name. The system disk is replaced on updates, while `/home` lives on a separate persistent disk.
+
+   The data disk is sparse, so a 128 GiB capacity does not use 128 GiB on the host. It grows as data is written, and freed blocks can be reclaimed through discard. You can increase its capacity later, but shrinking is not supported.
 
 3. Open Varmint and select `fresh.varmint`.
    Since Varmint is not signed or notarized, macOS will block the first launch. Go to **System Settings → Privacy & Security**, click **Open Anyway** and confirm.

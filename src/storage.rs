@@ -19,16 +19,10 @@ pub fn prepare(config: &VmConfig) -> io::Result<Guard> {
     };
 
     prepare_system_disk(config)?;
-    prepare_data_disk(&config.data_disk, config.data_disk_size)?;
+    prepare_data_disk(&config.data_disk, config.data_disk_capacity)?;
     ensure_distinct(&config.disk, &config.data_disk)?;
 
     Ok(guard)
-}
-
-fn sidecar_path(path: &Path, suffix: &str) -> PathBuf {
-    let mut value = path.as_os_str().to_os_string();
-    value.push(suffix);
-    value.into()
 }
 
 fn temporary_path(path: &Path) -> PathBuf {
@@ -40,10 +34,9 @@ fn temporary_path(path: &Path) -> PathBuf {
 }
 
 fn lock(disk: &Path) -> io::Result<File> {
-    let path = sidecar_path(disk, ".vm-lock");
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
+    let parent = disk.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+    let path = parent.join("vm.lock");
 
     let file = OpenOptions::new().read(true).write(true).create(true).open(&path)?;
     if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
@@ -98,7 +91,11 @@ fn prepare_system_disk(config: &VmConfig) -> io::Result<()> {
         )
     })?;
 
-    let installed_id_path = sidecar_path(&config.disk, ".image-id");
+    let installed_id_path = config
+        .disk
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("system-image-id");
     let installed_id = read_image_id(&installed_id_path).ok();
 
     if config.disk.exists() && installed_id.as_deref() == Some(expected_id.as_str()) {
@@ -145,12 +142,19 @@ fn prepare_system_disk(config: &VmConfig) -> io::Result<()> {
 }
 
 fn prepare_data_disk(path: &Path, size: u64) -> io::Result<()> {
-    if path.exists() {
-        return Ok(());
-    }
-
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;
+
+    if path.exists() {
+        let file = OpenOptions::new().read(true).write(true).open(path)?;
+        let current_size = file.metadata()?.len();
+        if current_size < size {
+            file.set_len(size)?;
+            file.sync_all()?;
+            sync_directory(parent)?;
+        }
+        return Ok(());
+    }
 
     let temporary = temporary_path(path);
     let _ = fs::remove_file(&temporary);

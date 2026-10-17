@@ -213,13 +213,13 @@ pub fn run(config_path: &Path) -> Result<()> {
 
     let (runtime_event_tx, runtime_event_rx) = std::sync::mpsc::channel();
     let blk_tx = runtime_event_tx.clone();
-    let disk = virtio::Blk::new(&config.disk, config.disk_size, move |event| {
+    let disk = virtio::Blk::new(&config.disk, move |event| {
         let _ = blk_tx.send(RuntimeEvent::BlkIo(event));
     })
     .unwrap_or_else(|error| panic!("failed to open VM disk {}: {error}", config.disk.display()));
 
     let data_blk_tx = runtime_event_tx.clone();
-    let data_disk = virtio::Blk::new(&config.data_disk, config.data_disk_size, move |completion| {
+    let data_disk = virtio::Blk::new(&config.data_disk, move |completion| {
         let _ = data_blk_tx.send(RuntimeEvent::DataBlkIo(completion));
     })
     .unwrap_or_else(|error| panic!("failed to open data disk {}: {error}", config.data_disk.display()));

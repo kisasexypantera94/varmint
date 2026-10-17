@@ -1,7 +1,6 @@
-format_version = 1
+format_version = 2
 
-memory_mib = 16384
-vcpus = 12
-
-disk = "fresh.raw"
-disk_size_gib = 24
+# memory_mib = 16384              # Guest RAM. Defaults to half of host memory.
+# vcpus = 8                       # Guest CPUs. Defaults to about 3/4 of host CPUs.
+# data_disk_capacity_gib = 128    # Persistent /home capacity. Sparse; only used data consumes host space.
+# storage_dir = "fresh"           # VM files. Defaults to a directory named after this config.

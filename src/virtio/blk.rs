@@ -94,21 +94,13 @@ pub struct Blk {
 }
 
 impl Blk {
-    pub fn new(
-        path: &Path,
-        minimum_size: u64,
-        on_complete: impl Fn(IoCompletion) + Send + 'static,
-    ) -> io::Result<Self> {
+    pub fn new(path: &Path, on_complete: impl Fn(IoCompletion) + Send + 'static) -> io::Result<Self> {
         let file = OpenOptions::new().read(true).write(true).open(path)?;
         lock_disk(&file, path)?;
 
-        let mut size = file.metadata()?.len();
-        if size % SECTOR_SIZE != 0 || minimum_size == 0 || minimum_size % SECTOR_SIZE != 0 {
+        let size = file.metadata()?.len();
+        if size == 0 || size % SECTOR_SIZE != 0 {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid disk size"));
-        }
-        if size < minimum_size {
-            file.set_len(minimum_size)?;
-            size = minimum_size;
         }
 
         let discard_alignment = apfs_discard_alignment(&file)?;
