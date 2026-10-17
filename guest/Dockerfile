@@ -120,17 +120,16 @@ RUN /usr/local/bin/varmint-neptune-provision && \
 
 FROM debian:trixie-slim
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    LIBGUESTFS_BACKEND=direct \
-    LIBGUESTFS_BACKEND_SETTINGS=force_tcg
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
-        libguestfs-tools \
-        linux-image-arm64 \
-        ipxe-qemu \
         qemu-utils \
+        cloud-guest-utils \
+        gdisk \
+        e2fsprogs \
+        util-linux \
         zstd && \
     rm -rf /var/lib/apt/lists/*
 
@@ -156,12 +155,18 @@ RUN install -Dm0755 /opt/varmint/source/build-image-container.sh /usr/local/bin/
     install -Dm0755 /opt/varmint/source/varmint-audio-watchdog /opt/varmint/rootfs/usr/local/libexec/varmint-audio-watchdog && \
     install -Dm0755 /opt/varmint/source/varmint-host-time /opt/varmint/rootfs/usr/local/libexec/varmint-host-time && \
     install -Dm0755 /opt/varmint/source/varmint-firstboot /opt/varmint/rootfs/usr/local/libexec/varmint-firstboot && \
+    install -Dm0755 /opt/varmint/source/varmint-home /opt/varmint/rootfs/usr/local/libexec/varmint-home && \
+    install -Dm0755 /opt/varmint/source/varmint-user-state /opt/varmint/rootfs/usr/local/libexec/varmint-user-state && \
     install -Dm0755 /opt/varmint/source/varmint-grow-root /opt/varmint/rootfs/usr/local/libexec/varmint-grow-root && \
     install -Dm0755 /opt/varmint/source/varmint-provision /opt/varmint/rootfs/usr/local/libexec/varmint-provision && \
     install -Dm0755 /opt/varmint/source/varmint-initramfs-fsck-hook /opt/varmint/rootfs/etc/initramfs-tools/hooks/varmint-fsck && \
     install -Dm0644 /opt/varmint/source/varmint-host-time.service /opt/varmint/rootfs/etc/systemd/system/varmint-host-time.service && \
     install -Dm0644 /opt/varmint/source/varmint-audio-watchdog.service /opt/varmint/rootfs/etc/systemd/user/varmint-audio-watchdog.service && \
     install -Dm0644 /opt/varmint/source/varmint-firstboot.service /opt/varmint/rootfs/etc/systemd/system/varmint-firstboot.service && \
+    install -Dm0644 /opt/varmint/source/varmint-home.service /opt/varmint/rootfs/etc/systemd/system/varmint-home.service && \
+    install -Dm0644 /opt/varmint/source/varmint-home-sddm.conf /opt/varmint/rootfs/etc/systemd/system/sddm.service.d/10-varmint-home.conf && \
+    install -Dm0644 /opt/varmint/source/varmint-user-state.service /opt/varmint/rootfs/etc/systemd/system/varmint-user-state.service && \
+    install -Dm0644 /opt/varmint/source/varmint-user-state.path /opt/varmint/rootfs/etc/systemd/system/varmint-user-state.path && \
     install -Dm0644 /opt/varmint/source/varmint-grow-root.service /opt/varmint/rootfs/etc/systemd/system/varmint-grow-root.service && \
     install -Dm0644 /opt/varmint/source/varmint-clipboard.desktop /opt/varmint/rootfs/etc/xdg/autostart/varmint-clipboard.desktop && \
     install -Dm0644 /opt/varmint/source/steam-edge-resize.desktop /opt/varmint/rootfs/etc/xdg/autostart/steam-edge-resize.desktop && \

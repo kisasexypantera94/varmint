@@ -21,6 +21,7 @@ OUTPUTS=(
   "$OUTPUT_DIR/Image"
   "$OUTPUT_DIR/initrd"
   "$OUTPUT_DIR/varmint-debian.raw.zst"
+  "$OUTPUT_DIR/system-image-id"
   "$OUTPUT_DIR/SHA256SUMS"
   "$OUTPUT_DIR/SOURCE"
 )
@@ -111,6 +112,7 @@ printf '\n== build guest runtime ==\n'
 docker run --rm \
   --platform linux/arm64 \
   --privileged \
+  --mount type=volume,source=varmint-guest-work,target=/work \
   --volume "$CACHE_DIR:/input:ro" \
   --volume "$OUTPUT_DIR:/output" \
   --env "HOST_UID=$(id -u)" \
