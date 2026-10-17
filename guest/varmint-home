@@ -1,0 +1,74 @@
+#!/bin/sh
+set -eu
+
+root_source=$(findmnt -nr -o SOURCE /)
+case "$root_source" in
+    /dev/*) ;;
+    *) echo "varmint-home: unrecognized root source $root_source" >&2; exit 1 ;;
+esac
+root_partition=$(readlink -f "$root_source")
+root_disk=$(lsblk -ndo PKNAME "$root_partition")
+[ -n "$root_disk" ] || { echo "varmint-home: failed to locate root disk" >&2; exit 1; }
+
+device=""
+i=0
+while [ "$i" -lt 100 ]; do
+    candidates=""
+    for sysdev in /sys/block/vd*; do
+        [ -d "$sysdev" ] || continue
+        name=${sysdev##*/}
+        [ "$name" = "$root_disk" ] && continue
+        [ -b "/dev/$name" ] || continue
+        candidates="$candidates /dev/$name"
+    done
+    set -- $candidates
+    if [ "$#" -eq 1 ]; then
+        device=$1
+        break
+    fi
+    if [ "$#" -gt 1 ]; then
+        echo "varmint-home: ambiguous virtio data disks: $candidates" >&2
+        exit 1
+    fi
+    i=$((i + 1))
+    sleep 0.1
+done
+[ -n "$device" ] || { echo "varmint-home: no data disk appeared" >&2; exit 1; }
+
+kind=$(blkid -p -s TYPE -o value "$device" 2>/dev/null || true)
+case "$kind" in
+    '')
+        marker=$(head -c 15 "$device")
+        if [ "$marker" != 'VARMINT-DATA-V1' ]; then
+            echo "varmint-home: data disk is not recognized; refusing to format $device" >&2
+            exit 1
+        fi
+        echo "varmint-home: formatting new data disk $device"
+        mkfs.ext4 -F -m 0 -L varmint-data "$device"
+        ;;
+    ext4)
+        label=$(blkid -p -s LABEL -o value "$device" 2>/dev/null || true)
+        if [ "$label" != varmint-data ]; then
+            echo "varmint-home: unexpected data disk label: $label" >&2
+            exit 1
+        fi
+        ;;
+    *)
+        echo "varmint-home: unexpected filesystem type: $kind" >&2
+        exit 1
+        ;;
+esac
+
+if mountpoint -q /home; then
+    echo "varmint-home: /home is already mounted; refusing to replace it" >&2
+    exit 1
+fi
+mkdir -p /home
+if [ -n "$(find /home -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+    echo "varmint-home: system /home is not empty; no legacy migration is supported" >&2
+    exit 1
+fi
+
+mount -t ext4 "$device" /home
+resize2fs "$device"
+echo "varmint-home: mounted $device on /home"

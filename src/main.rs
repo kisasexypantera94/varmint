@@ -13,6 +13,7 @@ mod macos_ui;
 mod memory;
 mod net;
 mod stdio;
+mod storage;
 mod uart;
 mod virtio;
 mod vmm;

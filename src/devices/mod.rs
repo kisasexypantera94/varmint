@@ -13,16 +13,14 @@ use crate::{
 use applevisor::prelude::*;
 pub use events::{RuntimeEvent, RuntimeInputEvent};
 use std::{
-    sync::{
-        Mutex,
-        mpsc::{Receiver, Sender},
-    },
+    sync::{Mutex, mpsc::Receiver},
     thread,
 };
 use winit::event_loop::EventLoopProxy;
 
 pub struct HostBackends {
     pub disk: virtio::Blk,
+    pub data_disk: virtio::Blk,
     pub net: net::Backend,
     pub audio: audio::PeriodSink,
     pub clipboard: clipboard::Sink,
@@ -32,6 +30,7 @@ pub struct HostBackends {
 pub struct Devices {
     uart: Mutex<uart::Uart>,
     blk: Mutex<virtio::MmioTransport<virtio::Blk>>,
+    data_blk: Mutex<virtio::MmioTransport<virtio::Blk>>,
     net: Mutex<virtio::MmioTransport<virtio::Net>>,
     gpu: gpu::Handle,
     keyboard: Mutex<virtio::MmioTransport<virtio::Input>>,
@@ -52,6 +51,7 @@ pub struct Runtime<'a> {
 enum MmioDevice {
     Uart,
     VirtioBlk,
+    VirtioData,
     VirtioNet,
     VirtioGpu,
     VirtioInputKeyboard,
@@ -83,6 +83,11 @@ const MMIO_REGIONS: &[MmioRegion] = &[
         base: VIRTBLK_START,
         size: VIRTBLK_SIZE,
         device: MmioDevice::VirtioBlk,
+    },
+    MmioRegion {
+        base: VIRTDATA_START,
+        size: VIRTDATA_SIZE,
+        device: MmioDevice::VirtioData,
     },
     MmioRegion {
         base: VIRTNET_START,
@@ -122,12 +127,7 @@ const MMIO_REGIONS: &[MmioRegion] = &[
 ];
 
 impl<'a> Runtime<'a> {
-    pub fn new(
-        vm: &'a VirtualMachineInstance<GicEnabled>,
-        runtime_event_tx: Sender<RuntimeEvent>,
-        backends: HostBackends,
-        vcpus: usize,
-    ) -> Result<Self> {
+    pub fn new(vm: &'a VirtualMachineInstance<GicEnabled>, backends: HostBackends, vcpus: usize) -> Result<Self> {
         let (spi_int_start, _) = GicConfig::get_spi_interrupt_range()?;
 
         let uart = Mutex::new(uart::Uart::new(
@@ -138,6 +138,11 @@ impl<'a> Runtime<'a> {
         let blk = Mutex::new(virtio::MmioTransport::new(
             backends.disk,
             irq::IrqLine::new(vm, spi_int_start + VIRTBLK_SPI_OFFSET),
+        ));
+
+        let data_blk = Mutex::new(virtio::MmioTransport::new(
+            backends.data_disk,
+            irq::IrqLine::new(vm, spi_int_start + VIRTDATA_SPI_OFFSET),
         ));
 
         let net = Mutex::new(virtio::MmioTransport::new(
@@ -177,6 +182,7 @@ impl<'a> Runtime<'a> {
             devices: Devices {
                 uart,
                 blk,
+                data_blk,
                 net,
                 gpu,
                 keyboard,
@@ -239,6 +245,7 @@ impl Devices {
                 }
             }
             MmioDevice::VirtioBlk => handle_virtio_mmio(&self.blk, route.offset, size, is_write, value, mem),
+            MmioDevice::VirtioData => handle_virtio_mmio(&self.data_blk, route.offset, size, is_write, value, mem),
             MmioDevice::VirtioNet => handle_virtio_mmio(&self.net, route.offset, size, is_write, value, mem),
             MmioDevice::VirtioGpu => self.gpu.handle_mmio(route.offset, size, is_write, value),
             MmioDevice::VirtioInputKeyboard => {

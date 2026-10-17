@@ -13,7 +13,7 @@ pub mod snd;
 pub mod virgl_ffi;
 mod virtq;
 
-pub use blk::Blk;
+pub use blk::{Blk, IoCompletion};
 pub use console::Console;
 pub use device::Device;
 pub use gpu::Gpu;

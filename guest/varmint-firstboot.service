@@ -1,8 +1,8 @@
 [Unit]
 Description=Set up Varmint
-Requires=varmint-grow-root.service
+Requires=varmint-grow-root.service varmint-home.service
 Wants=varmint-host-time.service
-After=systemd-user-sessions.service varmint-grow-root.service varmint-host-time.service
+After=systemd-user-sessions.service varmint-grow-root.service varmint-home.service varmint-host-time.service
 Before=getty@tty1.service
 ConditionPathExists=!/var/lib/varmint/firstboot.done
 

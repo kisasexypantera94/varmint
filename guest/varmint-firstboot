@@ -31,6 +31,15 @@ create_user() {
     install -d -m 0755 "$STATE_DIR"
     load_user && return
 
+    if [ -f /home/.varmint/user-v1 ]; then
+        /usr/local/libexec/varmint-user-state restore
+        load_user || {
+            printf '%s\n' 'Persistent Varmint user restore did not create firstboot.user.' >&2
+            exit 1
+        }
+        return
+    fi
+
     username=$(awk -F: '$3 >= 1000 && $3 < 65534 { print $1; exit }' /etc/passwd)
     if [ -n "$username" ]; then
         save_user
@@ -196,6 +205,7 @@ verify_setup() {
 main() {
     printf '%s\n\n' 'Varmint first boot'
     create_user
+    /usr/local/libexec/varmint-user-state save "$username"
 
     passwd -l root >/dev/null 2>&1 || true
 

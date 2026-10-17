@@ -1,0 +1,16 @@
+[Unit]
+Description=Initialize and mount persistent Varmint /home
+DefaultDependencies=no
+Wants=systemd-udev-trigger.service
+After=systemd-udev-trigger.service
+Before=local-fs.target
+ConditionKernelCommandLine=varmint.data_disk=1
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/varmint-home
+RemainAfterExit=yes
+TimeoutStartSec=0
+
+[Install]
+WantedBy=local-fs.target

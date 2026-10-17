@@ -75,6 +75,8 @@ pub struct VmConfig {
     pub vcpus: usize,
     pub disk: PathBuf,
     pub disk_size: u64,
+    pub data_disk: PathBuf,
+    pub data_disk_size: u64,
     pub base_image: PathBuf,
     pub kernel: PathBuf,
     pub initrd: Option<PathBuf>,
@@ -93,6 +95,8 @@ struct VmConfigFile {
     vcpus: usize,
     disk: PathBuf,
     disk_size_gib: u64,
+    data_disk: PathBuf,
+    data_disk_size_gib: u64,
     base_image: Option<PathBuf>,
     kernel: Option<PathBuf>,
     initrd: Option<PathBuf>,
@@ -111,9 +115,9 @@ impl VmConfig {
         let config: VmConfigFile = toml::from_str(&source)
             .unwrap_or_else(|error| panic!("failed to parse VM config {}: {error}", path.display()));
 
-        if config.format_version != 1 {
+        if config.format_version != 2 {
             panic!(
-                "unsupported VM config format_version {}; expected 1",
+                "unsupported VM config format_version {}; expected 2",
                 config.format_version
             );
         }
@@ -126,6 +130,9 @@ impl VmConfig {
         if config.disk_size_gib == 0 {
             panic!("disk_size_gib must be greater than zero");
         }
+        if config.data_disk_size_gib == 0 {
+            panic!("data_disk_size_gib must be greater than zero");
+        }
         if config.kernel.is_none() && config.initrd.is_some() {
             panic!("initrd requires a custom kernel");
         }
@@ -133,6 +140,8 @@ impl VmConfig {
         let base = path.parent().unwrap_or_else(|| Path::new("."));
         let resources = bundle_resources();
         let disk = resolve_path(base, config.disk);
+        let data_disk = resolve_path(base, config.data_disk);
+        assert_ne!(disk, data_disk, "system and data disk paths must differ");
         let base_image = config
             .base_image
             .map(|path| resolve_path(base, path))
@@ -148,6 +157,10 @@ impl VmConfig {
             .disk_size_gib
             .checked_mul(GIB)
             .unwrap_or_else(|| panic!("disk_size_gib is too large"));
+        let data_disk_size = config
+            .data_disk_size_gib
+            .checked_mul(GIB)
+            .unwrap_or_else(|| panic!("data_disk_size_gib is too large"));
 
         let (kernel, initrd) = match config.kernel {
             Some(kernel) => (
@@ -155,20 +168,8 @@ impl VmConfig {
                 config.initrd.map(|initrd| resolve_path(base, initrd)),
             ),
             None => {
-                let source_kernel = resource_path(resources.as_deref(), "kernel/Image", "build/guest/Image");
-                let source_initrd = resource_path(resources.as_deref(), "kernel/initrd", "build/guest/initrd");
-
-                let disk_name = disk.file_name().and_then(|name| name.to_str()).unwrap_or("disk");
-                let boot_dir = disk
-                    .parent()
-                    .unwrap_or_else(|| Path::new("."))
-                    .join(format!("{disk_name}.boot"));
-                let kernel = boot_dir.join("Image");
-                let initrd = boot_dir.join("initrd");
-
-                snapshot_file(&source_kernel, &kernel, "kernel");
-                snapshot_file(&source_initrd, &initrd, "initrd");
-
+                let kernel = resource_path(resources.as_deref(), "kernel/Image", "build/guest/Image");
+                let initrd = resource_path(resources.as_deref(), "kernel/initrd", "build/guest/initrd");
                 (kernel, Some(initrd))
             }
         };
@@ -183,6 +184,8 @@ impl VmConfig {
             vcpus: config.vcpus,
             disk,
             disk_size,
+            data_disk,
+            data_disk_size,
             base_image,
             kernel,
             initrd,
@@ -218,48 +221,6 @@ fn absolute_path(path: &Path) -> PathBuf {
 
 fn resolve_path(base: &Path, path: PathBuf) -> PathBuf {
     if path.is_absolute() { path } else { base.join(path) }
-}
-
-fn snapshot_file(source: &Path, destination: &Path, name: &str) {
-    if destination.exists() {
-        return;
-    }
-
-    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent)
-        .unwrap_or_else(|error| panic!("failed to create per-VM boot directory {}: {error}", parent.display()));
-
-    let temporary = parent.join(format!(
-        ".{}.partial.{}",
-        destination.file_name().and_then(|name| name.to_str()).unwrap_or(name),
-        std::process::id()
-    ));
-
-    let _ = fs::remove_file(&temporary);
-    fs::copy(source, &temporary).unwrap_or_else(|error| {
-        panic!(
-            "failed to snapshot {name} {} to {}: {error}",
-            source.display(),
-            temporary.display()
-        )
-    });
-
-    match fs::rename(&temporary, destination) {
-        Ok(()) => {
-            eprintln!(
-                "snapshotted VM {name} {} from {}",
-                destination.display(),
-                source.display()
-            );
-        }
-        Err(error) if destination.exists() => {
-            let _ = fs::remove_file(&temporary);
-        }
-        Err(error) => {
-            let _ = fs::remove_file(&temporary);
-            panic!("failed to install per-VM {name} {}: {error}", destination.display());
-        }
-    }
 }
 
 fn bundle_resources() -> Option<PathBuf> {
