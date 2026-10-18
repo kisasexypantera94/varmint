@@ -304,7 +304,7 @@ build_d3dmetal() {
   log "d3dmetal-native"
   checkout_repo "$D3DMETAL_REPOSITORY" "$D3DMETAL_COMMIT" "$source"
 
-  for patch in "${D3DMETAL_PATCHES[@]}"; do
+  for patch in "${D3DMETAL_PATCHES[@]+"${D3DMETAL_PATCHES[@]}"}"; do
     apply_dependency_patch "$source" "$patch"
   done
 
@@ -401,7 +401,7 @@ dependency_recipe_hash() {
   done < <(virgl_patch_files)
 
   cat \
-    "${D3DMETAL_PATCHES[@]}" \
+    "${D3DMETAL_PATCHES[@]+"${D3DMETAL_PATCHES[@]}"}" \
     "${DXMT_PATCHES[@]}" \
     "$COMMON_SCRIPT" \
     "$DEPENDENCIES_SCRIPT"
@@ -418,7 +418,7 @@ build_dependencies() {
     "${SPIRV_CROSS_PATCHES[@]}" \
     "$VIRGL_GENERATED_PATCH" \
     "$VIRGL_PATCH_SERIES" \
-    "${D3DMETAL_PATCHES[@]}" \
+    "${D3DMETAL_PATCHES[@]+"${D3DMETAL_PATCHES[@]}"}" \
     "${DXMT_PATCHES[@]}"
   do
     need_file "$patch"

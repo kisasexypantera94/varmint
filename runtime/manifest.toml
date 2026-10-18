@@ -18,7 +18,7 @@ commit = "ed78ab6e1a37f4f11583a0bd038f22ec91f3ff10"
 
 [dependencies.epoxy]
 repository = "https://github.com/utmapp/libepoxy.git"
-commit = "5014658f79e4d6872a1ad6754da9098ccd9d4fc5"
+commit = "bf98587477fe68d07b93319ece7b40a7d0e2eabe"
 
 [dependencies.moltenvk]
 repository = "https://github.com/utmapp/MoltenVK.git"
@@ -32,12 +32,12 @@ commit = "939b40b33a44443c404c4078823c406e3c94866f"
 
 [dependencies.virglrenderer]
 repository = "https://github.com/utmapp/virglrenderer.git"
-commit = "a2c0dbada964e2f2fa3cdf26f2fa736b6e32ec0e"
+commit = "451505ad0aa449290f2c0672da6877d57ee770e5"
 
 [dependencies.dxmt]
 repository = "https://github.com/utmapp/dxmt.git"
-commit = "bcdcf6da89af6c9fedeb2fc92b4367b23d5d6ed6"
+commit = "66e27f3759ff79e41a791ec40e2a70ef6d0c964c"
 
 [dependencies.d3dmetal]
 repository = "https://github.com/utmapp/d3dmetal-native.git"
-commit = "f0dd1fafded509c9a949535c773fdc4e3ab07a71"
+commit = "fd09f2edd6f972f28b0f65117b39c361ecf99ad1"
