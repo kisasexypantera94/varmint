@@ -15,7 +15,7 @@ diff --git a/src/airconv/nt/dxbc_converter_base.cpp b/src/airconv/nt/dxbc_conver
 index 7b42744..9ed4616 100644
 --- a/src/airconv/nt/dxbc_converter_base.cpp
 +++ b/src/airconv/nt/dxbc_converter_base.cpp
-@@ -1660,6 +1660,9 @@ Converter::operator()(const InstSampleLOD &sample) {
+@@ -1660,5 +1660,8 @@ Converter::operator()(const InstSampleLOD &sample) {
    auto [Value, Residency] =
        air.CreateSample(Tex->Texture, Tex->Handle, SamplerHandle, Coord, ArrayIndex, sample.offsets, sample_level{LOD});
  
