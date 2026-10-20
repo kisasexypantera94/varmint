@@ -73,6 +73,7 @@ pub struct VmConfig {
     pub memory_size: usize,
     pub vcpus: usize,
     pub disk: PathBuf,
+    pub system_disk_capacity: Option<u64>,
     pub data_disk: PathBuf,
     pub data_disk_capacity: u64,
     pub base_image: PathBuf,
@@ -92,6 +93,7 @@ struct VmConfigFile {
     #[serde(default = "default_vcpus")]
     vcpus: usize,
     storage_dir: Option<PathBuf>,
+    system_disk_capacity_gib: Option<u64>,
     #[serde(default = "default_data_disk_capacity_gib")]
     data_disk_capacity_gib: u64,
     base_image: Option<PathBuf>,
@@ -124,6 +126,9 @@ impl VmConfig {
         if config.memory_mib < 256 {
             panic!("memory_mib must be at least 256");
         }
+        if config.system_disk_capacity_gib == Some(0) {
+            panic!("system_disk_capacity_gib must be greater than zero");
+        }
         if config.data_disk_capacity_gib == 0 {
             panic!("data_disk_capacity_gib must be greater than zero");
         }
@@ -155,6 +160,11 @@ impl VmConfig {
                 )
             });
         let memory_size = bytes_from_units(config.memory_mib, MIB, "memory_mib");
+        let system_disk_capacity = config.system_disk_capacity_gib.map(|capacity| {
+            capacity
+                .checked_mul(GIB)
+                .unwrap_or_else(|| panic!("system_disk_capacity_gib is too large"))
+        });
         let data_disk_capacity = config
             .data_disk_capacity_gib
             .checked_mul(GIB)
@@ -181,6 +191,7 @@ impl VmConfig {
             memory_size,
             vcpus: config.vcpus,
             disk,
+            system_disk_capacity,
             data_disk,
             data_disk_capacity,
             base_image,

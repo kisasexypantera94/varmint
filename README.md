@@ -21,14 +21,15 @@ Windows games can use the Vulkan-based Venus graphics path or the experimental N
 
    # memory_mib = 16384              # Guest RAM. Defaults to half of host memory.
    # vcpus = 8                       # Guest CPUs. Defaults to about 3/4 of host CPUs.
-   # data_disk_capacity_gib = 128    # Persistent /home capacity. Sparse, so only used data consumes host space.
+   # system_disk_capacity_gib = 32   # Replaceable system disk capacity. Defaults to bundled image size.
+   # data_disk_capacity_gib = 128    # Persistent /home capacity. Defaults to 128 GiB.
    # storage_dir = "fresh"           # VM files. Defaults to a directory named after this config.
    EOF
    ```
 
-   By default, Varmint stores VM files in a directory next to the config with the same name. The system disk is replaced on updates, while `/home` lives on a separate persistent disk.
+   By default, Varmint stores VM files in a directory next to the config with the same name. The system disk is replaced on Varmint updates, while `/home` lives on a separate persistent data disk.
 
-   The data disk is sparse, so a 128 GiB capacity does not use 128 GiB on the host. It grows as data is written, and freed blocks can be reclaimed through discard. You can increase its capacity later, but shrinking is not supported.
+   Both disks are sparse: their configured capacity is the maximum virtual size, not the amount of host storage reserved up front. They grow as data is written. Capacities can be increased later, but shrinking is not supported.
 
 3. Open Varmint and select `fresh.varmint`.
    Since Varmint is not signed or notarized, macOS will block the first launch. Go to **System Settings → Privacy & Security**, click **Open Anyway** and confirm.

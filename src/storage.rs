@@ -99,6 +99,22 @@ fn prepare_system_disk(config: &VmConfig) -> io::Result<()> {
     let installed_id = read_image_id(&installed_id_path).ok();
 
     if config.disk.exists() && installed_id.as_deref() == Some(expected_id.as_str()) {
+        if let Some(capacity) = config.system_disk_capacity {
+            let file = OpenOptions::new().read(true).write(true).open(&config.disk)?;
+            let current_size = file.metadata()?.len();
+            if current_size < capacity {
+                file.set_len(capacity)?;
+                file.sync_all()?;
+                let parent = config.disk.parent().unwrap_or_else(|| Path::new("."));
+                sync_directory(parent)?;
+                eprintln!(
+                    "expanded VM system disk {}: {} -> {} bytes",
+                    config.disk.display(),
+                    current_size,
+                    capacity
+                );
+            }
+        }
         return Ok(());
     }
 
@@ -117,6 +133,22 @@ fn prepare_system_disk(config: &VmConfig) -> io::Result<()> {
         output.flush()?;
 
         let output = output.into_inner().map_err(|error| error.into_error())?;
+        let image_size = output.metadata()?.len();
+
+        if let Some(capacity) = config.system_disk_capacity {
+            if capacity < image_size {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "configured system disk capacity ({capacity} bytes) is smaller than bundled system image ({image_size} bytes)"
+                    ),
+                ));
+            }
+            if capacity > image_size {
+                output.set_len(capacity)?;
+            }
+        }
+
         output.sync_all()?;
         drop(output);
 
