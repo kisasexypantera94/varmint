@@ -69,6 +69,6 @@ if [ -n "$(find /home -mindepth 1 -maxdepth 1 -print -quit)" ]; then
     exit 1
 fi
 
-mount -t ext4 "$device" /home
+mount -t ext4 -o discard "$device" /home
 resize2fs "$device"
 echo "varmint-home: mounted $device on /home"
