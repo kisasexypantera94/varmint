@@ -1,0 +1,121 @@
+diff --git a/src/virtio/neptune/npt_overrides_d3d11_device.c b/src/virtio/neptune/npt_overrides_d3d11_device.c
+--- a/src/virtio/neptune/npt_overrides_d3d11_device.c
++++ b/src/virtio/neptune/npt_overrides_d3d11_device.c
+@@ -168,6 +168,7 @@
+                           ID3D11Buffer **ppBuffer)
+ {
+    struct npt_device *dev = npt_com_self_device(self);
++   struct npt_ring *ring = npt_device_method_ring(dev);
+    uint64_t self_id = npt_com_self_id(self);
+ 
+    /* Sync under multi-ring (cross-ring Create->Use race), async on
+@@ -176,36 +177,83 @@
+    HRESULT hr;
+    if (dev->multi_ring_enabled) {
+       hr = npt_call_ID3D11Device_CreateBuffer(
+-         npt_device_method_ring(dev), self_id, pDesc, NULL, &raw);
++         ring, self_id, pDesc, NULL, &raw);
+    } else {
+       npt_async_ID3D11Device_CreateBuffer(
+-         npt_device_method_ring(dev), self_id, pDesc, NULL, &raw);
++         ring, self_id, pDesc, NULL, &raw);
+       hr = (HRESULT)0;  /* deferred-fatal: assume S_OK */
+    }
+ 
+-   if (NPT_SUCCEEDED(hr) && raw && pInitialData && pInitialData->pSysMem &&
+-       pDesc && pDesc->ByteWidth > 0) {
+-      /* MSDN: SysMemPitch / SysMemSlicePitch ignored for buffers. */
+-      const struct npt_update_split split = {
+-         .extent = { 0, 0, 0, pDesc->ByteWidth, 1, 1 },
+-         .rows = 1, .row_texels = 1, .buffer = true,
+-      };
+-      npt_resource_update(npt_device_method_ring(dev), /*context_id=*/0,
+-                          (uint64_t)(uintptr_t)raw, /*subresource=*/0,
+-                          /*box=*/NULL, /*row_pitch=*/0, /*depth_pitch=*/0,
+-                          pInitialData->pSysMem, pDesc->ByteWidth,
+-                          pDesc->ByteWidth, &split);
+-   }
+-
+    if (NPT_SUCCEEDED(hr) && raw) {
++      const uint64_t raw_id = (uint64_t)(uintptr_t)raw;
+       struct npt_d3d11_buffer *b = (struct npt_d3d11_buffer *)
+          npt_com_get_or_wrap_or_release(dev, &NPT_IID_ID3D11Buffer,
+-                                        (uint64_t)(uintptr_t)raw,
++                                        raw_id,
+                                         (struct npt_com_base *)self);
++
+       if (b && pDesc)
+          npt_d3d11_buffer_set_desc(b, pDesc);
+-      if (b && ppBuffer && dev_buffer_external_eligible(dev, pDesc))
++
++      /*
++       * Bootstrap eligible large DYNAMIC buffers directly onto guest-shared
++       * storage before the application can use them.  The matching DXMT
++       * backend treats the first bound slot (cookie 0) as its current
++       * DynamicBuffer allocation.
++       *
++       * Doing this at CreateBuffer is important for WRITE_NO_OVERWRITE:
++       * switching an already-live buffer later would have to preserve and
++       * correctly order its existing contents.
++       */
++      bool external = false;
++      if (b && ppBuffer && dev_buffer_external_eligible(dev, pDesc)) {
+          npt_d3d11_buffer_set_external_eligible(b);
++
++         if (npt_d3d11_buffer_claim_external(b) &&
++             npt_d3d11_buffer_add_external_slot(b, ring)) {
++            npt_d3d11_buffer_set_external_current(b, 0);
++            external = true;
++         } else {
++            npt_d3d11_buffer_drop_external(b);
++         }
++      }
++
++      if (b && pInitialData && pInitialData->pSysMem &&
++          pDesc && pDesc->ByteWidth > 0) {
++         if (external) {
++            /*
++             * Slot 0 is already DXMT's current allocation.  Seed the same
++             * shared pages directly so CreateBuffer initial data is not lost
++             * when the original internal allocation is replaced.
++             */
++            void *dst = npt_d3d11_buffer_external_slot_ptr(b, 0);
++            if (!dst) {
++               npt_log("CreateBuffer: initial external slot has no mapping");
++               npt_d3d11_buffer_drop_external(b);
++               external = false;
++            } else {
++               memcpy(dst, pInitialData->pSysMem, pDesc->ByteWidth);
++               atomic_thread_fence(memory_order_release);
++            }
++         }
++
++         if (!external) {
++            /* Existing copy-backed fallback. */
++            const struct npt_update_split split = {
++               .extent = { 0, 0, 0, pDesc->ByteWidth, 1, 1 },
++               .rows = 1, .row_texels = 1, .buffer = true,
++            };
++            npt_resource_update(ring, /*context_id=*/0,
++                                raw_id, /*subresource=*/0,
++                                /*box=*/NULL,
++                                /*row_pitch=*/0,
++                                /*depth_pitch=*/0,
++                                pInitialData->pSysMem,
++                                pDesc->ByteWidth,
++                                pDesc->ByteWidth,
++                                &split);
++         }
++      }
++
+       if (ppBuffer) {
+          *ppBuffer = (ID3D11Buffer *)b;
+       } else if (b) {
+@@ -215,6 +263,7 @@
+    } else if (ppBuffer) {
+       *ppBuffer = NULL;
+    }
++
+    return hr;
+ }
+ 

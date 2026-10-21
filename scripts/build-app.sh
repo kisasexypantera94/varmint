@@ -28,6 +28,7 @@ DXMT_PATCHES=(
   "$ROOT/patches/dxmt/0001-fix-neptune-vertex-sample-flicker.patch"
   "$ROOT/patches/dxmt/0003-add-neptune-r10-bgra8-present-conversion.patch"
   "$ROOT/patches/dxmt/0005-fix-d3d11-event-repeated-stall.patch"
+  "$ROOT/patches/dxmt/0006-bootstrap-neptune-d3d11-external-buffers.patch"
 )
 D3DMETAL_PATCHES=()
 ENTITLEMENTS="$ROOT/runtime/entitlements.plist"
