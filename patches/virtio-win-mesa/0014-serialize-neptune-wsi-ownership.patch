@@ -1,0 +1,151 @@
+diff --git a/src/virtio/neptune/npt_device.c b/src/virtio/neptune/npt_device.c
+index 5b561dd9399..afda2c195fa 100644
+--- a/src/virtio/neptune/npt_device.c
++++ b/src/virtio/neptune/npt_device.c
+@@ -322,6 +322,9 @@ npt_device_create(void)
+    atomic_store(&dev->next_ring_id, 1);
+    npt_wrapper_cache_init(&dev->wrapper_cache);
+ 
++   mtx_init(&dev->wsi_owner_mutex, mtx_plain);
++   dev->wsi_owner = NULL;
++
+    mtx_init(&dev->tls_rings_mutex, mtx_plain);
+    list_inithead(&dev->tls_rings);
+    npt_tls_once_init();
+@@ -345,6 +348,7 @@ npt_device_create(void)
+    dev->ring = npt_ring_create(dev, &layout, ring_id, false /* primary */);
+    if (!dev->ring) {
+       npt_log("failed to create ring");
++      mtx_destroy(&dev->wsi_owner_mutex);
+       mtx_destroy(&dev->instance_rings_mutex);
+       mtx_destroy(&dev->tls_rings_mutex);
+       npt_wrapper_cache_fini(&dev->wrapper_cache);
+@@ -459,6 +463,7 @@ npt_device_destroy(struct npt_device *dev)
+    mtx_unlock(&dev->tls_rings_mutex);
+ 
+    npt_ring_destroy(dev->ring);
++   mtx_destroy(&dev->wsi_owner_mutex);
+    mtx_destroy(&dev->instance_rings_mutex);
+    mtx_destroy(&dev->tls_rings_mutex);
+    npt_wrapper_cache_fini(&dev->wrapper_cache);
+diff --git a/src/virtio/neptune/npt_device.h b/src/virtio/neptune/npt_device.h
+index da420b8a592..bfad15a401b 100644
+--- a/src/virtio/neptune/npt_device.h
++++ b/src/virtio/neptune/npt_device.h
+@@ -35,8 +35,18 @@ struct npt_wrapper_cache {
+    uint32_t count;
+ };
+ 
++struct npt_guest_swapchain_common;
++
+ struct npt_device {
+    struct npt_renderer *renderer;
++
++   /*
++    * The renderer WSI API is process-global and has no per-swapchain
++    * context handle. Serialize ownership so multiple live DXGI
++    * swapchains cannot overwrite or destroy each other's WSI state.
++    */
++   mtx_t wsi_owner_mutex;
++   struct npt_guest_swapchain_common *wsi_owner;
+    /* Primary ring; fallback when TLS rings are disabled. */
+    struct npt_ring *ring;
+ 
+diff --git a/src/virtio/neptune/npt_swapchain_common.c b/src/virtio/neptune/npt_swapchain_common.c
+index c58ea5668bd..4431833c84a 100644
+--- a/src/virtio/neptune/npt_swapchain_common.c
++++ b/src/virtio/neptune/npt_swapchain_common.c
+@@ -343,20 +343,38 @@ npt_gsc_release_pool(struct npt_guest_swapchain_common *c)
+  * swapchain interleaves its copy-list release).  When the device is
+  * shutting down the worker joins are skipped and the caller must leak
+  * the aux so the workers keep valid memory to come back to. */
+-void
+-npt_gsc_wsi_quiesce(struct npt_guest_swapchain_common *c, bool shutting_down)
++static void
++npt_gsc_wsi_quiesce_locked(struct npt_guest_swapchain_common *c,
++                           bool shutting_down)
+ {
++   struct npt_device *dev = c->com->base.device;
++
+    npt_gsc_wsi_stop(c, shutting_down);
+    npt_gsc_drain_stop(c, shutting_down);
+    npt_gsc_backpressure_flush(c);
+-   if (c->wsi_initialized && !shutting_down)
+-      npt_renderer_wsi_destroy(c->com->base.device->renderer);
++
++   if (dev->wsi_owner == c) {
++      if (c->wsi_initialized && !shutting_down)
++         npt_renderer_wsi_destroy(dev->renderer);
++      dev->wsi_owner = NULL;
++   }
++
+    c->wsi_initialized = false;
+    c->wsi_failed = false;
+    for (uint32_t i = 0; i < NPT_SC_PRESENT_IMAGES; i++)
+       atomic_store(&c->image_inflight[i], 0);
+ }
+ 
++void
++npt_gsc_wsi_quiesce(struct npt_guest_swapchain_common *c, bool shutting_down)
++{
++   struct npt_device *dev = c->com->base.device;
++
++   mtx_lock(&dev->wsi_owner_mutex);
++   npt_gsc_wsi_quiesce_locked(c, shutting_down);
++   mtx_unlock(&dev->wsi_owner_mutex);
++}
++
+ bool
+ npt_gsc_wsi_backend_available(struct npt_guest_swapchain_common *c)
+ {
+@@ -377,7 +395,17 @@ npt_gsc_wsi_backend_available(struct npt_guest_swapchain_common *c)
+ bool
+ npt_gsc_wsi_bringup(struct npt_guest_swapchain_common *c, uint32_t fmt)
+ {
+-   struct npt_renderer *renderer = c->com->base.device->renderer;
++   struct npt_device *dev = c->com->base.device;
++   struct npt_renderer *renderer = dev->renderer;
++
++   mtx_lock(&dev->wsi_owner_mutex);
++
++   if (dev->wsi_owner && dev->wsi_owner != c) {
++      struct npt_guest_swapchain_common *old_owner = dev->wsi_owner;
++      npt_log("%s: taking WSI ownership from %s",
++              c->tag, old_owner->tag);
++      npt_gsc_wsi_quiesce_locked(old_owner, false);
++   }
+ 
+    int fds[NPT_SC_PRESENT_IMAGES];
+    uint32_t strides[NPT_SC_PRESENT_IMAGES];
+@@ -419,17 +447,22 @@ npt_gsc_wsi_bringup(struct npt_guest_swapchain_common *c, uint32_t fmt)
+    }
+ 
+    c->wsi_initialized = true;
++   dev->wsi_owner = c;
++
+    if (!npt_gsc_drain_start(c) || !npt_gsc_wsi_start(c)) {
+       /* Without both workers a Present would enqueue frames nothing
+        * consumes and eventually block forever on the full queue.  Drop
+        * back to the no-WSI path instead. */
+       npt_log("%s: present worker startup failed; presents will be dropped",
+               c->tag);
+-      npt_gsc_wsi_quiesce(c, false);
++      npt_gsc_wsi_quiesce_locked(c, false);
+       npt_gsc_release_pool(c);
+       c->wsi_failed = true;
++      mtx_unlock(&dev->wsi_owner_mutex);
+       return false;
+    }
++
++   mtx_unlock(&dev->wsi_owner_mutex);
+    return true;
+ 
+ fail:
+@@ -439,6 +472,7 @@ fail:
+    }
+    npt_gsc_release_pool(c);
+    c->wsi_failed = true;
++   mtx_unlock(&dev->wsi_owner_mutex);
+    return false;
+ }
+ 

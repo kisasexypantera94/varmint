@@ -27,7 +27,7 @@ index 58596ea0074..dd87bcb0f31 100644
  #ifdef NPT_HAVE_XCB_DRI3_SYNCOBJ
        /* Persistent X XID, rebound each Present. */
        xcb_dri3_syncobj_t acquire_syncobj;
-@@ -58,6 +65,190 @@ static struct {
+@@ -58,6 +65,217 @@ static struct {
     xcb_special_event_t *special_event;
  } g_wsi;
  
@@ -158,26 +158,53 @@ index 58596ea0074..dd87bcb0f31 100644
 +   const int16_t dst_y =
 +      (int16_t)((g_wsi.target_height - view_h) / 2);
 +
-+   const xcb_render_color_t black = {
-+      .red = 0,
-+      .green = 0,
-+      .blue = 0,
-+      .alpha = 0xffff,
-+   };
-+   const xcb_rectangle_t full = {
-+      .x = 0,
-+      .y = 0,
-+      .width = (uint16_t)g_wsi.target_width,
-+      .height = (uint16_t)g_wsi.target_height,
-+   };
++   xcb_rectangle_t bars[2];
++   uint32_t num_bars = 0;
 +
-+   xcb_render_fill_rectangles(
-+      g_wsi.conn,
-+      XCB_RENDER_PICT_OP_SRC,
-+      img->scaled_picture,
-+      black,
-+      1,
-+      &full);
++   if (dst_y > 0) {
++      bars[num_bars++] = (xcb_rectangle_t) {
++         .x = 0,
++         .y = 0,
++         .width = (uint16_t)g_wsi.target_width,
++         .height = (uint16_t)dst_y,
++      };
++      bars[num_bars++] = (xcb_rectangle_t) {
++         .x = 0,
++         .y = (int16_t)(dst_y + view_h),
++         .width = (uint16_t)g_wsi.target_width,
++         .height = (uint16_t)(g_wsi.target_height - dst_y - view_h),
++      };
++   } else if (dst_x > 0) {
++      bars[num_bars++] = (xcb_rectangle_t) {
++         .x = 0,
++         .y = 0,
++         .width = (uint16_t)dst_x,
++         .height = (uint16_t)g_wsi.target_height,
++      };
++      bars[num_bars++] = (xcb_rectangle_t) {
++         .x = (int16_t)(dst_x + view_w),
++         .y = 0,
++         .width = (uint16_t)(g_wsi.target_width - dst_x - view_w),
++         .height = (uint16_t)g_wsi.target_height,
++      };
++   }
++
++   if (num_bars) {
++      const xcb_render_color_t black = {
++         .red = 0,
++         .green = 0,
++         .blue = 0,
++         .alpha = 0xffff,
++      };
++
++      xcb_render_fill_rectangles(
++         g_wsi.conn,
++         XCB_RENDER_PICT_OP_SRC,
++         img->scaled_picture,
++         black,
++         num_bars,
++         bars);
++   }
 +
 +   xcb_render_transform_t transform = {
 +      .matrix11 =
@@ -218,7 +245,7 @@ index 58596ea0074..dd87bcb0f31 100644
  NTSTATUS npt_do_wsi_init(void *args)
  {
     struct npt_unix_wsi_init_params *p = args;
-@@ -72,6 +263,9 @@ NTSTATUS npt_do_wsi_init(void *args)
+@@ -72,6 +297,9 @@ NTSTATUS npt_do_wsi_init(void *args)
  #endif
     for (uint32_t i = 0; i < NPT_WSI_MAX_IMAGES; i++) {
        g_wsi.images[i].fd = -1;
@@ -228,7 +255,7 @@ index 58596ea0074..dd87bcb0f31 100644
  #ifdef NPT_HAVE_XCB_DRI3_SYNCOBJ
        g_wsi.images[i].acquire_syncobj = XCB_NONE;
  #endif
-@@ -127,8 +321,43 @@ NTSTATUS npt_do_wsi_init(void *args)
+@@ -127,8 +355,43 @@ NTSTATUS npt_do_wsi_init(void *args)
     }
     g_wsi.width = p->width;
     g_wsi.height = p->height;
@@ -272,7 +299,7 @@ index 58596ea0074..dd87bcb0f31 100644
     for (uint32_t i = 0; i < p->num_images; i++) {
        if (p->fds[i] < 0) continue;
  
-@@ -155,6 +384,15 @@ NTSTATUS npt_do_wsi_init(void *args)
+@@ -155,6 +418,15 @@ NTSTATUS npt_do_wsi_init(void *args)
        fprintf(stderr, "neptune unixlib wsi: pixmap 0x%x for image %u (%ux%u)\n",
                g_wsi.images[i].pixmap, i, p->width, p->height);
  
@@ -288,7 +315,7 @@ index 58596ea0074..dd87bcb0f31 100644
  #ifdef NPT_HAVE_XCB_DRI3_SYNCOBJ
        if (g_wsi.dri3_has_explicit_sync) {
           /* XID is rebound to a fresh sync_file each Present. */
-@@ -188,7 +426,8 @@ static int
+@@ -188,7 +460,8 @@ static int
  image_index_for_pixmap(xcb_pixmap_t pixmap)
  {
     for (uint32_t i = 0; i < g_wsi.num_images; i++) {
@@ -298,7 +325,7 @@ index 58596ea0074..dd87bcb0f31 100644
           return (int)i;
     }
     return -1;
-@@ -260,6 +499,34 @@ NTSTATUS npt_do_wsi_present(void *args)
+@@ -260,6 +533,34 @@ NTSTATUS npt_do_wsi_present(void *args)
  
     const uint32_t this_serial = ++g_wsi.serial;
  
@@ -333,7 +360,7 @@ index 58596ea0074..dd87bcb0f31 100644
  #ifdef NPT_HAVE_XCB_DRI3_SYNCOBJ
     if (g_wsi.dri3_has_explicit_sync &&
         g_wsi.images[p->image_index].acquire_syncobj != XCB_NONE) {
-@@ -375,6 +642,15 @@ NTSTATUS npt_do_wsi_destroy(void *args)
+@@ -375,6 +676,15 @@ NTSTATUS npt_do_wsi_destroy(void *args)
     if (!g_wsi.conn) return STATUS_SUCCESS;
  
     for (uint32_t i = 0; i < g_wsi.num_images; i++) {
