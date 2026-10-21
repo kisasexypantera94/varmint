@@ -37,7 +37,7 @@ test:
 		DYLD_LIBRARY_PATH="$(PREFIX)/lib:$${DYLD_LIBRARY_PATH:-}" \
 		cargo test
 
-.PHONY: neptune-sync neptune-sync-force neptune-build game-graphics
+.PHONY: neptune-sync neptune-sync-force neptune-build
 
 neptune-sync:
 	./scripts/neptune-sync.sh
@@ -47,10 +47,6 @@ neptune-sync-force:
 
 neptune-build:
 	./scripts/neptune-build.sh
-
-game-graphics:
-	@test -n "$(APPID)" || (echo "usage: make game-graphics APPID=<steam-appid> MODE=<status|venus|neptune|neptune-dx12> [EXE='path/to/game.exe']" >&2; exit 2)
-	./scripts/game-graphics.sh "$(APPID)" "$(or $(MODE),status)" "$(EXE)"
 
 .PHONY: neptune-capture
 
