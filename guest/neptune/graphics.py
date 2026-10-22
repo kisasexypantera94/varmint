@@ -154,20 +154,32 @@ def require_x86_64_elf(path, kind):
         fail(f"unsupported {kind}: {path} ({machine_text}, expected x86_64)")
 
 
-def artifact_paths(mode, base):
-    windows = base / "x86_64-windows"
-    unix = base / "x86_64-unix"
-    paths = {
-        "dxgi": windows / "dxgi.dll",
-        "nptdll": windows / "nptunix.dll",
-        "nptso": unix / "nptunix.so",
-        "primary": windows / ("d3d11.dll" if mode == "neptune" else "d3d12.dll"),
-    }
+def validate_artifacts(paths):
     require_amd64_pe(paths["dxgi"], "Neptune dxgi.dll")
     require_amd64_pe(paths["primary"], f"Neptune {paths['primary'].name}")
     require_amd64_pe(paths["nptdll"], "Neptune nptunix.dll")
     require_x86_64_elf(paths["nptso"], "Neptune nptunix.so")
     return paths
+
+
+def prebuilt_artifact_paths(mode, base):
+    windows = base / "x86_64-windows"
+    unix = base / "x86_64-unix"
+    return validate_artifacts({
+        "dxgi": windows / "dxgi.dll",
+        "nptdll": windows / "nptunix.dll",
+        "nptso": unix / "nptunix.so",
+        "primary": windows / ("d3d11.dll" if mode == "neptune" else "d3d12.dll"),
+    })
+
+
+def build_artifact_paths(mode, base):
+    return validate_artifacts({
+        "dxgi": base / "dxgi.dll",
+        "nptdll": base / "nptunix" / "nptunix.dll",
+        "nptso": base / "nptunix" / "nptunix.so",
+        "primary": base / ("d3d11.dll" if mode == "neptune" else "d3d12.dll"),
+    })
 
 
 def find_component_dir(root, wine_roots, component, names):
@@ -669,9 +681,20 @@ def main():
     proton_index, proton_root = find_proton(command)
     layout = discover_proton_layout(mode, proton_root)
 
-    base = Path(os.environ.get("VARMINT_NEPTUNE_PREBUILT", str(DEFAULT_NEPTUNE)))
-    artifacts = artifact_paths(mode, base)
-    shadow, use_lock, mode_dir = acquire_shadow(mode, proton_root, artifacts, layout)
+    build = os.environ.get("VARMINT_NEPTUNE_BUILD")
+    if build:
+        artifacts = build_artifact_paths(
+            mode, Path(build).expanduser().resolve()
+        )
+    else:
+        base = Path(
+            os.environ.get("VARMINT_NEPTUNE_PREBUILT", str(DEFAULT_NEPTUNE))
+        ).expanduser()
+        artifacts = prebuilt_artifact_paths(mode, base)
+
+    shadow, use_lock, mode_dir = acquire_shadow(
+        mode, proton_root, artifacts, layout
+    )
 
     command[proton_index] = str(shadow / "proton")
 
