@@ -1,5 +1,68 @@
+diff --git a/src/virtio/neptune/npt_swapchain.c b/src/virtio/neptune/npt_swapchain.c
+index aabc52dcac9..2c508dc6cc7 100644
+--- a/src/virtio/neptune/npt_swapchain.c
++++ b/src/virtio/neptune/npt_swapchain.c
+@@ -795,17 +795,33 @@ static HRESULT NPT_STDMETHODCALLTYPE
+ gsc_SetFullscreenState(void *self, BOOL Fullscreen, IDXGIOutput *pTarget)
+ {
+    struct npt_guest_swapchain *s = gsc(self);
++   struct npt_guest_swapchain_common *c = &s->base;
+ 
+    if (!Fullscreen && pTarget)
+       return NPT_DXGI_ERROR_INVALID_CALL;
+ 
++   /*
++    * Serialize the HWND geometry change with Present/Resize.  The WSI caches
++    * the target window geometry at init, so a real fullscreen transition
++    * invalidates it even when the application does not call ResizeBuffers.
++    */
++   mtx_lock(&c->present_mutex);
++   const BOOL was_fullscreen = c->fullscreen;
++
++   HRESULT hr = NPT_S_OK;
++
+    /* Dispatch the windowed <-> fullscreen transition; both directions place
+     * and style the app's own OutputWindow guest-side. */
+-   if (!s->base.fullscreen && Fullscreen)
+-      return gsc_enter_fullscreen(self, s, pTarget);
+-   if (s->base.fullscreen && !Fullscreen)
+-      return gsc_leave_fullscreen(self, s);
+-   return NPT_S_OK;
++   if (!c->fullscreen && Fullscreen)
++      hr = gsc_enter_fullscreen(self, s, pTarget);
++   else if (c->fullscreen && !Fullscreen)
++      hr = gsc_leave_fullscreen(self, s);
++
++   if (c->fullscreen != was_fullscreen)
++      gsc_teardown_wsi(s, false);
++
++   mtx_unlock(&c->present_mutex);
++   return hr;
+ }
+ 
+ static HRESULT NPT_STDMETHODCALLTYPE
+diff --git a/src/virtio/neptune/nptunix/meson.build b/src/virtio/neptune/nptunix/meson.build
+index 36813c7627c..d4817595aa5 100644
+--- a/src/virtio/neptune/nptunix/meson.build
++++ b/src/virtio/neptune/nptunix/meson.build
+@@ -63,6 +63,7 @@ else
+ endif
+ 
+ npt_dep_xcb = dependency('xcb', native : true)
++npt_dep_xcb_render = dependency('xcb-render', native : true)
+ 
+ # Bake the xcb-dri3 libdir as an rpath so nptunix.so resolves the
+ # pkg-config-resolved libxcb-dri3.so.0 at runtime even when loaded inside
+@@ -73,6 +74,7 @@ npt_xcb_dri3_libdir = npt_dep_xcb_dri3.get_variable(pkgconfig : 'libdir')
+ 
+ npt_nptunix_deps = [
+   npt_dep_xcb, npt_dep_xcb_dri3, npt_dep_xcb_present,
++  npt_dep_xcb_render,
+   dependency('libdrm', native : true),
+ ]
+ npt_nptunix_c_args = []
 diff --git a/src/virtio/neptune/nptunix/npt_unix_wsi.c b/src/virtio/neptune/nptunix/npt_unix_wsi.c
-index 58596ea0074..dd87bcb0f31 100644
+index 3473de49176..0b491601f45 100644
 --- a/src/virtio/neptune/nptunix/npt_unix_wsi.c
 +++ b/src/virtio/neptune/nptunix/npt_unix_wsi.c
 @@ -30,6 +30,7 @@
@@ -10,7 +73,7 @@ index 58596ea0074..dd87bcb0f31 100644
  
  #include <xf86drm.h>
  
-@@ -40,10 +41,16 @@ static struct {
+@@ -40,10 +41,17 @@ static struct {
     xcb_connection_t *conn;
     xcb_window_t window;
     uint32_t width, height;
@@ -24,10 +87,11 @@ index 58596ea0074..dd87bcb0f31 100644
 +      xcb_render_picture_t src_picture;
 +      xcb_pixmap_t scaled_pixmap;
 +      xcb_render_picture_t scaled_picture;
++      uint32_t scaled_width, scaled_height;
  #ifdef NPT_HAVE_XCB_DRI3_SYNCOBJ
        /* Persistent X XID, rebound each Present. */
        xcb_dri3_syncobj_t acquire_syncobj;
-@@ -58,6 +65,217 @@ static struct {
+@@ -58,6 +66,290 @@ static struct {
     xcb_special_event_t *special_event;
  } g_wsi;
  
@@ -65,30 +129,60 @@ index 58596ea0074..dd87bcb0f31 100644
 +   return result;
 +}
 +
++static void
++destroy_scaled_target(uint32_t i)
++{
++   typeof(g_wsi.images[0]) *img = &g_wsi.images[i];
++
++   if (img->scaled_picture != XCB_NONE) {
++      xcb_render_free_picture(g_wsi.conn, img->scaled_picture);
++      img->scaled_picture = XCB_NONE;
++   }
++
++   if (img->scaled_pixmap != XCB_NONE) {
++      xcb_free_pixmap(g_wsi.conn, img->scaled_pixmap);
++      img->scaled_pixmap = XCB_NONE;
++   }
++
++   img->scaled_width = 0;
++   img->scaled_height = 0;
++}
++
 +static bool
 +create_scaled_image(uint32_t i)
 +{
 +   typeof(g_wsi.images[0]) *img = &g_wsi.images[i];
 +
-+   img->src_picture = xcb_generate_id(g_wsi.conn);
-+   xcb_void_cookie_t ck = xcb_render_create_picture_checked(
-+      g_wsi.conn, img->src_picture, img->pixmap,
-+      g_wsi.rgb24_format, 0, NULL);
-+   xcb_generic_error_t *err = xcb_request_check(g_wsi.conn, ck);
-+   if (err) {
-+      fprintf(stderr,
-+              "neptune unixlib wsi: create source Render picture failed (%u)\n",
-+              err->error_code);
-+      free(err);
-+      img->src_picture = XCB_NONE;
-+      return false;
++   if (g_wsi.rgb24_format == XCB_NONE) {
++      g_wsi.rgb24_format = find_rgb24_format(g_wsi.conn);
++      if (g_wsi.rgb24_format == XCB_NONE) {
++         fprintf(stderr,
++                 "neptune unixlib wsi: no RGB24 XRender format\n");
++         return false;
++      }
++   }
++
++   if (img->src_picture == XCB_NONE) {
++      img->src_picture = xcb_generate_id(g_wsi.conn);
++      xcb_void_cookie_t ck = xcb_render_create_picture_checked(
++         g_wsi.conn, img->src_picture, img->pixmap,
++         g_wsi.rgb24_format, 0, NULL);
++      xcb_generic_error_t *err = xcb_request_check(g_wsi.conn, ck);
++      if (err) {
++         fprintf(stderr,
++                 "neptune unixlib wsi: create source Render picture failed (%u)\n",
++                 err->error_code);
++         free(err);
++         img->src_picture = XCB_NONE;
++         return false;
++      }
 +   }
 +
 +   img->scaled_pixmap = xcb_generate_id(g_wsi.conn);
-+   ck = xcb_create_pixmap_checked(
++   xcb_void_cookie_t ck = xcb_create_pixmap_checked(
 +      g_wsi.conn, 24, img->scaled_pixmap, g_wsi.window,
 +      g_wsi.target_width, g_wsi.target_height);
-+   err = xcb_request_check(g_wsi.conn, ck);
++   xcb_generic_error_t *err = xcb_request_check(g_wsi.conn, ck);
 +   if (err) {
 +      fprintf(stderr,
 +              "neptune unixlib wsi: create scaled pixmap failed (%u)\n",
@@ -109,10 +203,53 @@ index 58596ea0074..dd87bcb0f31 100644
 +              err->error_code);
 +      free(err);
 +      img->scaled_picture = XCB_NONE;
++      xcb_free_pixmap(g_wsi.conn, img->scaled_pixmap);
++      img->scaled_pixmap = XCB_NONE;
 +      return false;
 +   }
 +
++   img->scaled_width = g_wsi.target_width;
++   img->scaled_height = g_wsi.target_height;
 +   return true;
++}
++
++static void
++drain_window_events(void)
++{
++   xcb_generic_event_t *ev;
++
++   while ((ev = xcb_poll_for_event(g_wsi.conn))) {
++      const uint8_t type = ev->response_type & 0x7f;
++
++      if (type == XCB_CONFIGURE_NOTIFY) {
++         const xcb_configure_notify_event_t *configure =
++            (const xcb_configure_notify_event_t *)ev;
++
++         if (configure->window == g_wsi.window &&
++             configure->width && configure->height &&
++             (configure->width != g_wsi.target_width ||
++              configure->height != g_wsi.target_height)) {
++            const uint32_t old_width = g_wsi.target_width;
++            const uint32_t old_height = g_wsi.target_height;
++
++            g_wsi.target_width = configure->width;
++            g_wsi.target_height = configure->height;
++            g_wsi.scale =
++               g_wsi.target_width != g_wsi.width ||
++               g_wsi.target_height != g_wsi.height;
++
++            fprintf(stderr,
++                    "neptune unixlib wsi: target resize %ux%u -> %ux%u "
++                    "(source=%ux%u, scale=%d)\n",
++                    old_width, old_height,
++                    g_wsi.target_width, g_wsi.target_height,
++                    g_wsi.width, g_wsi.height,
++                    (int)g_wsi.scale);
++         }
++      }
++
++      free(ev);
++   }
 +}
 +
 +static void
@@ -245,7 +382,7 @@ index 58596ea0074..dd87bcb0f31 100644
  NTSTATUS npt_do_wsi_init(void *args)
  {
     struct npt_unix_wsi_init_params *p = args;
-@@ -72,6 +297,9 @@ NTSTATUS npt_do_wsi_init(void *args)
+@@ -72,6 +364,9 @@ NTSTATUS npt_do_wsi_init(void *args)
  #endif
     for (uint32_t i = 0; i < NPT_WSI_MAX_IMAGES; i++) {
        g_wsi.images[i].fd = -1;
@@ -255,8 +392,16 @@ index 58596ea0074..dd87bcb0f31 100644
  #ifdef NPT_HAVE_XCB_DRI3_SYNCOBJ
        g_wsi.images[i].acquire_syncobj = XCB_NONE;
  #endif
-@@ -127,8 +355,43 @@ NTSTATUS npt_do_wsi_init(void *args)
+@@ -125,10 +420,51 @@ NTSTATUS npt_do_wsi_init(void *args)
+       xcb_disconnect(g_wsi.conn); g_wsi.conn = NULL;
+       return STATUS_SUCCESS;
     }
++
++   const uint32_t window_event_mask = XCB_EVENT_MASK_STRUCTURE_NOTIFY;
++   xcb_change_window_attributes(
++      g_wsi.conn, g_wsi.window,
++      XCB_CW_EVENT_MASK, &window_event_mask);
++
     g_wsi.width = p->width;
     g_wsi.height = p->height;
 +   g_wsi.target_width = p->width;
@@ -299,7 +444,7 @@ index 58596ea0074..dd87bcb0f31 100644
     for (uint32_t i = 0; i < p->num_images; i++) {
        if (p->fds[i] < 0) continue;
  
-@@ -155,6 +418,15 @@ NTSTATUS npt_do_wsi_init(void *args)
+@@ -155,6 +491,15 @@ NTSTATUS npt_do_wsi_init(void *args)
        fprintf(stderr, "neptune unixlib wsi: pixmap 0x%x for image %u (%ux%u)\n",
                g_wsi.images[i].pixmap, i, p->width, p->height);
  
@@ -315,7 +460,7 @@ index 58596ea0074..dd87bcb0f31 100644
  #ifdef NPT_HAVE_XCB_DRI3_SYNCOBJ
        if (g_wsi.dri3_has_explicit_sync) {
           /* XID is rebound to a fresh sync_file each Present. */
-@@ -188,7 +460,8 @@ static int
+@@ -188,7 +533,8 @@ static int
  image_index_for_pixmap(xcb_pixmap_t pixmap)
  {
     for (uint32_t i = 0; i < g_wsi.num_images; i++) {
@@ -325,7 +470,14 @@ index 58596ea0074..dd87bcb0f31 100644
           return (int)i;
     }
     return -1;
-@@ -260,6 +533,34 @@ NTSTATUS npt_do_wsi_present(void *args)
+@@ -255,11 +601,57 @@ NTSTATUS npt_do_wsi_present(void *args)
+    if (!g_wsi.conn || p->image_index >= g_wsi.num_images)
+       return STATUS_SUCCESS;
+ 
++   drain_window_events();
++
+    xcb_pixmap_t pixmap = g_wsi.images[p->image_index].pixmap;
+    if (!pixmap) return STATUS_SUCCESS;
  
     const uint32_t this_serial = ++g_wsi.serial;
  
@@ -338,6 +490,22 @@ index 58596ea0074..dd87bcb0f31 100644
 +    * The normal 1:1 path below keeps its asynchronous explicit-sync path.
 +    */
 +   if (g_wsi.scale) {
++      typeof(g_wsi.images[0]) *img = &g_wsi.images[p->image_index];
++
++      if (img->scaled_width != g_wsi.target_width ||
++          img->scaled_height != g_wsi.target_height) {
++         destroy_scaled_target(p->image_index);
++
++         if (!create_scaled_image(p->image_index)) {
++            fprintf(stderr,
++                    "neptune unixlib wsi: failed to resize scaler "
++                    "for image %u to %ux%u\n",
++                    p->image_index,
++                    g_wsi.target_width, g_wsi.target_height);
++            return STATUS_SUCCESS;
++         }
++      }
++
 +      wait_for_source_fence(p);
 +      scale_image(p->image_index);
 +
@@ -360,7 +528,7 @@ index 58596ea0074..dd87bcb0f31 100644
  #ifdef NPT_HAVE_XCB_DRI3_SYNCOBJ
     if (g_wsi.dri3_has_explicit_sync &&
         g_wsi.images[p->image_index].acquire_syncobj != XCB_NONE) {
-@@ -375,6 +676,15 @@ NTSTATUS npt_do_wsi_destroy(void *args)
+@@ -375,6 +767,15 @@ NTSTATUS npt_do_wsi_destroy(void *args)
     if (!g_wsi.conn) return STATUS_SUCCESS;
  
     for (uint32_t i = 0; i < g_wsi.num_images; i++) {
@@ -376,62 +544,3 @@ index 58596ea0074..dd87bcb0f31 100644
  #ifdef NPT_HAVE_XCB_DRI3_SYNCOBJ
        if (g_wsi.images[i].acquire_syncobj != XCB_NONE)
           xcb_dri3_free_syncobj(g_wsi.conn, g_wsi.images[i].acquire_syncobj);
-diff --git a/src/virtio/neptune/nptunix/meson.build b/src/virtio/neptune/nptunix/meson.build
---- a/src/virtio/neptune/nptunix/meson.build
-+++ b/src/virtio/neptune/nptunix/meson.build
-@@ -63,6 +63,7 @@
- endif
- 
- npt_dep_xcb = dependency('xcb', native : true)
-+npt_dep_xcb_render = dependency('xcb-render', native : true)
- 
- # Bake the xcb-dri3 libdir as an rpath so nptunix.so resolves the
- # pkg-config-resolved libxcb-dri3.so.0 at runtime even when loaded inside
-@@ -73,6 +74,7 @@
- 
- npt_nptunix_deps = [
-   npt_dep_xcb, npt_dep_xcb_dri3, npt_dep_xcb_present,
-+  npt_dep_xcb_render,
-   dependency('libdrm', native : true),
- ]
- npt_nptunix_c_args = []
-diff --git a/src/virtio/neptune/npt_swapchain.c b/src/virtio/neptune/npt_swapchain.c
---- a/src/virtio/neptune/npt_swapchain.c
-+++ b/src/virtio/neptune/npt_swapchain.c
-@@ -784,15 +784,31 @@ static HRESULT NPT_STDMETHODCALLTYPE
- gsc_SetFullscreenState(void *self, BOOL Fullscreen, IDXGIOutput *pTarget)
- {
-    struct npt_guest_swapchain *s = gsc(self);
-+   struct npt_guest_swapchain_common *c = &s->base;
- 
-    if (!Fullscreen && pTarget)
-       return NPT_DXGI_ERROR_INVALID_CALL;
- 
-+   /*
-+    * Serialize the HWND geometry change with Present/Resize.  The WSI caches
-+    * the target window geometry at init, so a real fullscreen transition
-+    * invalidates it even when the application does not call ResizeBuffers.
-+    */
-+   mtx_lock(&c->present_mutex);
-+   const BOOL was_fullscreen = c->fullscreen;
-+
-+   HRESULT hr = NPT_S_OK;
-+
-    /* Dispatch the windowed <-> fullscreen transition; both directions place
-     * and style the app's own OutputWindow guest-side. */
--   if (!s->base.fullscreen && Fullscreen)
--      return gsc_enter_fullscreen(self, s, pTarget);
--   if (s->base.fullscreen && !Fullscreen)
--      return gsc_leave_fullscreen(self, s);
--   return NPT_S_OK;
-+   if (!c->fullscreen && Fullscreen)
-+      hr = gsc_enter_fullscreen(self, s, pTarget);
-+   else if (c->fullscreen && !Fullscreen)
-+      hr = gsc_leave_fullscreen(self, s);
-+
-+   if (c->fullscreen != was_fullscreen)
-+      gsc_teardown_wsi(s, false);
-+
-+   mtx_unlock(&c->present_mutex);
-+   return hr;
- }
