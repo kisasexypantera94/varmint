@@ -231,10 +231,10 @@ pub fn run(config_path: &Path) -> Result<()> {
     .unwrap_or_else(|error| panic!("failed to start vmnet networking: {error}"));
 
     let (audio_event_tx, audio_event_rx) = std::sync::mpsc::channel();
-    let (_audio_backend, period_sink) = audio::Backend::new(move |event| {
+    let (_audio_backend, period_sink, capture_source) = audio::Backend::new(move |event| {
         let _ = audio_event_tx.send(event);
     })
-    .unwrap_or_else(|error| panic!("failed to start audio output: {error}"));
+    .unwrap_or_else(|error| panic!("failed to start audio backend: {error}"));
 
     let clipboard_change_tx = runtime_event_tx.clone();
     let clipboard = clipboard::start(move |payload| {
@@ -251,6 +251,7 @@ pub fn run(config_path: &Path) -> Result<()> {
         data_disk,
         net: network,
         audio: period_sink,
+        capture: capture_source,
         clipboard,
         serial,
     };

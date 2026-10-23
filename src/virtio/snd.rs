@@ -1,5 +1,5 @@
 use crate::{
-    audio::PeriodSink,
+    audio::{CaptureSource, PeriodSink},
     memory::GuestMemory,
     virtio::{
         chain::ChainData,
@@ -14,10 +14,11 @@ use zerocopy::{FromBytes, Immutable, IntoBytes};
 const DEVICE_ID: u32 = 25;
 
 const NUM_JACKS: u32 = 0;
-const NUM_STREAMS: u32 = 1;
-const NUM_CHMAPS: u32 = 1;
+const NUM_STREAMS: u32 = 2;
+const NUM_CHMAPS: u32 = 2;
 
-const STREAM_ID: u32 = 0;
+const PLAYBACK_STREAM_ID: u32 = 0;
+const CAPTURE_STREAM_ID: u32 = 1;
 
 const CHMAP_MAX_SIZE: usize = 18;
 
@@ -275,25 +276,38 @@ struct PendingPeriod {
     written: u32,
 }
 
+struct PendingCapture {
+    chain: ChainData,
+    token: ChainToken,
+}
+
 pub struct Snd {
     period_sink: PeriodSink,
+    capture_source: CaptureSource,
 
-    stream: Stream,
+    streams: [Stream; NUM_STREAMS as usize],
+
     pending: VecDeque<PendingPeriod>,
     next_period: u64,
     consumed_through: Option<u64>,
     tx_completions_since_notify: usize,
+
+    capture_pending: VecDeque<PendingCapture>,
+    capture_fill: usize,
 }
 
 impl Snd {
-    pub fn new(period_sink: PeriodSink) -> Snd {
+    pub fn new(period_sink: PeriodSink, capture_source: CaptureSource) -> Snd {
         Snd {
             period_sink,
-            stream: Stream::new(),
+            capture_source,
+            streams: [Stream::new(), Stream::new()],
             pending: VecDeque::new(),
             next_period: 0,
             consumed_through: None,
             tx_completions_since_notify: 0,
+            capture_pending: VecDeque::new(),
+            capture_fill: 0,
         }
     }
 }
@@ -350,16 +364,34 @@ impl Device for Snd {
                     self.publish_consumed(ctx);
                 }
             }
-            QueueType::Event | QueueType::Rx => {}
+            QueueType::Rx => {
+                while let Some(chain) = ctx.pop_chain(queue_idx) {
+                    match self.submit_capture(chain.data, chain.token, ctx.mem()) {
+                        ChainAction::Complete(written) => {
+                            ctx.complete(chain.token, written);
+                        }
+                        ChainAction::Deferred => {}
+                    }
+                }
+
+                self.publish_capture(ctx);
+            }
+            QueueType::Event => {}
         }
     }
 
     fn reset(&mut self) {
         self.period_sink.reset();
+        self.capture_source.reset();
+
         self.pending.clear();
+        self.capture_pending.clear();
+
+        self.capture_fill = 0;
         self.consumed_through = None;
         self.tx_completions_since_notify = 0;
-        self.stream = Stream::new();
+
+        self.streams = [Stream::new(), Stream::new()];
     }
 }
 
@@ -388,17 +420,24 @@ impl Snd {
                 .as_bytes()
                 .to_vec();
 
-                for _stream_id in start..start + count {
+                for stream_id in start..start + count {
+                    let (direction, channels) = match stream_id {
+                        PLAYBACK_STREAM_ID => (Direction::Output, 2),
+                        CAPTURE_STREAM_ID => (Direction::Input, 1),
+                        _ => unreachable!(),
+                    };
+
                     let info = PcmInfo {
                         hdr: Info { hda_fn_nid: 0 },
                         features: 0,
                         formats: 1u64 << PcmFormat::S16 as u64,
                         rates: 1u64 << PcmRate::R48000 as u64,
-                        direction: Direction::Output as u8,
-                        channels_min: 2,
-                        channels_max: 2,
+                        direction: direction as u8,
+                        channels_min: channels,
+                        channels_max: channels,
                         padding: [0; 5],
                     };
+
                     resp.extend_from_slice(info.as_bytes());
                 }
 
@@ -409,29 +448,42 @@ impl Snd {
                     return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 };
 
-                if p.hdr.stream_id != STREAM_ID || matches!(self.stream.state, StreamState::Running) {
+                let expected_channels = match p.hdr.stream_id {
+                    PLAYBACK_STREAM_ID => 2,
+                    CAPTURE_STREAM_ID => 1,
+                    _ => {
+                        return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
+                    }
+                };
+
+                let stream = &mut self.streams[p.hdr.stream_id as usize];
+
+                if matches!(stream.state, StreamState::Running) {
                     return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 }
 
                 if p.format != PcmFormat::S16 as u8
                     || p.rate != PcmRate::R48000 as u8
-                    || p.channels != 2
+                    || p.channels != expected_channels
                     || p.features != 0
                 {
                     return ChainAction::Complete(self.respond_status(chain, Status::NotSupp, ctx.mem()));
                 }
 
                 let (period, buffer) = (p.period_bytes, p.buffer_bytes);
-                if period == 0 || buffer % period != 0 || period % 4 != 0 {
+
+                let frame_bytes = expected_channels as u32 * std::mem::size_of::<i16>() as u32;
+
+                if period == 0 || buffer % period != 0 || period % frame_bytes != 0 {
                     return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 }
 
-                self.stream.buffer_bytes = buffer;
-                self.stream.period_scratch = vec![0; period as usize];
-                self.stream.channels = p.channels;
-                self.stream.format = p.format;
-                self.stream.rate = p.rate;
-                self.stream.state = StreamState::ParamsSet;
+                stream.buffer_bytes = buffer;
+                stream.period_scratch = vec![0; period as usize];
+                stream.channels = p.channels;
+                stream.format = p.format;
+                stream.rate = p.rate;
+                stream.state = StreamState::ParamsSet;
 
                 ChainAction::Complete(self.respond_status(chain, Status::Ok, ctx.mem()))
             }
@@ -440,12 +492,15 @@ impl Snd {
                     return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 };
 
-                if p.stream_id != STREAM_ID || matches!(self.stream.state, StreamState::Initial | StreamState::Running)
-                {
+                let Some(stream) = self.streams.get_mut(p.stream_id as usize) else {
+                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
+                };
+
+                if matches!(stream.state, StreamState::Initial | StreamState::Running) {
                     return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 }
 
-                self.stream.state = StreamState::Prepared;
+                stream.state = StreamState::Prepared;
                 ChainAction::Complete(self.respond_status(chain, Status::Ok, ctx.mem()))
             }
             Ok(RequestCode::PcmStart) => {
@@ -453,12 +508,30 @@ impl Snd {
                     return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 };
 
-                if p.stream_id != STREAM_ID || !matches!(self.stream.state, StreamState::Prepared) {
+                let stream_id = p.stream_id as usize;
+
+                let Some(stream) = self.streams.get(stream_id) else {
+                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
+                };
+
+                if !matches!(stream.state, StreamState::Prepared) {
                     return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 }
 
-                self.stream.state = StreamState::Running;
-                self.period_sink.start();
+                match p.stream_id {
+                    PLAYBACK_STREAM_ID => {
+                        self.period_sink.start();
+                    }
+                    CAPTURE_STREAM_ID => {
+                        if !self.capture_source.start() {
+                            return ChainAction::Complete(self.respond_status(chain, Status::IoErr, ctx.mem()));
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+
+                self.streams[stream_id].state = StreamState::Running;
+
                 ChainAction::Complete(self.respond_status(chain, Status::Ok, ctx.mem()))
             }
             Ok(RequestCode::PcmStop) => {
@@ -466,12 +539,28 @@ impl Snd {
                     return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 };
 
-                if p.stream_id != STREAM_ID || !matches!(self.stream.state, StreamState::Running) {
+                let stream_id = p.stream_id as usize;
+
+                let Some(stream) = self.streams.get(stream_id) else {
+                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
+                };
+
+                if !matches!(stream.state, StreamState::Running) {
                     return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 }
 
-                self.period_sink.stop();
-                self.stream.state = StreamState::Prepared;
+                match p.stream_id {
+                    PLAYBACK_STREAM_ID => {
+                        self.period_sink.stop();
+                    }
+                    CAPTURE_STREAM_ID => {
+                        self.capture_source.stop();
+                    }
+                    _ => unreachable!(),
+                }
+
+                self.streams[stream_id].state = StreamState::Prepared;
+
                 ChainAction::Complete(self.respond_status(chain, Status::Ok, ctx.mem()))
             }
             Ok(RequestCode::PcmRelease) => {
@@ -479,25 +568,63 @@ impl Snd {
                     return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 };
 
-                if p.stream_id != STREAM_ID
-                    || !matches!(self.stream.state, StreamState::ParamsSet | StreamState::Prepared)
-                {
+                let Some(stream) = self.streams.get(p.stream_id as usize) else {
+                    return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
+                };
+
+                if !matches!(stream.state, StreamState::ParamsSet | StreamState::Prepared) {
                     return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 }
 
-                self.period_sink.reset();
-                self.stream.state = StreamState::Initial;
-                self.consumed_through = None;
-                self.tx_completions_since_notify = 0;
+                match p.stream_id {
+                    PLAYBACK_STREAM_ID => {
+                        self.period_sink.reset();
+                        self.consumed_through = None;
+                        self.tx_completions_since_notify = 0;
 
-                while let Some(period) = self.pending.pop_front() {
-                    ctx.complete(period.token, period.written);
+                        while let Some(period) = self.pending.pop_front() {
+                            ctx.complete(period.token, period.written);
+                        }
+
+                        while let Some(period) = ctx.pop_chain(QueueType::Tx as usize) {
+                            let written = self.respond_pcm_status(&period.data, Status::IoErr, ctx.mem());
+
+                            ctx.complete(period.token, written);
+                        }
+                    }
+
+                    CAPTURE_STREAM_ID => {
+                        self.capture_source.reset();
+
+                        if let Some(pending) = self.capture_pending.pop_front() {
+                            let written = {
+                                let pcm = &self.streams[CAPTURE_STREAM_ID as usize].period_scratch[..self.capture_fill];
+
+                                Self::write_capture_response(&pending.chain, pcm, Status::Ok, ctx.mem())
+                            };
+
+                            ctx.complete(pending.token, written);
+                        }
+
+                        self.capture_fill = 0;
+
+                        while let Some(pending) = self.capture_pending.pop_front() {
+                            let written = Self::write_capture_response(&pending.chain, &[], Status::Ok, ctx.mem());
+
+                            ctx.complete(pending.token, written);
+                        }
+
+                        while let Some(pending) = ctx.pop_chain(QueueType::Rx as usize) {
+                            let written = Self::write_capture_response(&pending.data, &[], Status::Ok, ctx.mem());
+
+                            ctx.complete(pending.token, written);
+                        }
+                    }
+
+                    _ => unreachable!(),
                 }
 
-                while let Some(period) = ctx.pop_chain(QueueType::Tx as usize) {
-                    let written = self.respond_pcm_status(&period.data, Status::IoErr, ctx.mem());
-                    ctx.complete(period.token, written);
-                }
+                self.streams[p.stream_id as usize] = Stream::new();
 
                 ChainAction::Complete(self.respond_status(chain, Status::Ok, ctx.mem()))
             }
@@ -505,7 +632,9 @@ impl Snd {
                 let Some(q) = chain.read_obj::<QueryInfo>(0, ctx.mem()) else {
                     return ChainAction::Complete(self.respond_status(chain, Status::BadMsg, ctx.mem()));
                 };
+
                 let (start, count) = (q.start_id, q.count);
+
                 match start.checked_add(count) {
                     Some(end) if end <= NUM_CHMAPS => {}
                     _ => {
@@ -519,16 +648,34 @@ impl Snd {
                 .as_bytes()
                 .to_vec();
 
-                for _ in start..start + count {
+                for stream_id in start..start + count {
                     let mut positions = [ChmapPosition::None as u8; CHMAP_MAX_SIZE];
-                    positions[0] = ChmapPosition::Fl as u8;
-                    positions[1] = ChmapPosition::Fr as u8;
+
+                    let (direction, channels) = match stream_id {
+                        PLAYBACK_STREAM_ID => {
+                            positions[0] = ChmapPosition::Fl as u8;
+
+                            positions[1] = ChmapPosition::Fr as u8;
+
+                            (Direction::Output, 2)
+                        }
+
+                        CAPTURE_STREAM_ID => {
+                            positions[0] = ChmapPosition::Mono as u8;
+
+                            (Direction::Input, 1)
+                        }
+
+                        _ => unreachable!(),
+                    };
+
                     let info = ChmapInfo {
                         hdr: Info { hda_fn_nid: 0 },
-                        direction: Direction::Output as u8,
-                        channels: 2,
+                        direction: direction as u8,
+                        channels,
                         positions,
                     };
+
                     resp.extend_from_slice(info.as_bytes());
                 }
 
@@ -551,19 +698,19 @@ impl Snd {
             return ChainAction::Complete(0);
         };
 
-        if pcm_xfer.stream_id != STREAM_ID || !matches!(self.stream.state, StreamState::Prepared | StreamState::Running)
+        let stream = &mut self.streams[PLAYBACK_STREAM_ID as usize];
+
+        if pcm_xfer.stream_id != PLAYBACK_STREAM_ID
+            || !matches!(stream.state, StreamState::Prepared | StreamState::Running)
         {
             return ChainAction::Complete(self.respond_pcm_status(chain, Status::IoErr, mem));
         }
 
-        if chain
-            .read_at(PAYLOAD_OFFSET, &mut self.stream.period_scratch, mem)
-            .is_none()
-        {
+        if chain.read_at(PAYLOAD_OFFSET, &mut stream.period_scratch, mem).is_none() {
             return ChainAction::Complete(0);
-        };
+        }
 
-        if !self.period_sink.push(self.next_period, &self.stream.period_scratch) {
+        if !self.period_sink.push(self.next_period, &stream.period_scratch) {
             return ChainAction::Complete(self.respond_pcm_status(chain, Status::IoErr, mem));
         }
 
@@ -585,11 +732,14 @@ impl Snd {
             return;
         };
 
-        let period_bytes = self.stream.period_scratch.len();
+        let stream = &self.streams[PLAYBACK_STREAM_ID as usize];
+
+        let period_bytes = stream.period_scratch.len();
+
         let periods = if period_bytes == 0 {
             1
         } else {
-            self.stream.buffer_bytes as usize / period_bytes
+            stream.buffer_bytes as usize / period_bytes
         };
 
         // virtio-snd driver can miss a full buffer wrap when completions are batched.
@@ -610,6 +760,84 @@ impl Snd {
         }
     }
 
+    fn submit_capture(&mut self, chain: ChainData, token: ChainToken, mem: &GuestMemory) -> ChainAction {
+        let Some(pcm_xfer) = chain.read_obj::<PcmXfer>(0, mem) else {
+            return ChainAction::Complete(0);
+        };
+
+        let stream = &self.streams[CAPTURE_STREAM_ID as usize];
+
+        if pcm_xfer.stream_id != CAPTURE_STREAM_ID
+            || !matches!(stream.state, StreamState::Prepared | StreamState::Running)
+        {
+            return ChainAction::Complete(0);
+        }
+
+        let required = stream.period_scratch.len() + size_of::<PcmStatus>();
+
+        let writable: usize = chain.writable.iter().map(|seg| seg.len as usize).sum();
+
+        if stream.period_scratch.is_empty() || writable < required {
+            return ChainAction::Complete(0);
+        }
+
+        self.capture_pending.push_back(PendingCapture { chain, token });
+
+        ChainAction::Deferred
+    }
+
+    fn publish_capture(&mut self, ctx: &mut DeviceContext<'_>) {
+        if !matches!(self.streams[CAPTURE_STREAM_ID as usize].state, StreamState::Running) {
+            return;
+        }
+
+        loop {
+            if self.capture_pending.is_empty() {
+                break;
+            }
+
+            let period_len = self.streams[CAPTURE_STREAM_ID as usize].period_scratch.len();
+
+            if period_len == 0 {
+                break;
+            }
+
+            let read = {
+                let stream = &mut self.streams[CAPTURE_STREAM_ID as usize];
+
+                self.capture_source
+                    .read(&mut stream.period_scratch[self.capture_fill..])
+            };
+
+            self.capture_fill += read;
+
+            if self.capture_fill < period_len {
+                break;
+            }
+
+            let pending = self.capture_pending.pop_front().unwrap();
+
+            let written = {
+                let stream = &self.streams[CAPTURE_STREAM_ID as usize];
+
+                Self::write_capture_response(&pending.chain, &stream.period_scratch, Status::Ok, ctx.mem())
+            };
+
+            ctx.complete(pending.token, written);
+
+            self.capture_fill = 0;
+        }
+    }
+
+    fn write_capture_response(chain: &ChainData, pcm: &[u8], status: Status, mem: &GuestMemory) -> u32 {
+        let status = PcmStatus {
+            status: status as u32,
+            latency_bytes: 0,
+        };
+
+        chain.write_parts(&[pcm, status.as_bytes()], mem)
+    }
+
     fn respond_status(&self, chain: &ChainData, status: Status, mem: &GuestMemory) -> u32 {
         let hdr = Hdr { code: status as u32 };
         chain.write_response(hdr.as_bytes(), mem)
@@ -626,6 +854,7 @@ impl Snd {
 
 pub enum ExternalEvent {
     PeriodElapsed(u64),
+    CaptureReady,
 }
 
 impl ExternalEventHandler for Snd {
@@ -636,6 +865,9 @@ impl ExternalEventHandler for Snd {
             ExternalEvent::PeriodElapsed(seq) => {
                 self.consumed_through = Some(seq);
                 self.publish_consumed(ctx);
+            }
+            ExternalEvent::CaptureReady => {
+                self.publish_capture(ctx);
             }
         }
     }

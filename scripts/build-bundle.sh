@@ -149,6 +149,8 @@ assemble_app() {
     <string>$MINIMUM_MACOS</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Varmint needs microphone access for audio input in the virtual machine.</string>
 </dict>
 </plist>
 EOF_PLIST
@@ -470,6 +472,8 @@ verify_app() {
     || die "Info.plist does not reference the Varmint asset icon"
   [ "$(plutil -extract LSMinimumSystemVersion raw -o - "$contents/Info.plist")" = "$MINIMUM_MACOS" ] \
     || die "Info.plist minimum macOS does not match runtime manifest"
+  plutil -extract NSMicrophoneUsageDescription raw -o - "$contents/Info.plist" >/dev/null \
+    || die "Info.plist is missing NSMicrophoneUsageDescription"
   for file in "$resources/kernel/Image" "$resources/kernel/initrd" "$resources/runtime/base.raw.zst" "$resources/runtime/system-image-id" "$resources/Assets.car"; do
     [ -s "$file" ] || die "bundled resource is empty: $file"
   done

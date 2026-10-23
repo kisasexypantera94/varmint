@@ -23,6 +23,7 @@ pub struct HostBackends {
     pub data_disk: virtio::Blk,
     pub net: net::Backend,
     pub audio: audio::PeriodSink,
+    pub capture: audio::CaptureSource,
     pub clipboard: clipboard::Sink,
     pub serial: stdio::Sink,
 }
@@ -168,7 +169,7 @@ impl<'a> Runtime<'a> {
         ));
 
         let snd = Mutex::new(virtio::MmioTransport::new(
-            virtio::Snd::new(backends.audio),
+            virtio::Snd::new(backends.audio, backends.capture),
             irq::IrqLine::new(vm, spi_int_start + VIRTSND_SPI_OFFSET),
         ));
 

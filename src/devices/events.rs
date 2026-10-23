@@ -219,6 +219,13 @@ impl<'a> AudioEventPump<'a> {
                         .unwrap()
                         .handle_external_event(virtio::snd::ExternalEvent::PeriodElapsed(seq), self.mem);
                 }
+                audio::BackendEvent::CaptureReady => {
+                    self.devices
+                        .snd
+                        .lock()
+                        .unwrap()
+                        .handle_external_event(virtio::snd::ExternalEvent::CaptureReady, self.mem);
+                }
             }
         }
     }
