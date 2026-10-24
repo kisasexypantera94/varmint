@@ -7,9 +7,7 @@ Varmint is a lightweight virtual machine for Macs, built on top of Hypervisor.fr
 
 The current focus is gaming and hardware-accelerated graphics. It boots a Debian arm64 guest with FEX, Steam and Proton, making it possible to run Windows and Linux games on Mac.
 
-Windows games can use the Vulkan-based Venus graphics path or the experimental Neptune path for DirectX.
-
-Documentation in this branch targets the current release. For older releases, use the documentation from the corresponding repository tag.
+It supports two graphics backends: Venus for Vulkan and Neptune for DirectX.
 
 ## How to use
 1. Download the [latest release](https://github.com/kisasexypantera94/varmint/releases), extract it and move `Varmint.app` to Applications.
@@ -36,26 +34,16 @@ Documentation in this branch targets the current release. For older releases, us
 3. Open Varmint and select `fresh.varmint`.
    Since Varmint is not signed or notarized, macOS will block the first launch. Go to **System Settings → Privacy & Security**, click **Open Anyway** and confirm.
 
-4. Wait for Debian to start, create a user and password, then log in. Initial provisioning may take a few more minutes.
+4. Wait for Debian to start, create a user and password, then log in.
 
 5. Open **Applications → Games → Steam**, wait for Steam to finish setting up, then sign in and install a game.
-
-## Features
-
-* hardware-accelerated Vulkan and OpenGL
-* experimental DirectX 11 support through Neptune
-* x86-64 support through FEX
-* Windows games through Proton
-* audio, networking and input
-* shared clipboard
-* Retina and high-refresh display modes
 
 ## Games
 
 Compatibility varies between games and graphics paths:
-- Use Venus for DirectX 9 and 32-bit DirectX 11 games.
-- For 64-bit DirectX 11 games, try Neptune first and use Venus as a fallback.
-- DirectX 12 has not been tested extensively yet.
+- Use Venus for DX9 and 32-bit DX11 games.
+- For 64-bit DX11 games, try Neptune first and use Venus as a fallback.
+- DX12 has not been tested extensively yet.
 
 See [Running games in Varmint](docs/games/common.md) for general setup and troubleshooting.
 
@@ -115,10 +103,10 @@ The games below have been tested. Click a game name for its tested configuration
 
 ## Graphics
 
-DirectX 11 through Neptune:
+DirectX through Neptune:
 
 ```text
-guest DirectX 11 => Mesa Neptune => virglrenderer => DXMT => Metal
+guest DirectX => Mesa Neptune => virglrenderer => DXMT => Metal
 ```
 
 Vulkan:
