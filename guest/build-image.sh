@@ -27,32 +27,7 @@ OUTPUTS=(
 )
 
 command -v shasum >/dev/null 2>&1 || { echo "error: shasum is required" >&2; exit 1; }
-
-fingerprint="$({
-  printf '%s\n' "$DEBIAN_BASE_URL" "$DEBIAN_IMAGE_NAME"
-  find "${INPUTS[@]}" -type f | LC_ALL=C sort | while IFS= read -r input; do
-    printf '%s\0' "${input#$ROOT/}"
-    cat "$input"
-    printf '\0'
-  done
-} | shasum -a 256 | awk '{print $1}')"
-
-outputs_ready=1
-for output in "${OUTPUTS[@]}"; do
-  if [ ! -s "$output" ]; then
-    outputs_ready=0
-    break
-  fi
-done
-
-if [ "$outputs_ready" -eq 1 ] && [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$fingerprint" ]; then
-  printf '\n== guest runtime is up to date ==\n'
-  exit 0
-fi
-
-command -v docker >/dev/null 2>&1 || { echo "error: Docker is required to build the guest runtime" >&2; exit 1; }
 command -v curl >/dev/null 2>&1 || { echo "error: curl is required" >&2; exit 1; }
-docker info >/dev/null 2>&1 || { echo "error: Docker is not running" >&2; exit 1; }
 
 mkdir -p "$CACHE_DIR" "$OUTPUT_DIR"
 sums="$CACHE_DIR/SHA512SUMS"
@@ -78,6 +53,35 @@ expected_sha512="$(awk -v name="$DEBIAN_IMAGE_NAME" '
   }
 ' "$sums")"
 [ -n "$expected_sha512" ] || { echo "error: $DEBIAN_IMAGE_NAME is missing from $DEBIAN_BASE_URL/SHA512SUMS" >&2; exit 1; }
+
+fingerprint="$({
+  printf '%s\n' "$DEBIAN_BASE_URL" "$DEBIAN_IMAGE_NAME" "$expected_sha512"
+  find "${INPUTS[@]}" -type f | LC_ALL=C sort | while IFS= read -r input; do
+    printf '%s\0' "${input#$ROOT/}"
+    cat "$input"
+    printf '\0'
+  done
+} | shasum -a 256 | awk '{print $1}')"
+
+outputs_ready=1
+for output in "${OUTPUTS[@]}"; do
+  if [ ! -s "$output" ]; then
+    outputs_ready=0
+    break
+  fi
+done
+
+if [ "$outputs_ready" -eq 1 ] && [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$fingerprint" ]; then
+  printf '\n== guest runtime is up to date ==\n'
+  exit 0
+fi
+
+command -v docker >/dev/null 2>&1 || { echo "error: Docker is required to build the guest runtime" >&2; exit 1; }
+docker info >/dev/null 2>&1 || { echo "error: Docker is not running" >&2; exit 1; }
+
+# From here on a failed/interrupted build must not leave the previous
+# fingerprint claiming that the output set is current.
+rm -f "$STAMP"
 
 actual_sha512=""
 if [ -f "$SOURCE_IMAGE" ]; then
