@@ -43,6 +43,7 @@ It supports two graphics backends: Venus for Vulkan and Neptune for DirectX.
 Compatibility varies between games and graphics paths:
 - Use Venus for DX9 and 32-bit DX11 games.
 - For 64-bit DX11 games, try Neptune first and use Venus as a fallback.
+- Proton 10 is the recommended baseline for Venus, while Neptune also works well with Proton Experimental.
 - DX12 has not been tested extensively yet.
 
 See [Running games in Varmint](docs/games/common.md) for general setup and troubleshooting.
