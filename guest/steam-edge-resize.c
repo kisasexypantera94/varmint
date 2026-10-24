@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h>
 #include <unistd.h>
 
 static Display *dpy;
@@ -31,6 +32,26 @@ static int br_hotspot;
 static int drag_height;
 static int drag_left;
 static int drag_right;
+
+#define RAW_MOTION_INTERVAL_NS (33LL * 1000 * 1000)
+
+static int raw_motion_check_due(struct timespec *last)
+{
+    struct timespec now;
+
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+        return 1;
+
+    long long delta =
+        (long long)(now.tv_sec - last->tv_sec) * 1000000000LL +
+        (long long)(now.tv_nsec - last->tv_nsec);
+
+    if (delta < RAW_MOTION_INTERVAL_NS)
+        return 0;
+
+    *last = now;
+    return 1;
+}
 
 static int read_ui_scale(void)
 {
@@ -582,6 +603,8 @@ int main(void)
 
     XFlush(dpy);
 
+    struct timespec last_motion_check = {0};
+
     for (;;) {
         XEvent ev;
         XNextEvent(dpy, &ev);
@@ -593,7 +616,8 @@ int main(void)
                 &ev.xcookie))
             continue;
 
-        if (ev.xcookie.evtype == XI_RawMotion) {
+        if (ev.xcookie.evtype == XI_RawMotion &&
+            raw_motion_check_due(&last_motion_check)) {
             Window win;
             int rx, ry;
             int lx, ly;
