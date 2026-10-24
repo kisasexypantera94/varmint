@@ -18,8 +18,7 @@ In Steam:
 
 1. Open **Properties** for Grand Theft Auto IV.
 2. Open **Compatibility**.
-3. Enable **Force the use of a specific Steam Play compatibility tool**.
-4. Select **Proton 10.0**.
+3. Under **Select compatibility tool**, select **Proton 10.0**.
 
 ### 2. Install RGLess
 
@@ -60,7 +59,7 @@ RGLess replaces `GTAIV.exe`, `PlayGTAIV.exe`, and `binkw32.dll`. The original fi
 
 Launch Grand Theft Auto IV normally from Steam.
 
-No additional launch options are required. The Rockstar Games Launcher should no longer appear.
+No additional launch options are required. This setup skips the Rockstar Games Launcher.
 
 ## Save files
 

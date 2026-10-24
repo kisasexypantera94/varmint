@@ -24,7 +24,7 @@ Use the following configuration:
 Game version:   next-gen
 Proton version: Proton 10.0
 Renderer:       Neptune
-Launch options: FEX_X87REDUCEDPRECISION=0 WINEDLLOVERRIDES='d3d11,dxgi=n,b;nptunix=b;d3d12,d3d12core=;nvapi,nvapi64=' %command%
+Launch options: FEX_X87REDUCEDPRECISION=0 varmint-graphics neptune %command%
 ```
 
 ### 1. Select Proton 10
@@ -33,8 +33,7 @@ In Steam:
 
 1. Open **Properties** for The Witcher 3.
 2. Open **Compatibility**.
-3. Enable **Force the use of a specific Steam Play compatibility tool**.
-4. Select **Proton 10.0**.
+3. Under **Select compatibility tool**, select **Proton 10.0**.
 
 ### 2. Select the next-gen version
 
@@ -44,16 +43,10 @@ The new Remastered version is not currently supported because it requires Direct
 
 ### 3. Enable Neptune
 
-From a terminal inside Varmint, run:
-
-```bash
-varmint-game-graphics 292030 neptune 'bin/x64/witcher3.exe'
-```
-
-Then set the following Steam launch options:
+Set the following Steam launch options:
 
 ```text
-FEX_X87REDUCEDPRECISION=0 WINEDLLOVERRIDES='d3d11,dxgi=n,b;nptunix=b;d3d12,d3d12core=;nvapi,nvapi64=' %command%
+FEX_X87REDUCEDPRECISION=0 varmint-graphics neptune %command%
 ```
 
 ### 4. Use DirectX 11
@@ -80,11 +73,7 @@ Venus can still be used instead of Neptune, but currently only with the Classic 
 
 First select the **Classic** version under **Properties → Game Versions & Betas**.
 
-Then switch the game to Venus:
-
-```bash
-varmint-game-graphics 292030 venus
-```
+Venus is the default backend and requires no additional setup.
 
 Use the following configuration:
 

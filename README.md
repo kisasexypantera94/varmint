@@ -9,6 +9,8 @@ The current focus is gaming and hardware-accelerated graphics. It boots a Debian
 
 Windows games can use the Vulkan-based Venus graphics path or the experimental Neptune path for DirectX.
 
+Documentation in this branch targets the current release. For older releases, use the documentation from the corresponding repository tag.
+
 ## How to use
 1. Download the [latest release](https://github.com/kisasexypantera94/varmint/releases), extract it and move `Varmint.app` to Applications.
 
@@ -27,9 +29,9 @@ Windows games can use the Vulkan-based Venus graphics path or the experimental N
    EOF
    ```
 
-   By default, Varmint stores VM files in a directory next to the config with the same name. The system disk is replaced on Varmint updates, while `/home` lives on a separate persistent data disk.
+   By default, Varmint stores VM files in a directory next to the config with the same name. The system disk is replaced on updates, while `/home` lives on a separate persistent data disk.
 
-   Both disks are sparse: their configured capacity is the maximum virtual size, not the amount of host storage reserved up front. They grow as data is written. Capacities can be increased later, but shrinking is not supported.
+   Both disks are sparse. They only use as much host storage as the data inside them requires, and can grow or shrink as that data changes. Their maximum capacity can be increased later, but not reduced.
 
 3. Open Varmint and select `fresh.varmint`.
    Since Varmint is not signed or notarized, macOS will block the first launch. Go to **System Settings → Privacy & Security**, click **Open Anyway** and confirm.
@@ -50,13 +52,10 @@ Windows games can use the Vulkan-based Venus graphics path or the experimental N
 
 ## Games
 
-Compatibility varies between games and graphics paths.
-
-DirectX 9 games, along with some early DirectX 11 games, currently have the best chance of working through DXVK and Venus.
-
-Newer DirectX 11 games can run either through Venus or Neptune, but compatibility is less predictable.
-
-DirectX 12 support is experimental and has not been tested extensively yet.
+Compatibility varies between games and graphics paths:
+- Use Venus for DirectX 9 and 32-bit DirectX 11 games.
+- For 64-bit DirectX 11 games, try Neptune first and use Venus as a fallback.
+- DirectX 12 has not been tested extensively yet.
 
 See [Running games in Varmint](docs/games/common.md) for general setup and troubleshooting.
 
@@ -83,7 +82,7 @@ The games below have been tested. Click a game name for its tested configuration
 | [Red Comrades 2: For the Great Justice. Reloaded](docs/games/red-comrades-reloaded.md)  |      ✅ |               🟢 |
 | [Red Comrades Save the Galaxy: Reloaded](docs/games/red-comrades-reloaded.md)           |      ✅ |               🟢 |
 | [Counter-Strike 2](docs/games/counter-strike-2.md)                                      |      ✅ |               🟡 |
-| [Stoneshard](docs/games/stoneshard.md)                                                  |      ✅ |               🟢 |
+| [Stoneshard Demo](docs/games/stoneshard.md)                                                  |      ✅ |               🟢 |
 | [Assassin's Creed II](docs/games/assassins-creed-2.md)                                  |      ✅ |               🟢 |
 | [SnowRunner](docs/games/snowrunner.md)                                                  |      ✅ |               🟢 |
 | [Grand Theft Auto IV](docs/games/grand-theft-auto-iv.md)                                |      ✅ |               🟡 |
@@ -95,6 +94,15 @@ The games below have been tested. Click a game name for its tested configuration
 | [DARK SOULS II: Scholar of the First Sin](docs/games/dark-souls-2-sotfs.md)             |      ✅ |               🟢 |
 | [Assassin's Creed Odyssey](docs/games/assassins-creed-odyssey.md)                       |      ✅ |               🟢 |
 | [The Elder Scrolls V: Skyrim Special Edition](docs/games/skyrim-special-edition.md)     |      ✅ |               🟢 |
+| [Dark Deception](docs/games/dark-deception.md)                                          |      ✅ |               🟢 |
+| [Resident Evil 2 "R.P.D. Demo"](docs/games/resident-evil-2-rpd-demo.md)                 |      ✅ |               🟢 |
+| [FINAL FANTASY XV WINDOWS EDITION PLAYABLE DEMO](docs/games/final-fantasy-xv-demo.md)   |      ✅ |               🟢 |
+| [The Dark Pictures Anthology: The Devil in Me Demo](docs/games/the-dark-pictures-the-devil-in-me-demo.md) |      ✅ |               🟢 |
+| [Ghostrunner Demo](docs/games/ghostrunner-demo.md)                                      |      ✅ |               🟢 |
+| [Guild Wars 2](docs/games/guild-wars-2.md)                                              |      ✅ |               🟢 |
+| [Risk of Rain 2](docs/games/risk-of-rain-2.md)                                          |      ✅ |               🟢 |
+| [Batman: Arkham Asylum](docs/games/batman-arkham-asylum.md)                             |      ✅ |               🟢 |
+| [Warframe](docs/games/warframe.md)                                                      |      ✅ |               🟢 |
 
 ## Demos
 |                                                       The Witcher 3: Wild Hunt                                                       |                                                       Dragon's Dogma: Dark Arisen                                                       |

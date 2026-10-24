@@ -11,7 +11,7 @@ Use the following configuration:
 ```text
 Proton version: Proton Hotfix
 Renderer:       Neptune
-Launch options: WINEDLLOVERRIDES='d3d11,dxgi=n,b;nptunix=b;d3d12,d3d12core=;nvapi,nvapi64=' %command%
+Launch options: varmint-graphics neptune %command%
 ```
 
 ### 1. Select Proton Hotfix
@@ -20,28 +20,23 @@ In Steam:
 
 1. Open **Properties** for SAND: Raiders of Sophie.
 2. Open **Compatibility**.
-3. Enable **Force the use of a specific Steam Play compatibility tool**.
-4. Select **Proton Hotfix**.
+3. Under **Select compatibility tool**, select **Proton Hotfix**.
 
 ### 2. Enable Neptune
 
-From a terminal inside Varmint, run:
-
-```bash
-VARMINT_PROTON_ROOT="$HOME/.local/share/Steam/steamapps/common/Proton Hotfix" \
-  varmint-game-graphics 1431300 neptune
-```
-
-Then set the following Steam launch options:
+Set the Steam launch options to:
 
 ```text
-WINEDLLOVERRIDES='d3d11,dxgi=n,b;nptunix=b;d3d12,d3d12core=;nvapi,nvapi64=' %command%
+varmint-graphics neptune %command%
 ```
 
-No additional configuration is required.
+No additional setup is required.
 
 ## Reported configuration
 
 ```text
 SAND: Raiders of Sophie
 Proton Hotfix
+DirectX 11
+Neptune
+```
