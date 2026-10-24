@@ -10,8 +10,8 @@ Use the following configuration:
 
 ```text
 Proton version: Proton 10.0
-Renderer:       DirectX 9
-Patch:          Unofficial Patch 11.5 Basic
+Renderer:       Venus
+Patch:          Unofficial Patch (Basic)
 Launch options: -game Unofficial_Patch
 snd_mixahead:   0.05
 ```
@@ -22,8 +22,7 @@ In Steam:
 
 1. Open **Properties** for Vampire: The Masquerade – Bloodlines.
 2. Open **Compatibility**.
-3. Enable **Force the use of a specific Steam Play compatibility tool**.
-4. Select **Proton 10.0**.
+3. Under **Select compatibility tool**, select **Proton 10.0**.
 
 Launch the game once. It is expected to exit with an out-of-memory error at this point, this is normal and is the reason we need a patch.
 
@@ -194,7 +193,8 @@ Vampire: The Masquerade – Bloodlines
 Steam App ID 2600
 Proton 10.0
 DirectX 9
-Unofficial Patch 11.5 Basic
+Venus
+Unofficial Patch (Basic)
 Launch options: -game Unofficial_Patch
 snd_mixahead 0.05
 ```

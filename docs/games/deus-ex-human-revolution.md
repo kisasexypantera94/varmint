@@ -8,7 +8,7 @@ Use the following configuration:
 
 ```text
 Proton version:    Proton 9.0
-Renderer:          DirectX 11
+Renderer:          Venus
 Graphics settings: Default
 Launch options:    None
 ```
@@ -19,21 +19,21 @@ In Steam:
 
 1. Open **Properties** for Deus Ex: Human Revolution.
 2. Open **Compatibility**.
-3. Enable **Force the use of a specific Steam Play compatibility tool**.
-4. Select **Proton 9.0**.
+3. Under **Select compatibility tool**, select **Proton 9.0**.
 
 ### 2. Start the game
 
 Launch the game normally with the default graphics settings.
 
-The tested configuration uses DirectX 11. No additional launch options or custom DXVK configuration are required.
+No additional setup is required.
 
 ## Tested configuration
 
 ```text
 Deus Ex: Human Revolution
 Proton 9.0
-DirectX 11 through DXVK
+DirectX 11
+Venus
 Default graphics settings
 No launch options
 ```

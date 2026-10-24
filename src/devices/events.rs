@@ -31,6 +31,8 @@ pub enum RuntimeInputEvent {
 
 pub enum RuntimeEvent {
     NetRx(Vec<u8>),
+    BlkIo(virtio::IoCompletion),
+    DataBlkIo(virtio::IoCompletion),
     UartRx(u8),
     Input(RuntimeInputEvent),
     DisplayResized {
@@ -70,6 +72,20 @@ impl<'a> RuntimeEventPump<'a> {
 
     fn handle_event(&mut self, event: RuntimeEvent, pointer_move: &mut Option<(u32, u32, u32, u32)>) {
         match event {
+            RuntimeEvent::BlkIo(completion) => {
+                self.devices
+                    .blk
+                    .lock()
+                    .unwrap()
+                    .handle_external_event(&completion, self.mem);
+            }
+            RuntimeEvent::DataBlkIo(completion) => {
+                self.devices
+                    .data_blk
+                    .lock()
+                    .unwrap()
+                    .handle_external_event(&completion, self.mem);
+            }
             RuntimeEvent::NetRx(frame) => {
                 self.devices.net.lock().unwrap().handle_external_event(&frame, self.mem);
             }
@@ -202,6 +218,13 @@ impl<'a> AudioEventPump<'a> {
                         .lock()
                         .unwrap()
                         .handle_external_event(virtio::snd::ExternalEvent::PeriodElapsed(seq), self.mem);
+                }
+                audio::BackendEvent::CaptureReady => {
+                    self.devices
+                        .snd
+                        .lock()
+                        .unwrap()
+                        .handle_external_event(virtio::snd::ExternalEvent::CaptureReady, self.mem);
                 }
             }
         }

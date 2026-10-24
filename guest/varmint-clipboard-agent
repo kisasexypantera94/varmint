@@ -20,18 +20,33 @@ def log(message):
 def find_port():
     if PORT.exists():
         return PORT
+
     for entry in Path("/sys/class/virtio-ports").glob("vport*p*"):
         try:
             if (entry / "name").read_text(encoding="utf-8").strip() == "clipboard":
                 return Path("/dev") / entry.name
         except OSError:
             pass
+
     raise FileNotFoundError("clipboard virtio-console port is not available")
 
 
-def read_clipboard():
+def clipboard_backend():
+    if os.environ.get("WAYLAND_DISPLAY"):
+        return "wayland"
+    if os.environ.get("DISPLAY"):
+        return "x11"
+    raise RuntimeError("neither WAYLAND_DISPLAY nor DISPLAY is set")
+
+
+def read_clipboard(backend):
+    if backend == "wayland":
+        command = ["wl-paste", "--no-newline"]
+    else:
+        command = ["xclip", "-selection", "clipboard", "-out"]
+
     result = subprocess.run(
-        ["xclip", "-selection", "clipboard", "-out"],
+        command,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         check=False,
@@ -39,9 +54,14 @@ def read_clipboard():
     return result.stdout if result.returncode == 0 else None
 
 
-def write_clipboard(payload):
+def write_clipboard(backend, payload):
+    if backend == "wayland":
+        command = ["wl-copy"]
+    else:
+        command = ["xclip", "-selection", "clipboard", "-in"]
+
     subprocess.run(
-        ["xclip", "-selection", "clipboard", "-in"],
+        command,
         input=payload,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -51,6 +71,7 @@ def write_clipboard(payload):
 
 def write_all(fd, payload):
     view = memoryview(payload)
+
     while view:
         try:
             written = os.write(fd, view)
@@ -62,44 +83,51 @@ def write_all(fd, payload):
 
 
 def run_session():
-    if not os.environ.get("DISPLAY"):
-        raise RuntimeError("DISPLAY is not set")
-
+    backend = clipboard_backend()
     port = find_port()
     fd = os.open(port, os.O_RDWR | os.O_NONBLOCK)
     received = bytearray()
-    last = read_clipboard()
-    log(f"using {port}")
+    last = read_clipboard(backend)
+
+    log(f"using {port} with {backend} clipboard")
 
     try:
         while True:
             readable, _, _ = select.select([fd], [], [], POLL_INTERVAL)
+
             if readable:
                 chunk = os.read(fd, 65536)
                 if not chunk:
                     raise OSError("clipboard port closed")
+
                 received.extend(chunk)
 
                 while len(received) >= 4:
                     size = struct.unpack_from("<I", received)[0]
+
                     if size > MAX_FRAME:
                         raise ValueError(f"clipboard frame is too large: {size}")
+
                     if len(received) < 4 + size:
                         break
 
                     payload = bytes(received[4:4 + size])
                     del received[:4 + size]
+
                     if payload != last:
-                        write_clipboard(payload)
+                        write_clipboard(backend, payload)
                         last = payload
 
-            payload = read_clipboard()
+            payload = read_clipboard(backend)
+
             if payload is None or payload == last:
                 continue
+
             if len(payload) > MAX_FRAME:
                 log(f"clipboard contents are too large: {len(payload)}")
-            else:
-                write_all(fd, struct.pack("<I", len(payload)) + payload)
+                continue
+
+            write_all(fd, struct.pack("<I", len(payload)) + payload)
             last = payload
     finally:
         os.close(fd)

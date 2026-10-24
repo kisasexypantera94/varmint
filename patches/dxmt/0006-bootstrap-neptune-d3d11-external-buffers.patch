@@ -1,0 +1,55 @@
+diff --git a/src/d3d11/d3d11_buffer.cpp b/src/d3d11/d3d11_buffer.cpp
+--- a/src/d3d11/d3d11_buffer.cpp
++++ b/src/d3d11/d3d11_buffer.cpp
+@@ -155,7 +155,14 @@
+     if (!allocation.ptr())
+       return E_OUTOFMEMORY;
+     void *mapped = allocation->mappedMemory(0);
+-    dynamic_->addExternal(std::move(allocation));
++
++    if (cookie == 0) {
++      if (!dynamic_->bindInitialExternal(std::move(allocation)))
++        return E_FAIL;
++    } else {
++      dynamic_->addExternal(std::move(allocation));
++    }
++
+     std::lock_guard<std::mutex> lock(external_mutex_);
+     external_cookies_[mapped] = cookie;
+     return S_OK;
+diff --git a/src/dxmt/dxmt_dynamic.cpp b/src/dxmt/dxmt_dynamic.cpp
+--- a/src/dxmt/dxmt_dynamic.cpp
++++ b/src/dxmt/dxmt_dynamic.cpp
+@@ -45,6 +45,21 @@
+   return ret;
+ }
+ 
++bool
++DynamicBuffer::bindInitialExternal(Rc<BufferAllocation> &&allocation) {
++  std::lock_guard<dxmt::mutex> lock(mutex_);
++
++  if (external_mode_ || !allocation.ptr() || !fifo.empty() ||
++      owned_by_command_list_ || name_.ptr() != buffer->current())
++    return false;
++
++  auto old = buffer->rename(Rc<BufferAllocation>(allocation));
++  name_ = std::move(allocation);
++  name_suballocation_ = 0;
++  external_mode_ = true;
++  return true;
++}
++
+ void
+ DynamicBuffer::addExternal(Rc<BufferAllocation> &&allocation) {
+   std::lock_guard<dxmt::mutex> lock(mutex_);
+diff --git a/src/dxmt/dxmt_dynamic.hpp b/src/dxmt/dxmt_dynamic.hpp
+--- a/src/dxmt/dxmt_dynamic.hpp
++++ b/src/dxmt/dxmt_dynamic.hpp
+@@ -11,6 +11,7 @@
+   void decRef();
+ 
+   Rc<BufferAllocation> allocate(uint64_t coherent_seq_id);
++  bool bindInitialExternal(Rc<BufferAllocation> &&allocation);
+   /* Queue an external allocation for allocate() to hand out before it
+    * would create a new internal one.  From then on, internal allocations
+    * that come back free are dropped instead of reused, so renames keep

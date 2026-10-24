@@ -12,3 +12,6 @@ patches/wip
 *.raw
 *.boot
 _dxmt.log
+system-image-id
+vm.lock
+vmm-update*.log

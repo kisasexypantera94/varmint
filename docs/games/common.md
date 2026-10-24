@@ -6,32 +6,44 @@ Game-specific Proton versions, graphics backends, launch options and workarounds
 
 ## Graphics backends
 
-Varmint currently has two main paths for Windows games:
+Varmint has two main graphics backends:
 
-- **Venus** - the default path. DirectX games run through DXVK or VKD3D-Proton and the guest Vulkan stack.
-- **Neptune** - an experimental path for DirectX games. It is currently most useful for supported DirectX 11 titles.
+- Venus - the default backend.
+- Neptune - the preferred backend for supported 64-bit DirectX 11 games.
 
 Use the backend recommended on the game's documentation page.
 
-The graphics backend can be configured per Steam game from a terminal inside the guest:
+### Venus
 
-```bash
-varmint-game-graphics <steam-appid> status
-varmint-game-graphics <steam-appid> venus
-varmint-game-graphics <steam-appid> neptune 'relative/path/to/Game.exe'
+Venus is the default backend and requires no additional setup.
+
+### Neptune
+
+Set the game's Steam launch options to:
+
+```text
+varmint-graphics neptune %command%
 ```
 
-For example:
+Game-specific environment variables go before the wrapper:
 
-```bash
-varmint-game-graphics 292030 neptune 'bin/x64/witcher3.exe'
+```text
+VARIABLE=value varmint-graphics neptune %command%
 ```
 
-The executable path is only needed when the game executable is below the Steam install directory.
+Game arguments go after `%command%`:
 
-The helper installs or removes the required Neptune files and prints the Steam launch options for the selected backend.
+```text
+varmint-graphics neptune %command% -dx11
+```
 
-It only configures the graphics backend. Game-specific options such as `FEX_X87REDUCEDPRECISION`, `PROTON_LOG` or other workarounds are documented separately on each game page.
+To switch back to Venus, remove `varmint-graphics neptune` from the launch options and launch the game normally.
+
+### 32-bit games
+
+Neptune currently supports 64-bit Windows games only.
+
+Use Venus for 32-bit games such as L.A. Noire and Deus Ex: Human Revolution.
 
 ## Choosing a Proton version
 
@@ -39,15 +51,27 @@ It only configures the graphics backend. Game-specific options such as `FEX_X87R
 
 It has a good balance of recent Wine fixes and an older DXVK version that is compatible with our current Vulkan feature set, so it works well as a default for both Venus and Neptune.
 
+Many Neptune games that launch directly into a 64-bit DirectX 11 executable also work with default Proton Experimental. Games with older launchers or other legacy startup components are more likely to need a specific Proton version.
+
 Some games may work better with a newer Proton version, while others may require an older one. Check the game's documentation page first, and use [ProtonDB](https://www.protondb.com/) for known Proton versions, launch options and game-specific fixes or patches.
+
+Follow the individual game page when one is specified.
+
+## Fullscreen and borderless modes
+
+Fullscreen and borderless can behave differently depending on the game.
+
+Borderless is often simpler for window management and focus. Fullscreen can be useful when a game only exposes lower resolutions or upscaling options there.
+
+Varmint also exposes scaled modes derived from the Mac's native Retina resolution. For example, a 3456×2168 display has a 1728×1084 half-resolution mode. Some games do not handle these non-standard fullscreen modes correctly: the resolution may appear selectable, but the game may apply it incorrectly or not switch at all. This can lead to incorrect scaling or mismatched mouse input.
+
+If a resolution is missing, or a game has scaling, focus or performance problems in one mode, try borderless or another available resolution.
 
 ## Shader and pipeline warm-up
 
-Both graphics paths may stutter when shaders or graphics pipelines are encountered for the first time.
+Games may stutter when shaders or graphics pipelines are encountered for the first time.
 
-This is usually more noticeable with Venus and DXVK, especially when entering a new area or seeing an effect for the first time. Later runs are generally smoother once the relevant caches have been populated.
-
-Neptune and DXMT can also compile graphics pipelines during gameplay, but first-run stutter is generally less pronounced there.
+This is usually more noticeable with Venus, especially when entering a new area or seeing an effect for the first time. Neptune can also compile pipelines during gameplay, but first-run stutter is generally less pronounced.
 
 ## Steam launch options
 
@@ -65,14 +89,6 @@ Multiple variables are separated by spaces:
 VARIABLE_A=value VARIABLE_B=value %command%
 ```
 
-Use `$HOME` rather than `~` inside environment-variable values:
-
-```text
-DXVK_CONFIG_FILE="$HOME/dxvk.conf" %command%
-```
-
-Tilde expansion is not reliable in every position inside Steam launch options.
-
 ## Graphics settings
 
 Start with moderate graphics settings when trying a game for the first time.
@@ -83,9 +99,7 @@ Once the game is stable, increase settings individually instead of immediately s
 
 ## Audio recovery
 
-Audio can occasionally stop working in a running game.
-
-Open a terminal inside Varmint and run:
+If audio stops working, open a terminal inside Varmint and run:
 
 ```bash
 pulseaudio -k
@@ -93,9 +107,7 @@ pulseaudio -k
 
 PulseAudio should restart automatically.
 
-Some games recover immediately. Others initialize their audio device only at startup and need to be restarted afterwards. Dragon's Dogma: Dark Arisen is one known example.
-
-If resetting PulseAudio does not help, close and reopen the game.
+Some games recover immediately. Others may need to be restarted.
 
 ## When a game hangs
 
@@ -112,4 +124,4 @@ Try, in order:
 
 macOS notifications or other host windows appearing over Varmint can cause a brief stutter while a game is running.
 
-For more consistent performance during gameplay or recording, avoid opening host overlays and consider disabling distracting notifications temporarily.
+For more consistent performance during gameplay or recording, avoid opening host overlays.

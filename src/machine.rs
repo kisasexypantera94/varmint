@@ -15,6 +15,10 @@ pub const VIRTBLK_START: u64 = 0x0a000000;
 pub const VIRTBLK_SIZE: u64 = 0x1000;
 pub const VIRTBLK_SPI_OFFSET: u32 = 32;
 
+pub const VIRTDATA_START: u64 = 0x0a008000;
+pub const VIRTDATA_SIZE: u64 = 0x1000;
+pub const VIRTDATA_SPI_OFFSET: u32 = 40;
+
 pub const VIRTNET_START: u64 = 0x0a001000;
 pub const VIRTNET_SIZE: u64 = 0x1000;
 pub const VIRTNET_SPI_OFFSET: u32 = 33;
@@ -130,6 +134,13 @@ pub fn build_fdt(
     fdt.end_node(uart)?;
 
     add_virtio(&mut fdt, "virtio_blk", VIRTBLK_START, VIRTBLK_SIZE, VIRTBLK_SPI_OFFSET)?;
+    add_virtio(
+        &mut fdt,
+        "virtio_data",
+        VIRTDATA_START,
+        VIRTDATA_SIZE,
+        VIRTDATA_SPI_OFFSET,
+    )?;
     add_virtio(&mut fdt, "virtio_net", VIRTNET_START, VIRTNET_SIZE, VIRTNET_SPI_OFFSET)?;
     add_virtio(&mut fdt, "virtio_gpu", VIRTGPU_START, VIRTGPU_SIZE, VIRTGPU_SPI_OFFSET)?;
     add_virtio(

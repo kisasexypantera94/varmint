@@ -9,7 +9,7 @@ Use the following configuration:
 ```text
 Proton version: Proton 10.0
 Renderer:       Neptune
-Launch options: WINEDLLOVERRIDES='d3d11,dxgi=n,b;nptunix=b;d3d12,d3d12core=;nvapi,nvapi64=' %command% -dx11
+Launch options: varmint-graphics neptune %command% -dx11
 ```
 
 ### 1. Select Proton 10
@@ -18,21 +18,14 @@ In Steam:
 
 1. Open **Properties** for Grounded.
 2. Open **Compatibility**.
-3. Enable **Force the use of a specific Steam Play compatibility tool**.
-4. Select **Proton 10.0**.
+3. Under **Select compatibility tool**, select **Proton 10.0**.
 
 ### 2. Enable Neptune
 
-From a terminal inside Varmint, run:
-
-```bash
-varmint-game-graphics 962130 neptune 'Maine/Binaries/Win64/Maine-Win64-Shipping.exe'
-```
-
-Then set the following Steam launch options:
+Set the following Steam launch options:
 
 ```text
-WINEDLLOVERRIDES='d3d11,dxgi=n,b;nptunix=b;d3d12,d3d12core=;nvapi,nvapi64=' %command% -dx11
+varmint-graphics neptune %command% -dx11
 ```
 
 No additional configuration is required.
@@ -47,7 +40,7 @@ The artifacts are most visible on the ground and may change as the camera moves.
 
 Using the **Medium** preset or higher is recommended if the artifacts are distracting.
 
-This seems to be a rendering issue in the Neptune or DXMT. More research required.
+This appears to be a rendering issue in the Neptune/DXMT path.
 
 ## Tested configuration
 

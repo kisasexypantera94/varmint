@@ -1,0 +1,155 @@
+#!/bin/sh
+set -eu
+
+PERSIST_DIR=/home/.varmint
+PERSIST_FILE=$PERSIST_DIR/user-v1
+SYSTEM_STATE_DIR=/var/lib/varmint
+SYSTEM_USER_FILE=$SYSTEM_STATE_DIR/firstboot.user
+MAGIC=VARMINT_USER_V1
+
+fail() {
+    echo "varmint-user-state: $*" >&2
+    exit 1
+}
+
+regular_user() {
+    awk -F: '$3 >= 1000 && $3 < 65534 { print $1; exit }' /etc/passwd
+}
+
+validate_name() {
+    case "$1" in
+        ''|root|*[!a-z0-9_-]*|[0-9-]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+validate_id() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ "$1" -ge 1000 ] && [ "$1" -lt 65534 ]
+}
+
+save_state() {
+    username=${1:-$(regular_user)}
+    [ -n "$username" ] || return 0
+    validate_name "$username" || fail "invalid username: $username"
+
+    passwd_entry=$(getent passwd "$username") || fail "user $username does not exist"
+    uid=$(printf '%s\n' "$passwd_entry" | cut -d: -f3)
+    gid=$(printf '%s\n' "$passwd_entry" | cut -d: -f4)
+    home=$(printf '%s\n' "$passwd_entry" | cut -d: -f6)
+    validate_id "$uid" || fail "invalid uid for $username: $uid"
+    validate_id "$gid" || fail "invalid gid for $username: $gid"
+    [ "$home" = "/home/$username" ] || fail "unexpected home for $username: $home"
+    [ -d "$home" ] || fail "home does not exist: $home"
+
+    group_entry=$(getent group "$gid") || fail "primary group $gid does not exist"
+    group_name=$(printf '%s\n' "$group_entry" | cut -d: -f1)
+    validate_name "$group_name" || fail "invalid primary group name: $group_name"
+
+    shadow_entry=$(getent shadow "$username") || fail "shadow entry for $username does not exist"
+    password_hash=$(printf '%s\n' "$shadow_entry" | cut -d: -f2)
+    [ -n "$password_hash" ] || fail "empty password hash for $username"
+
+    install -d -m 0700 -o root -g root "$PERSIST_DIR"
+    tmp="$PERSIST_DIR/.user-v1.$$"
+    trap 'rm -f "$tmp"' EXIT HUP INT TERM
+    umask 077
+    {
+        printf '%s\n' "$MAGIC"
+        printf '%s\n' "$username"
+        printf '%s\n' "$uid"
+        printf '%s\n' "$group_name"
+        printf '%s\n' "$gid"
+        printf '%s\n' "$password_hash"
+    } > "$tmp"
+    chmod 0600 "$tmp"
+    chown root:root "$tmp"
+    mv -f "$tmp" "$PERSIST_FILE"
+    trap - EXIT HUP INT TERM
+    sync -f "$PERSIST_FILE" 2>/dev/null || true
+    echo "varmint-user-state: saved identity for $username"
+}
+
+restore_state() {
+    [ -f "$PERSIST_FILE" ] || fail "persistent user metadata is missing"
+    [ "$(stat -c '%u:%g:%a' "$PERSIST_FILE")" = "0:0:600" ] \
+        || fail "$PERSIST_FILE must be root:root mode 600"
+
+    line_count=$(wc -l < "$PERSIST_FILE" | tr -d ' ')
+    [ "$line_count" -eq 6 ] || fail "invalid metadata line count: $line_count"
+
+    magic=$(sed -n '1p' "$PERSIST_FILE")
+    username=$(sed -n '2p' "$PERSIST_FILE")
+    uid=$(sed -n '3p' "$PERSIST_FILE")
+    group_name=$(sed -n '4p' "$PERSIST_FILE")
+    gid=$(sed -n '5p' "$PERSIST_FILE")
+    password_hash=$(sed -n '6p' "$PERSIST_FILE")
+
+    [ "$magic" = "$MAGIC" ] || fail "unsupported metadata format: $magic"
+    validate_name "$username" || fail "invalid username in metadata: $username"
+    validate_name "$group_name" || fail "invalid group name in metadata: $group_name"
+    validate_id "$uid" || fail "invalid uid in metadata: $uid"
+    validate_id "$gid" || fail "invalid gid in metadata: $gid"
+    [ -n "$password_hash" ] || fail "empty password hash in metadata"
+    [ -d "/home/$username" ] || fail "persistent home /home/$username is missing"
+
+    existing_regular=$(regular_user)
+    [ -z "$existing_regular" ] || [ "$existing_regular" = "$username" ] \
+        || fail "unexpected regular user already exists: $existing_regular"
+
+    if getent group "$group_name" >/dev/null; then
+        actual_gid=$(getent group "$group_name" | cut -d: -f3)
+        [ "$actual_gid" = "$gid" ] || fail "group $group_name has gid $actual_gid, expected $gid"
+    elif getent group "$gid" >/dev/null; then
+        fail "gid $gid is already used by another group"
+    else
+        groupadd --gid "$gid" "$group_name"
+    fi
+
+    if getent passwd "$username" >/dev/null; then
+        entry=$(getent passwd "$username")
+        actual_uid=$(printf '%s\n' "$entry" | cut -d: -f3)
+        actual_gid=$(printf '%s\n' "$entry" | cut -d: -f4)
+        [ "$actual_uid" = "$uid" ] || fail "user $username has uid $actual_uid, expected $uid"
+        [ "$actual_gid" = "$gid" ] || fail "user $username has gid $actual_gid, expected $gid"
+    elif getent passwd "$uid" >/dev/null; then
+        fail "uid $uid is already used by another user"
+    else
+        useradd \
+            --no-create-home \
+            --uid "$uid" \
+            --gid "$gid" \
+            --shell /bin/bash \
+            --home-dir "/home/$username" \
+            "$username"
+    fi
+
+    usermod --password "$password_hash" "$username"
+    for group in sudo audio video render input; do
+        getent group "$group" >/dev/null && usermod -aG "$group" "$username"
+    done
+
+    # Do not recursively chown a potentially large Steam library.
+    chown "$uid:$gid" "/home/$username"
+
+    install -d -m 0755 "$SYSTEM_STATE_DIR"
+    printf '%s\n' "$username" > "$SYSTEM_USER_FILE"
+    chmod 0600 "$SYSTEM_USER_FILE"
+
+    echo "varmint-user-state: restored identity for $username ($uid:$gid)"
+}
+
+case "${1:-}" in
+    save)
+        save_state "${2:-}"
+        ;;
+    restore)
+        restore_state
+        ;;
+    *)
+        echo "usage: $0 <save [username]|restore>" >&2
+        exit 2
+        ;;
+esac

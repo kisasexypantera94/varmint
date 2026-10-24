@@ -1,0 +1,414 @@
+diff --git a/src/virtio/neptune/npt_device.c b/src/virtio/neptune/npt_device.c
+index 5b561dd9399..afda2c195fa 100644
+--- a/src/virtio/neptune/npt_device.c
++++ b/src/virtio/neptune/npt_device.c
+@@ -322,6 +322,9 @@ npt_device_create(void)
+    atomic_store(&dev->next_ring_id, 1);
+    npt_wrapper_cache_init(&dev->wrapper_cache);
+ 
++   mtx_init(&dev->wsi_owner_mutex, mtx_plain);
++   dev->wsi_owner = NULL;
++
+    mtx_init(&dev->tls_rings_mutex, mtx_plain);
+    list_inithead(&dev->tls_rings);
+    npt_tls_once_init();
+@@ -345,6 +348,7 @@ npt_device_create(void)
+    dev->ring = npt_ring_create(dev, &layout, ring_id, false /* primary */);
+    if (!dev->ring) {
+       npt_log("failed to create ring");
++      mtx_destroy(&dev->wsi_owner_mutex);
+       mtx_destroy(&dev->instance_rings_mutex);
+       mtx_destroy(&dev->tls_rings_mutex);
+       npt_wrapper_cache_fini(&dev->wrapper_cache);
+@@ -459,6 +463,7 @@ npt_device_destroy(struct npt_device *dev)
+    mtx_unlock(&dev->tls_rings_mutex);
+ 
+    npt_ring_destroy(dev->ring);
++   mtx_destroy(&dev->wsi_owner_mutex);
+    mtx_destroy(&dev->instance_rings_mutex);
+    mtx_destroy(&dev->tls_rings_mutex);
+    npt_wrapper_cache_fini(&dev->wrapper_cache);
+diff --git a/src/virtio/neptune/npt_device.h b/src/virtio/neptune/npt_device.h
+index da420b8a592..bfad15a401b 100644
+--- a/src/virtio/neptune/npt_device.h
++++ b/src/virtio/neptune/npt_device.h
+@@ -35,8 +35,18 @@ struct npt_wrapper_cache {
+    uint32_t count;
+ };
+ 
++struct npt_guest_swapchain_common;
++
+ struct npt_device {
+    struct npt_renderer *renderer;
++
++   /*
++    * The renderer WSI API is process-global and has no per-swapchain
++    * context handle. Serialize ownership so multiple live DXGI
++    * swapchains cannot overwrite or destroy each other's WSI state.
++    */
++   mtx_t wsi_owner_mutex;
++   struct npt_guest_swapchain_common *wsi_owner;
+    /* Primary ring; fallback when TLS rings are disabled. */
+    struct npt_ring *ring;
+ 
+diff --git a/src/virtio/neptune/npt_swapchain.c b/src/virtio/neptune/npt_swapchain.c
+index 2c508dc6cc7..a8541992d97 100644
+--- a/src/virtio/neptune/npt_swapchain.c
++++ b/src/virtio/neptune/npt_swapchain.c
+@@ -145,16 +145,24 @@ gsc_ensure_wsi(struct npt_guest_swapchain *s)
+       return;
+ 
+    const uint32_t fmt = npt_shared_texture_host_format(c->desc.Format);
+-   for (uint32_t i = 0; i < NPT_SC_PRESENT_IMAGES; i++) {
+-      void *tex = npt_shared_texture_create_exportable(
+-         s->device, c->desc.Width, c->desc.Height, fmt);
+-      if (!tex) {
+-         npt_gsc_release_pool(c);
+-         c->wsi_failed = true;
+-         return;
++
++   /*
++    * Ownership handoff quiesces the process-global WSI, but the old
++    * swapchain keeps its exportable pool. Reuse it when that swapchain
++    * becomes owner again instead of overwriting the held wrappers.
++    */
++   if (!c->present_tex[0]) {
++      for (uint32_t i = 0; i < NPT_SC_PRESENT_IMAGES; i++) {
++         void *tex = npt_shared_texture_create_exportable(
++            s->device, c->desc.Width, c->desc.Height, fmt);
++         if (!tex) {
++            npt_gsc_release_pool(c);
++            c->wsi_failed = true;
++            return;
++         }
++         c->present_tex[i] = tex;
++         c->present_tex_id[i] = npt_com_self_id(tex);
+       }
+-      c->present_tex[i] = tex;
+-      c->present_tex_id[i] = npt_com_self_id(tex);
+    }
+ 
+    npt_gsc_wsi_bringup(c, fmt);
+@@ -228,25 +236,25 @@ gsc_present_common(void *self, UINT SyncInterval, UINT Flags)
+    const bool prof = NPT_DEBUG(PRESENT_TIMING);
+    uint64_t t0 = prof ? npt_profile_now_ns() : 0, t1 = t0, t2 = t0, t3 = t0;
+ 
+-   mtx_lock(&c->present_mutex);
++   struct npt_device *dev = c->com->base.device;
++   npt_gsc_wsi_guard_lock(c);
+ 
+    if (!c->wsi_initialized && !c->wsi_failed)
+       gsc_ensure_wsi(s);
+    if (c->wsi_failed) {
+       c->present_count++;
+-      mtx_unlock(&c->present_mutex);
++      npt_gsc_wsi_guard_unlock(c);
+       /* No worker will complete this frame; release the latency object
+        * synchronously so a waiting app is not stalled. */
+       npt_gsc_frame_latency_release(c);
+       return NPT_S_OK;
+    }
+ 
+-   struct npt_device *dev = c->com->base.device;
+    const uint32_t i = s->next_image;
+ 
+    if ((Flags & NPT_DXGI_PRESENT_DO_NOT_WAIT) &&
+        npt_gsc_present_would_block(c, i)) {
+-      mtx_unlock(&c->present_mutex);
++      npt_gsc_wsi_guard_unlock(c);
+       return NPT_DXGI_ERROR_WAS_STILL_DRAWING;
+    }
+ 
+@@ -338,7 +346,7 @@ gsc_present_common(void *self, UINT SyncInterval, UINT Flags)
+       npt_profile_log_present_timing((unsigned)SyncInterval, t0, t1, t2, t3);
+    }
+    const bool occluded = c->occluded_streak >= NPT_SC_OCCLUDED_STREAK;
+-   mtx_unlock(&c->present_mutex);
++   npt_gsc_wsi_guard_unlock(c);
+    return occluded ? NPT_DXGI_STATUS_OCCLUDED : NPT_S_OK;
+ }
+ 
+@@ -456,7 +464,7 @@ gsc_resize_common(void *self, UINT BufferCount, UINT Width, UINT Height,
+    struct npt_device *dev = c->com->base.device;
+    (void)SwapChainFlags;
+ 
+-   mtx_lock(&c->present_mutex);
++   npt_gsc_wsi_guard_lock(c);
+ 
+    /* Old pool (and its X pixmaps) die here; the new pool is built
+     * lazily on the next Present. */
+@@ -484,7 +492,7 @@ gsc_resize_common(void *self, UINT BufferCount, UINT Width, UINT Height,
+    if (NPT_SUCCEEDED(hr))
+       hr = gsc_create_r10_stage(s);
+ 
+-   mtx_unlock(&c->present_mutex);
++   npt_gsc_wsi_guard_unlock(c);
+    return hr;
+ }
+ 
+@@ -805,7 +813,8 @@ gsc_SetFullscreenState(void *self, BOOL Fullscreen, IDXGIOutput *pTarget)
+     * the target window geometry at init, so a real fullscreen transition
+     * invalidates it even when the application does not call ResizeBuffers.
+     */
+-   mtx_lock(&c->present_mutex);
++   struct npt_device *dev = c->com->base.device;
++   npt_gsc_wsi_guard_lock(c);
+    const BOOL was_fullscreen = c->fullscreen;
+ 
+    HRESULT hr = NPT_S_OK;
+@@ -820,7 +829,7 @@ gsc_SetFullscreenState(void *self, BOOL Fullscreen, IDXGIOutput *pTarget)
+    if (c->fullscreen != was_fullscreen)
+       gsc_teardown_wsi(s, false);
+ 
+-   mtx_unlock(&c->present_mutex);
++   npt_gsc_wsi_guard_unlock(c);
+    return hr;
+ }
+ 
+diff --git a/src/virtio/neptune/npt_swapchain12.c b/src/virtio/neptune/npt_swapchain12.c
+index a516cb222f8..d5525d6d6bd 100644
+--- a/src/virtio/neptune/npt_swapchain12.c
++++ b/src/virtio/neptune/npt_swapchain12.c
+@@ -366,15 +366,22 @@ gsc12_ensure_wsi(struct npt_guest_swapchain12 *s)
+       return;
+ 
+    const uint32_t fmt = npt_shared_texture_host_format(c->desc.Format);
+-   for (uint32_t i = 0; i < NPT_SC_PRESENT_IMAGES; i++) {
+-      void *tex = gsc12_create_pool_texture(s, fmt);
+-      if (!tex) {
+-         npt_gsc_release_pool(c);
+-         c->wsi_failed = true;
+-         return;
++
++   /*
++    * Ownership handoff stops WSI but keeps this swapchain's pool and
++    * pre-recorded copy lists intact. Reuse both when ownership returns.
++    */
++   if (!c->present_tex[0]) {
++      for (uint32_t i = 0; i < NPT_SC_PRESENT_IMAGES; i++) {
++         void *tex = gsc12_create_pool_texture(s, fmt);
++         if (!tex) {
++            npt_gsc_release_pool(c);
++            c->wsi_failed = true;
++            return;
++         }
++         c->present_tex[i] = tex;
++         c->present_tex_id[i] = npt_com_self_id(tex);
+       }
+-      c->present_tex[i] = tex;
+-      c->present_tex_id[i] = npt_com_self_id(tex);
+    }
+ 
+    if (!npt_gsc_wsi_bringup(c, fmt))
+@@ -383,7 +390,7 @@ gsc12_ensure_wsi(struct npt_guest_swapchain12 *s)
+    /* The lists only reference the pool and the backbuffers; the (just
+     * started) workers act on nothing until the first push, so recording
+     * after bring-up is safe. */
+-   if (!gsc12_record_copy_lists(s)) {
++   if (!s->copy_allocator && !gsc12_record_copy_lists(s)) {
+       gsc12_teardown_wsi(s, false);
+       c->wsi_failed = true;
+       return;
+@@ -445,26 +452,26 @@ gsc12_present_common(void *self, UINT SyncInterval, UINT Flags)
+    const bool prof = NPT_DEBUG(PRESENT_TIMING);
+    uint64_t t0 = prof ? npt_profile_now_ns() : 0, t1 = t0, t2 = t0, t3 = t0;
+ 
+-   mtx_lock(&c->present_mutex);
++   struct npt_device *dev = c->com->base.device;
++   npt_gsc_wsi_guard_lock(c);
+ 
+    if (!c->wsi_initialized && !c->wsi_failed)
+       gsc12_ensure_wsi(s);
+    if (c->wsi_failed) {
+       c->present_count++;
+-      mtx_unlock(&c->present_mutex);
++      npt_gsc_wsi_guard_unlock(c);
+       /* No worker will complete this frame; release the latency object
+        * synchronously so a waiting app is not stalled. */
+       npt_gsc_frame_latency_release(c);
+       return NPT_S_OK;
+    }
+ 
+-   struct npt_device *dev = c->com->base.device;
+    const uint32_t bb = c->present_count % c->desc.BufferCount;
+    const uint32_t img = c->present_count % NPT_SC_PRESENT_IMAGES;
+ 
+    if ((Flags & NPT_DXGI_PRESENT_DO_NOT_WAIT) &&
+        npt_gsc_present_would_block(c, img)) {
+-      mtx_unlock(&c->present_mutex);
++      npt_gsc_wsi_guard_unlock(c);
+       return NPT_DXGI_ERROR_WAS_STILL_DRAWING;
+    }
+ 
+@@ -524,7 +531,7 @@ gsc12_present_common(void *self, UINT SyncInterval, UINT Flags)
+       npt_profile_log_present_timing((unsigned)SyncInterval, t0, t1, t2, t3);
+    }
+    const bool occluded = c->occluded_streak >= NPT_SC_OCCLUDED_STREAK;
+-   mtx_unlock(&c->present_mutex);
++   npt_gsc_wsi_guard_unlock(c);
+    return occluded ? NPT_DXGI_STATUS_OCCLUDED : NPT_S_OK;
+ }
+ 
+@@ -587,7 +594,7 @@ gsc12_resize_common(void *self, UINT BufferCount, UINT Width, UINT Height,
+        BufferCount == 1 /* flip model needs >= 2; 0 keeps current */)
+       return NPT_DXGI_ERROR_INVALID_CALL;
+ 
+-   mtx_lock(&c->present_mutex);
++   npt_gsc_wsi_guard_lock(c);
+ 
+    /* Full GPU drain, then drop the pool + copy lists + X pixmaps;
+     * everything is rebuilt lazily on the next Present. */
+@@ -614,7 +621,7 @@ gsc12_resize_common(void *self, UINT BufferCount, UINT Width, UINT Height,
+    gsc12_release_backbuffers(s, dev);
+    HRESULT hr = gsc12_create_backbuffers(s);
+ 
+-   mtx_unlock(&c->present_mutex);
++   npt_gsc_wsi_guard_unlock(c);
+    return hr;
+ }
+ 
+diff --git a/src/virtio/neptune/npt_swapchain_common.c b/src/virtio/neptune/npt_swapchain_common.c
+index c58ea5668bd..b3eae904bb1 100644
+--- a/src/virtio/neptune/npt_swapchain_common.c
++++ b/src/virtio/neptune/npt_swapchain_common.c
+@@ -343,20 +343,38 @@ npt_gsc_release_pool(struct npt_guest_swapchain_common *c)
+  * swapchain interleaves its copy-list release).  When the device is
+  * shutting down the worker joins are skipped and the caller must leak
+  * the aux so the workers keep valid memory to come back to. */
+-void
+-npt_gsc_wsi_quiesce(struct npt_guest_swapchain_common *c, bool shutting_down)
++static void
++npt_gsc_wsi_quiesce_locked(struct npt_guest_swapchain_common *c,
++                           bool shutting_down)
+ {
++   struct npt_device *dev = c->com->base.device;
++
+    npt_gsc_wsi_stop(c, shutting_down);
+    npt_gsc_drain_stop(c, shutting_down);
+    npt_gsc_backpressure_flush(c);
+-   if (c->wsi_initialized && !shutting_down)
+-      npt_renderer_wsi_destroy(c->com->base.device->renderer);
++
++   if (dev->wsi_owner == c) {
++      if (c->wsi_initialized && !shutting_down)
++         npt_renderer_wsi_destroy(dev->renderer);
++      dev->wsi_owner = NULL;
++   }
++
+    c->wsi_initialized = false;
+    c->wsi_failed = false;
+    for (uint32_t i = 0; i < NPT_SC_PRESENT_IMAGES; i++)
+       atomic_store(&c->image_inflight[i], 0);
+ }
+ 
++void
++npt_gsc_wsi_quiesce(struct npt_guest_swapchain_common *c, bool shutting_down)
++{
++   struct npt_device *dev = c->com->base.device;
++
++   mtx_lock(&dev->wsi_owner_mutex);
++   npt_gsc_wsi_quiesce_locked(c, shutting_down);
++   mtx_unlock(&dev->wsi_owner_mutex);
++}
++
+ bool
+ npt_gsc_wsi_backend_available(struct npt_guest_swapchain_common *c)
+ {
+@@ -370,6 +388,22 @@ npt_gsc_wsi_backend_available(struct npt_guest_swapchain_common *c)
+    return true;
+ }
+ 
++void
++npt_gsc_wsi_guard_lock(struct npt_guest_swapchain_common *c)
++{
++   struct npt_device *dev = c->com->base.device;
++   mtx_lock(&dev->wsi_owner_mutex);
++   mtx_lock(&c->present_mutex);
++}
++
++void
++npt_gsc_wsi_guard_unlock(struct npt_guest_swapchain_common *c)
++{
++   struct npt_device *dev = c->com->base.device;
++   mtx_unlock(&c->present_mutex);
++   mtx_unlock(&dev->wsi_owner_mutex);
++}
++
+ /* Bind the (already created) exportable pool to guest blobs, hand the
+  * dmabufs to the WSI backend, and start the worker threads.  On any
+  * failure the pool is released and presents degrade to the no-WSI
+@@ -377,7 +411,17 @@ npt_gsc_wsi_backend_available(struct npt_guest_swapchain_common *c)
+ bool
+ npt_gsc_wsi_bringup(struct npt_guest_swapchain_common *c, uint32_t fmt)
+ {
+-   struct npt_renderer *renderer = c->com->base.device->renderer;
++   struct npt_device *dev = c->com->base.device;
++   struct npt_renderer *renderer = dev->renderer;
++
++   mtx_lock(&dev->wsi_owner_mutex);
++
++   if (dev->wsi_owner && dev->wsi_owner != c) {
++      struct npt_guest_swapchain_common *old_owner = dev->wsi_owner;
++      npt_log("%s: taking WSI ownership from %s",
++              c->tag, old_owner->tag);
++      npt_gsc_wsi_quiesce_locked(old_owner, false);
++   }
+ 
+    int fds[NPT_SC_PRESENT_IMAGES];
+    uint32_t strides[NPT_SC_PRESENT_IMAGES];
+@@ -419,17 +463,22 @@ npt_gsc_wsi_bringup(struct npt_guest_swapchain_common *c, uint32_t fmt)
+    }
+ 
+    c->wsi_initialized = true;
++   dev->wsi_owner = c;
++
+    if (!npt_gsc_drain_start(c) || !npt_gsc_wsi_start(c)) {
+       /* Without both workers a Present would enqueue frames nothing
+        * consumes and eventually block forever on the full queue.  Drop
+        * back to the no-WSI path instead. */
+       npt_log("%s: present worker startup failed; presents will be dropped",
+               c->tag);
+-      npt_gsc_wsi_quiesce(c, false);
++      npt_gsc_wsi_quiesce_locked(c, false);
+       npt_gsc_release_pool(c);
+       c->wsi_failed = true;
++      mtx_unlock(&dev->wsi_owner_mutex);
+       return false;
+    }
++
++   mtx_unlock(&dev->wsi_owner_mutex);
+    return true;
+ 
+ fail:
+@@ -439,6 +488,7 @@ fail:
+    }
+    npt_gsc_release_pool(c);
+    c->wsi_failed = true;
++   mtx_unlock(&dev->wsi_owner_mutex);
+    return false;
+ }
+ 
+diff --git a/src/virtio/neptune/npt_swapchain_common.h b/src/virtio/neptune/npt_swapchain_common.h
+index 03f5ca41a46..a94158760b8 100644
+--- a/src/virtio/neptune/npt_swapchain_common.h
++++ b/src/virtio/neptune/npt_swapchain_common.h
+@@ -172,6 +172,19 @@ npt_gsc_qi_held(void *wrapper, const IID *riid, void **out);
+ bool
+ npt_gsc_wsi_backend_available(struct npt_guest_swapchain_common *c);
+ 
++/*
++ * Serialize an operation that touches both the process-global renderer WSI
++ * and per-swapchain present state.  Always acquire in owner -> present order.
++ *
++ * Neptune's Win32 mtx_t is a CRITICAL_SECTION, so bringup/quiesce may safely
++ * re-enter wsi_owner_mutex while this guard is held.
++ */
++void
++npt_gsc_wsi_guard_lock(struct npt_guest_swapchain_common *c);
++
++void
++npt_gsc_wsi_guard_unlock(struct npt_guest_swapchain_common *c);
++
+ bool
+ npt_gsc_wsi_bringup(struct npt_guest_swapchain_common *c, uint32_t fmt);
+ 

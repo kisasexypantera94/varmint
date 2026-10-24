@@ -1,0 +1,39 @@
+#!/bin/sh
+
+timezone=
+host_time=
+
+for arg in $(cat /proc/cmdline); do
+    case "$arg" in
+        varmint.tz=*)
+            timezone=${arg#varmint.tz=}
+            ;;
+        varmint.host_time=*)
+            host_time=${arg#varmint.host_time=}
+            ;;
+    esac
+done
+
+case "$timezone" in
+    ''|*..*|/*)
+        ;;
+    *)
+        zoneinfo="/usr/share/zoneinfo/$timezone"
+        if [ -f "$zoneinfo" ]; then
+            ln -sfn "$zoneinfo" /etc/localtime
+            printf '%s\n' "$timezone" > /etc/timezone
+        fi
+        ;;
+esac
+
+case "$host_time" in
+    ''|*[!0-9]*)
+        ;;
+    *)
+        # The host timestamp is captured immediately before VM startup.
+        # NTP can refine the clock later; boot itself never depends on NTP.
+        date -u -s "@$host_time" >/dev/null 2>&1 || true
+        ;;
+esac
+
+exit 0

@@ -7,32 +7,17 @@ A Plague Tale: Innocence is playable in Varmint using Neptune.
 Use the following configuration:
 
 ```text
-Proton version: Proton 10.0
+Proton version: Proton Experimental
 Renderer:       Neptune
-Launch options: WINEDLLOVERRIDES='d3d11,dxgi=n,b;nptunix=b;d3d12,d3d12core=;nvapi,nvapi64=' %command%
+Launch options: varmint-graphics neptune %command%
 ```
 
-### 1. Select Proton 10
+### 1. Enable Neptune
 
-In Steam:
-
-1. Open **Properties** for A Plague Tale: Innocence.
-2. Open **Compatibility**.
-3. Enable **Force the use of a specific Steam Play compatibility tool**.
-4. Select **Proton 10.0**.
-
-### 2. Enable Neptune
-
-From a terminal inside Varmint, run:
-
-```bash
-varmint-game-graphics 752590 neptune
-```
-
-Then set the following Steam launch options:
+Set the following Steam launch options:
 
 ```text
-WINEDLLOVERRIDES='d3d11,dxgi=n,b;nptunix=b;d3d12,d3d12core=;nvapi,nvapi64=' %command%
+varmint-graphics neptune %command%
 ```
 
 No additional configuration is required.
@@ -55,7 +40,7 @@ Fullscreen also provides better performance in the tested setup.
 
 ```text
 A Plague Tale: Innocence
-Proton 10.0
+Proton Experimental
 DirectX 11
 Neptune
 Fullscreen

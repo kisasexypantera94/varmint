@@ -1,6 +1,66 @@
 #!/bin/sh
-set -eu
+set -u
 
-exec FEXBash -c \
-    'exec /usr/lib/steam/bin_steam.sh -no-cef-sandbox "$@"' \
-    sh "$@"
+STEAM_ROOT="$HOME/.local/share/Steam"
+CLIENT_DIR="$STEAM_ROOT/steamrtarm64"
+CLIENT="$CLIENT_DIR/steam"
+MARKER="$STEAM_ROOT/package/steam_client_publicbeta_linuxarm64.installed"
+
+# Keep Proton's generated per-game FEX configuration and only override
+# Varmint's performance default. The remaining FEX defaults we use already
+# match Proton's own defaults.
+export STEAM_FEX_TSOENABLED=0
+
+if [ ! -x "$CLIENT" ]; then
+    printf '%s\n' "varmint-steam: Steam client is missing: $CLIENT" >&2
+    exit 1
+fi
+
+# Steam's graphical bootstrap updater dlopens "libGLX.so" rather than the
+# versioned runtime SONAME. Debian ships libGLX.so.0, so provide the name
+# expected by the ARM64 bootstrap next to the Steam binary.
+if [ -e /usr/lib/aarch64-linux-gnu/libGLX.so.0 ]; then
+    ln -sfn /usr/lib/aarch64-linux-gnu/libGLX.so.0 \
+        "$CLIENT_DIR/libGLX.so"
+fi
+
+cd "$CLIENT_DIR" || exit 1
+
+# Normal launches after the full public beta ARM64 client has been installed.
+if [ -f "$MARKER" ]; then
+    exec "$CLIENT" -noverifyfiles "$@"
+fi
+
+# First launch: warn once about the known rendering glitches in Steam's
+# bootstrap updater, then allow it to verify/download the full client.
+notice_dir="$HOME/.local/state/varmint"
+notice_marker="$notice_dir/steam-installer-notice-shown"
+
+if [ ! -f "$notice_marker" ]; then
+    mkdir -p "$notice_dir"
+
+    if command -v notify-send >/dev/null 2>&1; then
+        if notify-send \
+            --app-name=Varmint \
+            --expire-time=15000 \
+            "Steam Installer" \
+            "Yes, the Steam Installer GUI rendering is broken... But who cares if it gets the job done?
+
+If it doesn't, please file an issue. Thank you!" \
+            >/dev/null 2>&1
+        then
+            touch "$notice_marker"
+        fi
+    fi
+fi
+
+"$CLIENT" "$@"
+rc=$?
+
+# If the bootstrap exits after completing the installation, start the
+# installed client immediately.
+if [ -f "$MARKER" ]; then
+    exec "$CLIENT" -noverifyfiles "$@"
+fi
+
+exit "$rc"

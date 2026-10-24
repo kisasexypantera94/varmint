@@ -1,0 +1,116 @@
+diff --git a/spirv_msl.cpp b/spirv_msl.cpp
+index d4252fcf..67c0878a 100644
+--- a/spirv_msl.cpp
++++ b/spirv_msl.cpp
+@@ -1877,18 +1877,18 @@ static const char* get_vertex_loader_component_suffix(uint32_t elements)
+ 	}
+ }
+ 
+-static const char* get_normalization_string(MSLShaderVariableFormat type, bool normalized)
++static std::string normalize_vertex_load(MSLShaderVariableFormat type, bool normalized, const std::string &load)
+ {
+ 	if (!normalized)
+-		return "";
++		return load;
++
+ 	switch (type)
+ 	{
+-		case MSL_SHADER_VARIABLE_FORMAT_UINT16: return " * (1.f/65535.f)";
+-		case MSL_SHADER_VARIABLE_FORMAT_UINT8:  return " * (1.f/255.f)";
+-		// TODO: Proper positive sint normalization
+-		case MSL_SHADER_VARIABLE_FORMAT_INT16: return " * (1.f/32768.f)";
+-		case MSL_SHADER_VARIABLE_FORMAT_INT8:  return " * (1.f/128.f)";
+-		default: return "";
++		case MSL_SHADER_VARIABLE_FORMAT_UINT16: return load + " * (1.f/65535.f)";
++		case MSL_SHADER_VARIABLE_FORMAT_UINT8:  return load + " * (1.f/255.f)";
++		case MSL_SHADER_VARIABLE_FORMAT_INT16:  return "max(" + load + " * (1.f/32767.f), -1.f)";
++		case MSL_SHADER_VARIABLE_FORMAT_INT8:   return "max(" + load + " * (1.f/127.f), -1.f)";
++		default: return load;
+ 	}
+ }
+ 
+@@ -1896,8 +1896,8 @@ static const char *get_variable_format_string(MSLShaderVariableFormat format)
+ {
+ 	switch (format)
+ 	{
+-		case MSL_SHADER_VARIABLE_FORMAT_INT8: return "byte";
+-		case MSL_SHADER_VARIABLE_FORMAT_UINT8: return "ubyte";
++		case MSL_SHADER_VARIABLE_FORMAT_INT8: return "char";
++		case MSL_SHADER_VARIABLE_FORMAT_UINT8: return "uchar";
+ 		case MSL_SHADER_VARIABLE_FORMAT_INT16: return "short";
+ 		case MSL_SHADER_VARIABLE_FORMAT_UINT16: return "ushort";
+ 		case MSL_SHADER_VARIABLE_FORMAT_INT32: return "int";
+@@ -1949,6 +1949,7 @@ void CompilerMSL::emit_mesh_wrapper()
+ 		statement("int32_t indexed;");
+ 		statement("int32_t indexSize;");
+ 		statement("int64_t indexBuffer;");
++		statement("uint32_t vertexStrides[31];");
+ 		statement("uint8_t topoStrip;");
+ 
+ 		end_scope(";");
+@@ -2092,20 +2093,47 @@ void CompilerMSL::emit_mesh_wrapper()
+ 
+ 			std::string type_name = get_variable_format_string(variable.format);
+ 			std::string component = type_name + get_vertex_loader_component_suffix(load_elements);
+-			std::string packed = variable.vecsize > 1 ? "packed_" : "";
+-			std::string load_string = "*(device " + packed + component + " *)(vb" + std::to_string(variable.binding) + " + " + std::to_string(variable.offset) + " + vertexIndex * " + std::to_string(variable.stride) + ")";
++			std::string packed = load_elements > 1 ? "packed_" : "";
++
++			std::string load_string =
++			    "*(device " + packed + component + " *)(vb" +
++			    std::to_string(variable.binding) + " + " +
++			    std::to_string(variable.offset) +
++			    " + vertexIndex * drawInfo->vertexStrides[" +
++			    std::to_string(variable.binding) + "])";
++
++			auto loaded_type = parent_type;
++			loaded_type.vecsize = load_elements;
++			loaded_type.columns = 1;
++
++			std::string loaded_type_str = type_to_glsl(loaded_type);
++			if (loaded_type_str != component)
++				load_string = loaded_type_str + "(" + load_string + ")";
++
++			if (parent_type.basetype == SPIRType::Float)
++				load_string = normalize_vertex_load(variable.format, variable.normalized, load_string);
++			else if (parent_type.basetype == SPIRType::Half && variable.normalized)
++			{
++				auto float_type = loaded_type;
++				float_type.basetype = SPIRType::Float;
++				float_type.width = 32;
++				load_string =
++				    loaded_type_str + "(" +
++				    normalize_vertex_load(
++				        variable.format, true,
++				        type_to_glsl(float_type) + "(" + load_string + ")") +
++				    ")";
++			}
++
+ 			if (load_elements != parent_type.vecsize)
+ 			{
+-				component = type_name + get_vertex_loader_component_suffix(parent_type.vecsize);
+-				load_string = component + "(" + load_string;
++				load_string = parent_type_str + "(" + load_string;
+ 				for (uint32_t i = load_elements; i < parent_type.vecsize; i++)
+ 					load_string += (i == 3) ? ", 1" : ", 0";
+ 				load_string += ")";
+ 			}
+ 
+-			if (parent_type_str != component)
+-				load_string = parent_type_str + "(" + load_string + ")";
+-			statement(to_name(var.self), " = ", load_string, get_normalization_string(variable.format, variable.normalized), ";");
++			statement(to_name(var.self), " = ", load_string, ";");
+ 		});
+ 
+ 		statement("payload.vertices[i] = ", execution.name, "(");
+@@ -5647,6 +5675,10 @@ uint32_t CompilerMSL::ensure_correct_input_type(uint32_t type_id, uint32_t locat
+ {
+ 	auto &type = get<SPIRType>(type_id);
+ 
++	if (msl_options.for_mesh_pipeline &&
++	    get_execution_model() == ExecutionModelVertex)
++		return type_id;
++
+ 	uint32_t max_array_dimensions = strip_array ? 1 : 0;
+ 
+ 	// Struct and array types must match exactly.

@@ -81,12 +81,22 @@ find_vmnet_helper() {
 assemble_app() {
   log "assemble app"
   local contents="$APP_BUNDLE/Contents"
+  local system_image_id="$(dirname "$BASE_IMAGE")/system-image-id"
+  local expected_system_image_id actual_system_image_id
   local helper file
 
-  require_commands plutil
-  for file in "$BINARY" "$KERNEL" "$INITRD" "$BASE_IMAGE" "$ICON" "$MANIFEST"; do
+  require_commands plutil shasum
+  for file in "$BINARY" "$KERNEL" "$INITRD" "$BASE_IMAGE" "$system_image_id" "$ICON" "$MANIFEST"; do
     need_file "$file"
   done
+  expected_system_image_id="$(tr -d '\n' < "$system_image_id")"
+  [ "${#expected_system_image_id}" -eq 64 ] || die "invalid system image id: $system_image_id"
+  case "$expected_system_image_id" in
+    *[!0-9a-f]*) die "invalid system image id: $system_image_id" ;;
+  esac
+  actual_system_image_id="$(shasum -a 256 "$BASE_IMAGE" | awk '{print $1}')"
+  [ "$actual_system_image_id" = "$expected_system_image_id" ] \
+    || die "system-image-id does not match $BASE_IMAGE"
   helper="$(find_vmnet_helper)"
   need_file "$PREFIX/libexec/virgl_render_server"
   need_file "$PREFIX/lib/x86_64/libd3dmetal-native.dylib"
@@ -106,6 +116,7 @@ assemble_app() {
   install -m 644 "$KERNEL" "$contents/Resources/kernel/Image"
   install -m 644 "$INITRD" "$contents/Resources/kernel/initrd"
   install -m 644 "$BASE_IMAGE" "$contents/Resources/runtime/base.raw.zst"
+  install -m 644 "$system_image_id" "$contents/Resources/runtime/system-image-id"
   install -m 644 "$ICON" "$contents/Resources/Assets.car"
   install -m 644 "$MANIFEST" "$contents/Resources/runtime-manifest.toml"
 
@@ -138,6 +149,8 @@ assemble_app() {
     <string>$MINIMUM_MACOS</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Varmint needs microphone access for audio input in the virtual machine.</string>
 </dict>
 </plist>
 EOF_PLIST
@@ -438,6 +451,7 @@ verify_app() {
     "$resources/kernel/Image" \
     "$resources/kernel/initrd" \
     "$resources/runtime/base.raw.zst" \
+    "$resources/runtime/system-image-id" \
     "$resources/Assets.car" \
     "$bundled_manifest"; do
     need_file "$file"
@@ -458,7 +472,9 @@ verify_app() {
     || die "Info.plist does not reference the Varmint asset icon"
   [ "$(plutil -extract LSMinimumSystemVersion raw -o - "$contents/Info.plist")" = "$MINIMUM_MACOS" ] \
     || die "Info.plist minimum macOS does not match runtime manifest"
-  for file in "$resources/kernel/Image" "$resources/kernel/initrd" "$resources/runtime/base.raw.zst" "$resources/Assets.car"; do
+  plutil -extract NSMicrophoneUsageDescription raw -o - "$contents/Info.plist" >/dev/null \
+    || die "Info.plist is missing NSMicrophoneUsageDescription"
+  for file in "$resources/kernel/Image" "$resources/kernel/initrd" "$resources/runtime/base.raw.zst" "$resources/runtime/system-image-id" "$resources/Assets.car"; do
     [ -s "$file" ] || die "bundled resource is empty: $file"
   done
   xcrun --sdk macosx assetutil --info "$resources/Assets.car" >/dev/null

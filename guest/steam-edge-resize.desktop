@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Varmint Steam Window Helper
+Comment=Provide native resize and move gestures for the ARM64 Steam client
+Exec=/usr/local/bin/steam-edge-resize
+OnlyShowIn=KDE;
+NoDisplay=true
+StartupNotify=false
+Terminal=false
+X-KDE-autostart-after=panel

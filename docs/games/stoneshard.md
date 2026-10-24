@@ -1,6 +1,6 @@
 # Running Stoneshard in Varmint
 
-The Stoneshard is playable in Varmint using Proton 10.
+Stoneshard is playable in Varmint using Proton 10.
 
 **Note: Stoneshard was tested using the demo version. The full version may behave differently.**
 
@@ -18,8 +18,7 @@ In Steam:
 
 1. Open **Properties** for Stoneshard.
 2. Open **Compatibility**.
-3. Enable **Force the use of a specific Steam Play compatibility tool**.
-4. Select **Proton 10.0**.
+3. Under **Select compatibility tool**, select **Proton 10.0**.
 
 ### 2. Start the game
 

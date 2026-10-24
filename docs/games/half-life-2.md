@@ -15,7 +15,7 @@ Launch options:    -vulkan
 
 ### 1. Use the native Linux version
 
-In Steam, leave **Force the use of a specific Steam Play compatibility tool** disabled.
+Use the native Linux version; do not select Proton.
 
 ### 2. Launch the Vulkan version
 

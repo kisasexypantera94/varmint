@@ -18,8 +18,7 @@ In Steam:
 
 1. Open **Properties** for Assassin's Creed II.
 2. Open **Compatibility**.
-3. Enable **Force the use of a specific Steam Play compatibility tool**.
-4. Select **Proton 9.0**.
+3. Under **Select compatibility tool**, select **Proton 9.0**.
 
 ### 2. Start the game
 

@@ -15,7 +15,7 @@ MVK_CONFIG_FAST_MATH_ENABLED = "0"
 
 ### 1. Use the native Linux version
 
-Do not force a Proton compatibility tool in Steam.
+Use the native Linux version; do not select Proton.
 
 ### 2. Start the game
 

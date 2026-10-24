@@ -1,0 +1,13 @@
+[Unit]
+Description=Apply Varmint host time and time zone
+DefaultDependencies=no
+After=local-fs.target
+Before=systemd-timesyncd.service varmint-firstboot.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/varmint-host-time
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

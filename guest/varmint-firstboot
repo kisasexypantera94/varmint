@@ -4,8 +4,6 @@ set -eu
 STATE_DIR=/var/lib/varmint
 USER_FILE=$STATE_DIR/firstboot.user
 DONE_FILE=$STATE_DIR/firstboot.done
-FEX_ROOTFS=Ubuntu_24_04
-STEAM_URL=https://repo.steampowered.com/steam/archive/stable/steam-launcher_latest_all.deb
 
 cleanup() {
     stty echo 2>/dev/null || true
@@ -32,6 +30,15 @@ save_user() {
 create_user() {
     install -d -m 0755 "$STATE_DIR"
     load_user && return
+
+    if [ -f /home/.varmint/user-v1 ]; then
+        /usr/local/libexec/varmint-user-state restore
+        load_user || {
+            printf '%s\n' 'Persistent Varmint user restore did not create firstboot.user.' >&2
+            exit 1
+        }
+        return
+    fi
 
     username=$(awk -F: '$3 >= 1000 && $3 < 65534 { print $1; exit }' /etc/passwd)
     if [ -n "$username" ]; then
@@ -99,52 +106,6 @@ run_as_user() {
         "$@"
 }
 
-setup_fex() {
-    rootfs=$home_dir/.local/share/fex-emu/RootFS/$FEX_ROOTFS
-    config=$home_dir/.config/fex-emu/Config.json
-
-    if [ ! -d "$rootfs" ]; then
-        printf '\nDownloading and extracting the FEX Ubuntu 24.04 rootfs...\n'
-        run_as_user FEXRootFSFetcher \
-            --assume-yes \
-            --extract \
-            --distro-name ubuntu \
-            --distro-version 24.04 \
-            --force-ui tty
-    fi
-    [ -d "$rootfs" ] || {
-        printf 'FEX rootfs setup did not create %s.\n' "$rootfs" >&2
-        exit 1
-    }
-
-    run_as_user sh -c 'mkdir -p "$(dirname "$1")"; cat > "$1"' sh "$config" <<EOF_CONFIG
-{
-  "Config": {
-    "RootFS": "$FEX_ROOTFS",
-    "DiskCache": "0",
-    "TSOEnabled": "0",
-    "VectorTSOEnabled": "0",
-    "MemcpySetTSOEnabled": "0",
-    "HalfBarrierTSOEnabled": "1",
-    "X87ReducedPrecision": "1"
-  },
-  "ThunksDB": {
-    "Vulkan": 1
-  }
-}
-EOF_CONFIG
-
-    # Work around FEX-Emu/FEX#5336
-    run_as_user sh -c 'mkdir -p "$(dirname "$1")"; cat > "$1"' sh \
-        "$home_dir/.config/fex-emu/AppConfig/steamwebhelper.json" <<'EOF_APPCONFIG'
-{
-  "Config": {
-    "Multiblock": "0"
-  }
-}
-EOF_APPCONFIG
-}
-
 setup_desktop() {
     ui_scale=1
 
@@ -155,98 +116,88 @@ setup_desktop() {
         esac
     done
 
-    cursor_size=$((24 * ui_scale))
-
     install -d -m 0755 /etc/varmint
     printf '%s\n' "$ui_scale" > /etc/varmint/ui-scale
     chmod 0644 /etc/varmint/ui-scale
 
-    run_as_user dbus-run-session -- sh -c '
-        scale=$1
-        cursor_size=$2
+    # Varmint is a single-user appliance-style VM. Keep the account password
+    # for sudo/SSH, but enter the Plasma Wayland desktop automatically.
+    session=
+    for candidate in \
+        /usr/share/wayland-sessions/plasma.desktop \
+        /usr/share/wayland-sessions/plasmawayland.desktop
+    do
+        if [ -f "$candidate" ]; then
+            session=$(basename "$candidate")
+            break
+        fi
+    done
 
-        set_int() {
-            property=$1
-            value=$2
+    [ -n "$session" ] || {
+        printf '%s\n' 'Plasma Wayland session file is missing.' >&2
+        exit 1
+    }
 
-            if xfconf-query -c xsettings -p "$property" >/dev/null 2>&1; then
-                xfconf-query -c xsettings -p "$property" -s "$value"
-            else
-                xfconf-query -c xsettings -p "$property" -n -t int -s "$value"
-            fi
-        }
-
-        set_int /Gdk/WindowScalingFactor "$scale"
-        set_int /Gtk/CursorThemeSize "$cursor_size"
-    ' sh "$ui_scale" "$cursor_size"
+    install -d -m 0755 /etc/sddm.conf.d
+    cat > /etc/sddm.conf.d/10-varmint-autologin.conf <<EOF_SDDM
+[Autologin]
+User=$username
+Session=$session
+Relogin=true
+EOF_SDDM
 }
 
 install_steam() {
-    if ! dpkg-query -W -f='${Status}\n' steam-launcher 2>/dev/null \
-        | grep -Fx 'install ok installed' >/dev/null; then
+    steam_root=$home_dir/.local/share/Steam
+    bootstrap=/usr/local/share/varmint/steam-bootstrap
+    client=$steam_root/steamrtarm64/steam
 
-        printf '\nInstalling the Steam launcher...\n'
-        cache_dir=/var/cache/varmint
-        steam_deb=$cache_dir/steam-launcher_latest_all.deb
-        install -d -m 0755 "$cache_dir"
-
-        if [ ! -s "$steam_deb" ]; then
-            partial=$steam_deb.partial.$$
-            curl --fail --location --retry 3 --retry-delay 2 \
-                --output "$partial" "$STEAM_URL"
-            mv "$partial" "$steam_deb"
-            partial=
-        fi
-
-        apt-get update
-        DEBIAN_FRONTEND=noninteractive apt-get install -y "$steam_deb"
-    fi
-
-    # steam-launcher installs Valve's apt source, but Steam updates itself.
-    # Keeping the source can break every later apt update when Valve's key
-    # no longer satisfies Debian's signature policy.
-    rm -f \
-        /etc/apt/sources.list.d/steam-stable.list \
-        /etc/apt/sources.list.d/steam-beta.list
-
-    dpkg-query -W -f='${Status}\n' steam-launcher 2>/dev/null \
-        | grep -Fx 'install ok installed' >/dev/null || {
-            printf 'Steam launcher package was not installed successfully.\n' >&2
-            exit 1
-        }
-
-    [ -x /usr/lib/steam/bin_steam.sh ] || {
-        printf 'Steam launcher script is missing.\n' >&2
+    [ -x "$bootstrap/steamrtarm64/steam" ] || {
+        printf '%s\n' 'ARM64 Steam bootstrap is missing from the Varmint image.' >&2
         exit 1
     }
 
-    # Make /usr/bin/steam the FEX boundary for Steam and Steam-generated
-    # shortcuts while preserving Valve's package-owned launcher.
-    if [ "$(dpkg-divert --truename /usr/bin/steam)" = /usr/bin/steam ]; then
-        dpkg-divert \
-            --local \
-            --rename \
-            --add \
-            --divert /usr/bin/steam.distrib \
-            /usr/bin/steam
+    if [ ! -x "$client" ]; then
+        printf '\nInstalling the ARM64 Steam bootstrap...\n'
+
+        run_as_user mkdir -p "$steam_root"
+        run_as_user cp -a "$bootstrap/." "$steam_root/"
     fi
 
-    [ "$(dpkg-divert --truename /usr/bin/steam)" = /usr/bin/steam.distrib ] || {
-        printf 'Unexpected diversion for /usr/bin/steam.\n' >&2
+    run_as_user mkdir -p \
+        "$steam_root/package" \
+        "$home_dir/.steam"
+
+    run_as_user ln -sfn steamrtarm64 "$steam_root/steamrt64"
+    run_as_user touch "$steam_root/.steam-enable-steamrt64-client"
+    run_as_user sh -c \
+        'printf "%s\n" publicbeta > "$1/package/beta"' \
+        sh "$steam_root"
+
+    run_as_user ln -sTfn "$steam_root" "$home_dir/.steam/steam"
+    run_as_user ln -sTfn "$steam_root" "$home_dir/.steam/root"
+
+    # Steam's ARM client launches games through the native ARM64 wrapper, while
+    # Proton itself runs as x86_64 under FEX. lsteamclient therefore expects
+    # both standard Steam SDK paths to exist.
+    run_as_user ln -sfn "$home_dir/.local/share/Steam/linuxarm64" "$home_dir/.steam/sdkarm64"
+    run_as_user ln -sfn "$home_dir/.local/share/Steam/linux64" "$home_dir/.steam/sdk64"
+    run_as_user ln -sfn "$home_dir/.local/share/Steam/linux32" "$home_dir/.steam/sdk32"
+
+    [ -x "$client" ] || {
+        printf '%s\n' 'ARM64 Steam bootstrap installation failed.' >&2
         exit 1
     }
-
-    ln -sfn /usr/local/bin/varmint-steam /usr/bin/steam
 }
 
 verify_setup() {
-    arch=$(run_as_user FEXBash -c 'uname -m')
-    [ "$arch" = x86_64 ] || {
-        printf 'FEX verification failed: expected x86_64, got %s.\n' "$arch" >&2
+    [ -f /usr/share/guestos/fex-mesa/graphics_provider.json ] || {
+        printf '%s\n' 'Varmint FEX rootfs is missing graphics_provider.json.' >&2
         exit 1
     }
-    run_as_user FEXBash -c 'test -x /usr/lib/steam/bin_steam.sh' || {
-        printf 'Steam launcher is not available inside FEX.\n' >&2
+
+    [ -x "$home_dir/.local/share/Steam/steamrtarm64/steam" ] || {
+        printf '%s\n' 'ARM64 Steam bootstrap verification failed.' >&2
         exit 1
     }
 }
@@ -254,19 +205,19 @@ verify_setup() {
 main() {
     printf '%s\n\n' 'Varmint first boot'
     create_user
+    /usr/local/libexec/varmint-user-state save "$username"
 
     passwd -l root >/dev/null 2>&1 || true
 
     printf '\nPreparing the gaming environment. This may take a few minutes...\n'
-    setup_fex
     setup_desktop
     install_steam
     verify_setup
 
-    systemctl unmask lightdm.service >/dev/null 2>&1 || true
-    systemctl enable lightdm.service >/dev/null
+    systemctl unmask sddm.service >/dev/null 2>&1 || true
+    systemctl enable sddm.service >/dev/null
     systemctl set-default graphical.target >/dev/null
-    systemctl start lightdm.service
+    systemctl start sddm.service
 
     touch "$DONE_FILE"
     printf '\nVarmint is ready for %s.\n' "$username"

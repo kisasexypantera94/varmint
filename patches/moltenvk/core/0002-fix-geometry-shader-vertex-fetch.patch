@@ -1,0 +1,202 @@
+diff --git a/MoltenVK/MoltenVK/Commands/MVKCmdDraw.mm b/MoltenVK/MoltenVK/Commands/MVKCmdDraw.mm
+index ea656405..245404bf 100644
+--- a/MoltenVK/MoltenVK/Commands/MVKCmdDraw.mm
++++ b/MoltenVK/MoltenVK/Commands/MVKCmdDraw.mm
+@@ -164,9 +164,32 @@
+ 	int32_t indexed;
+ 	int32_t indexSize;
+ 	uint64_t indexBuffer;
++	uint32_t vertexStrides[kMVKMaxBufferCount];
+ 	uint8_t topoStrip;
+ };
+ 
++static_assert(kMVKMaxBufferCount == 31,
++              "DrawInfo.vertexStrides must match SPIRV-Cross");
++
++static void setGeometryVertexStrides(DrawInfo& drawInfo,
++                                     MVKCommandEncoder* cmdEncoder,
++                                     MVKGraphicsPipeline* pipeline) {
++	bool dynamicStride =
++		pipeline->getDynamicStateFlags().has(MVKRenderStateFlag::VertexStride);
++	const auto& vkState = cmdEncoder->getVkGraphics();
++
++	for (size_t vkIdx : pipeline->getVkVertexBuffers()) {
++		uint32_t mtlIdx =
++			pipeline->getMetalBufferIndexForVertexAttributeBinding((uint32_t)vkIdx);
++		if (mtlIdx >= kMVKMaxBufferCount) { continue; }
++
++		drawInfo.vertexStrides[mtlIdx] =
++			dynamicStride
++				? vkState._vertexBuffers[vkIdx].stride
++				: pipeline->getVkVertexBindingStride((uint32_t)vkIdx);
++	}
++}
++
+ #pragma mark -
+ #pragma mark MVKCmdDraw
+ 
+@@ -369,7 +392,6 @@
+                 } else if (pipeline->isGeometryPipeline()) {
+ 					DrawInfo drawInfo = {};
+ 
+-					[cmdEncoder->_mtlRenderEncoder setObjectBytes: &drawInfo length: sizeof(drawInfo) atIndex: pipeline->getDrawInfoBufferIndex()];
+ 
+ 					auto primitiveType = cmdEncoder->getMtlGraphics().getPrimitiveType();
+ 					int threadCount = 0;
+@@ -392,6 +414,11 @@
+ 					if (_firstVertex) reportMessage(MVK_CONFIG_LOG_LEVEL_ERROR, "First vertex not supported yet.");
+ 					if (_firstInstance) reportMessage(MVK_CONFIG_LOG_LEVEL_ERROR, "First instance not supported yet.");
+ 
++					setGeometryVertexStrides(drawInfo, cmdEncoder, pipeline);
++					[cmdEncoder->_mtlRenderEncoder setObjectBytes: &drawInfo
++														 length: sizeof(drawInfo)
++														atIndex: pipeline->getDrawInfoBufferIndex()];
++
+ 					[cmdEncoder->_mtlRenderEncoder drawMeshThreadgroups: MTLSizeMake(threadCount, _instanceCount, 1)
+ 											threadsPerObjectThreadgroup: MTLSizeMake(1, 1, 1)
+ 											  threadsPerMeshThreadgroup: MTLSizeMake(1, 1, 1)];
+@@ -656,7 +683,6 @@
+ 					drawInfo.indexBuffer = ibb.mtlBuffer.gpuAddress + idxBuffOffset;
+ 
+ 					[cmdEncoder->_mtlRenderEncoder useResource: ibb.mtlBuffer usage: MTLResourceUsageRead stages: MTLRenderStageObject];
+-					[cmdEncoder->_mtlRenderEncoder setObjectBytes: &drawInfo length: sizeof(drawInfo) atIndex: pipeline->getDrawInfoBufferIndex()];
+ 
+ 					auto primitiveType = cmdEncoder->getMtlGraphics().getPrimitiveType();
+ 					int threadCount = 0;
+@@ -679,6 +705,11 @@
+ 					if (_vertexOffset) reportMessage(MVK_CONFIG_LOG_LEVEL_ERROR, "Vertex offset not supported yet.");
+ 					if (_firstInstance) reportMessage(MVK_CONFIG_LOG_LEVEL_ERROR, "First instance not supported yet.");
+ 
++					setGeometryVertexStrides(drawInfo, cmdEncoder, pipeline);
++					[cmdEncoder->_mtlRenderEncoder setObjectBytes: &drawInfo
++														 length: sizeof(drawInfo)
++														atIndex: pipeline->getDrawInfoBufferIndex()];
++
+ 					[cmdEncoder->_mtlRenderEncoder drawMeshThreadgroups:MTLSizeMake(threadCount, _instanceCount, 1)
+ 											threadsPerObjectThreadgroup:MTLSizeMake(1, 1, 1)
+ 											  threadsPerMeshThreadgroup:MTLSizeMake(1, 1, 1)];
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKPipeline.h b/MoltenVK/MoltenVK/GPUObjects/MVKPipeline.h
+index 3ac8bba0..bb0f8b3f 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKPipeline.h
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKPipeline.h
+@@ -323,6 +323,7 @@ public:
+ 	const MVKStaticBitSet<kMVKMaxBufferCount>& getMtlVertexBuffers() const { return _mtlVertexBuffers; }
+ 	/** Returns the stride for the given vertex buffer binding (only valid for static strides) */
+ 	uint32_t getVertexStride(uint32_t binding) const { return _vertexStrides[binding]; }
++	uint32_t getVkVertexBindingStride(uint32_t binding) const { return _vkVertexBindingStrides[binding]; }
+ 	const VkViewport* getViewports() const { return _viewports; }
+ 	const VkRect2D* getScissors() const { return _scissors; }
+ 	const MTLSamplePosition* getSampleLocations() const { return _sampleLocations; }
+@@ -409,6 +410,7 @@ protected:
+ 	MVKStaticBitSet<kMVKMaxBufferCount> _vkVertexBuffers;
+ 	MVKStaticBitSet<kMVKMaxBufferCount> _mtlVertexBuffers;
+ 	uint32_t _vertexStrides[kMVKMaxBufferCount] = {};
++	uint32_t _vkVertexBindingStrides[kMVKMaxBufferCount] = {};
+ 	MVKPipelineStageResourceInfo _stageResources[kMVKShaderStageFragment + 1] = {};
+ 
+ 	id<MTLComputePipelineState> _mtlTessVertexStageState = nil;
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKPipeline.mm b/MoltenVK/MoltenVK/GPUObjects/MVKPipeline.mm
+index fbead640..19f7a918 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKPipeline.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKPipeline.mm
+@@ -1317,6 +1317,7 @@ static bool usesConstantColor(MVKRenderStateFlags dynamic, const VkPipelineColor
+             uint32_t vbIdx = getMetalBufferIndexForVertexAttributeBinding(pVKVB->binding);
+             _mtlVertexBuffers.set(vbIdx);
+             _vkVertexBuffers.set(pVKVB->binding);
++            _vkVertexBindingStrides[pVKVB->binding] = pVKVB->stride;
+         }
+     }
+ 
+@@ -1661,6 +1662,77 @@ static void addCommonImplicitBuffersToShaderConfig(SPIRVToMSLConversionConfigura
+ 	return verifyImplicitBuffers(kMVKShaderStageVertex);
+ }
+ 
++static MSLShaderVariableFormat mvkMSLMeshVertexMemoryFormat(MTLVertexFormat f) {
++	switch (f) {
++		case MTLVertexFormatUChar:
++		case MTLVertexFormatUChar2:
++		case MTLVertexFormatUChar3:
++		case MTLVertexFormatUChar4:
++		case MTLVertexFormatUCharNormalized:
++		case MTLVertexFormatUChar2Normalized:
++		case MTLVertexFormatUChar3Normalized:
++		case MTLVertexFormatUChar4Normalized:
++			return MSL_SHADER_VARIABLE_FORMAT_UINT8;
++
++		case MTLVertexFormatChar:
++		case MTLVertexFormatChar2:
++		case MTLVertexFormatChar3:
++		case MTLVertexFormatChar4:
++		case MTLVertexFormatCharNormalized:
++		case MTLVertexFormatChar2Normalized:
++		case MTLVertexFormatChar3Normalized:
++		case MTLVertexFormatChar4Normalized:
++			return MSL_SHADER_VARIABLE_FORMAT_INT8;
++
++		case MTLVertexFormatUShort:
++		case MTLVertexFormatUShort2:
++		case MTLVertexFormatUShort3:
++		case MTLVertexFormatUShort4:
++		case MTLVertexFormatUShortNormalized:
++		case MTLVertexFormatUShort2Normalized:
++		case MTLVertexFormatUShort3Normalized:
++		case MTLVertexFormatUShort4Normalized:
++			return MSL_SHADER_VARIABLE_FORMAT_UINT16;
++
++		case MTLVertexFormatShort:
++		case MTLVertexFormatShort2:
++		case MTLVertexFormatShort3:
++		case MTLVertexFormatShort4:
++		case MTLVertexFormatShortNormalized:
++		case MTLVertexFormatShort2Normalized:
++		case MTLVertexFormatShort3Normalized:
++		case MTLVertexFormatShort4Normalized:
++			return MSL_SHADER_VARIABLE_FORMAT_INT16;
++
++		case MTLVertexFormatHalf:
++		case MTLVertexFormatHalf2:
++		case MTLVertexFormatHalf3:
++		case MTLVertexFormatHalf4:
++			return MSL_SHADER_VARIABLE_FORMAT_HALF;
++
++		case MTLVertexFormatFloat:
++		case MTLVertexFormatFloat2:
++		case MTLVertexFormatFloat3:
++		case MTLVertexFormatFloat4:
++			return MSL_SHADER_VARIABLE_FORMAT_FLOAT;
++
++		case MTLVertexFormatUInt:
++		case MTLVertexFormatUInt2:
++		case MTLVertexFormatUInt3:
++		case MTLVertexFormatUInt4:
++			return MSL_SHADER_VARIABLE_FORMAT_UINT32;
++
++		case MTLVertexFormatInt:
++		case MTLVertexFormatInt2:
++		case MTLVertexFormatInt3:
++		case MTLVertexFormatInt4:
++			return MSL_SHADER_VARIABLE_FORMAT_INT32;
++
++		default:
++			return MSL_SHADER_VARIABLE_FORMAT_OTHER;
++	}
++}
++
+ struct MSLVertexFormatInfo {
+ 	uint8_t num_elements : 7;
+ 	bool normalized : 1;
+@@ -2584,6 +2656,14 @@ static void addCommonImplicitBuffersToShaderConfig(SPIRVToMSLConversionConfigura
+ 			}
+ 		}
+ 
++        if (shaderConfig.options.mslOptions.for_mesh_pipeline) {
++            auto memFmt = mvkMSLMeshVertexMemoryFormat(
++                getPixelFormats()->getMTLVertexFormat(pVKVA->format));
++            if (memFmt != MSL_SHADER_VARIABLE_FORMAT_OTHER) {
++                si.shaderVar.format = memFmt;
++            }
++        }
++
+         shaderConfig.shaderInputs.push_back(si);
+     }
+ }

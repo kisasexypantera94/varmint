@@ -1,0 +1,89 @@
+#!/bin/sh
+
+CHECK_INTERVAL=0.5
+STUCK_SAMPLES=4
+COOLDOWN=10
+
+last_pcm=
+last_hw=
+stuck_count=0
+
+while :; do
+    pcm=
+    state=
+    hw=
+    appl=
+    avail=
+    buffer=
+
+    for status in /proc/asound/card*/pcm*p/sub*/status; do
+        [ -r "$status" ] || continue
+
+        current_state=$(awk '/^state:/ { print $2; exit }' "$status")
+        [ "$current_state" = RUNNING ] || continue
+
+        hw_params=${status%/status}/hw_params
+        [ -r "$hw_params" ] || continue
+
+        current_hw=$(awk '/^hw_ptr/ { print $3; exit }' "$status")
+        current_appl=$(awk '/^appl_ptr/ { print $3; exit }' "$status")
+        current_avail=$(awk '/^avail / { print $3; exit }' "$status")
+        current_buffer=$(awk '/^buffer_size:/ { print $2; exit }' "$hw_params")
+
+        [ -n "$current_hw" ] || continue
+        [ -n "$current_appl" ] || continue
+        [ -n "$current_avail" ] || continue
+        [ -n "$current_buffer" ] || continue
+
+        pcm=$status
+        state=$current_state
+        hw=$current_hw
+        appl=$current_appl
+        avail=$current_avail
+        buffer=$current_buffer
+        break
+    done
+
+    if [ -z "$pcm" ]; then
+        last_pcm=
+        last_hw=
+        stuck_count=0
+        sleep "$CHECK_INTERVAL"
+        continue
+    fi
+
+    delta=$((appl - hw))
+
+    if [ "$avail" -eq 0 ] && [ "$delta" -eq "$buffer" ]; then
+        if [ "$pcm" = "$last_pcm" ] && [ "$hw" = "$last_hw" ]; then
+            stuck_count=$((stuck_count + 1))
+        else
+            stuck_count=1
+        fi
+    else
+        stuck_count=0
+    fi
+
+    last_pcm=$pcm
+    last_hw=$hw
+
+    if [ "$stuck_count" -ge "$STUCK_SAMPLES" ]; then
+        sink=$(pactl get-default-sink 2>/dev/null || true)
+
+        if [ -n "$sink" ]; then
+            echo "varmint-audio-watchdog: stuck PCM detected: $pcm hw=$hw appl=$appl delta=$delta buffer=$buffer; resetting sink $sink"
+
+            pactl suspend-sink "$sink" 1 >/dev/null 2>&1 || true
+            sleep 0.2
+            pactl suspend-sink "$sink" 0 >/dev/null 2>&1 || true
+        fi
+
+        last_pcm=
+        last_hw=
+        stuck_count=0
+        sleep "$COOLDOWN"
+        continue
+    fi
+
+    sleep "$CHECK_INTERVAL"
+done

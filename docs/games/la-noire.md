@@ -14,7 +14,7 @@ Use the following configuration:
 
 ```text
 Proton version: Proton 10.0
-Renderer:       DirectX 11
+Renderer:       Venus
 RAM:            24 GB recommended
 Launch options: bash -c 'DLL="$HOME/.local/share/Steam/steamapps/compatdata/110800/pfx/drive_c/Program Files/Rockstar Games/Social Club/libcef.dll"; sleep 10; [[ -f "$DLL" ]] && touch "$DLL"; sleep 3; exec "$@"' -- %command%
 ```
@@ -25,8 +25,7 @@ In Steam:
 
 1. Open **Properties** for L.A. Noire.
 2. Open **Compatibility**.
-3. Enable **Force the use of a specific Steam Play compatibility tool**.
-4. Select **Proton 10.0**.
+3. Under **Select compatibility tool**, select **Proton 10.0**.
 
 ### 2. Add the launch option
 
@@ -90,5 +89,6 @@ L.A. Noire
 Steam App ID 110800
 Proton 10.0
 DirectX 11
+Venus
 24 GB RAM
 ```

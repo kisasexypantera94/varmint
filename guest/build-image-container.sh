@@ -1,97 +1,203 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SOURCE_IMAGE="${1:-}"
-OUTPUT_DIR=/output
+SOURCE_IMAGE="${1:?source image path is required}"
 SCRIPT_DIR=/opt/varmint
+OUTPUT_DIR=/output
+WORK_DIR="$(mktemp -d /work/varmint.XXXXXXXX)"
+WORK_IMAGE="$WORK_DIR/varmint-debian.raw"
+MOUNT_DIR="$WORK_DIR/root"
 PUBLISH_DIR=""
+LOOP=""
+RESOLV_BACKUP="$WORK_DIR/resolv.conf.original"
+RESOLV_PRESENT=0
+POLICY_PRESENT=0
+POLICY_BACKUP="$WORK_DIR/policy-rc.d.original"
 
-[ -n "$SOURCE_IMAGE" ] || { echo "error: source image path is required" >&2; exit 1; }
-[ -f "$SOURCE_IMAGE" ] || { echo "error: missing source image: $SOURCE_IMAGE" >&2; exit 1; }
+cleanup() {
+  if mountpoint -q "$MOUNT_DIR"; then
+    if ! umount -R "$MOUNT_DIR"; then
+      echo "ERROR: cannot unmount $MOUNT_DIR; inspect mounts before cleanup" >&2
+      return
+    fi
+  fi
+  if [ -n "$LOOP" ]; then
+    losetup -d "$LOOP" || true
+  fi
+  [ -z "$PUBLISH_DIR" ] || rm -rf "$PUBLISH_DIR"
+  rm -rf "$WORK_DIR"
+}
+trap cleanup EXIT
 
-work_dir="$(mktemp -d /tmp/varmint-guest.XXXXXX)"
-trap 'rm -rf "$work_dir"; [ -z "$PUBLISH_DIR" ] || rm -rf "$PUBLISH_DIR"' EXIT
-work_image="$work_dir/varmint-debian.raw"
-stage="$work_dir/stage"
-mkdir -p "$OUTPUT_DIR" "$stage"
+attach() {
+  LOOP="$(losetup --find --show --partscan "$WORK_IMAGE")"
+  echo "loop device: $LOOP"
 
-qemu-img convert -p -O raw "$SOURCE_IMAGE" "$work_image"
+  loop_name=${LOOP##*/}
+  for part in 1 15; do
+    node="${LOOP}p${part}"
+    sysdev="/sys/class/block/${loop_name}/${loop_name}p${part}/dev"
 
-virt-customize --network -a "$work_image" \
-    --copy-in "$SCRIPT_DIR/fex-install:/tmp" \
-    --copy-in "$SCRIPT_DIR/rootfs:/tmp" \
-    --run-command 'cp -a /tmp/fex-install/. / && cp -a /tmp/rootfs/. / && rm -rf /tmp/fex-install /tmp/rootfs' \
-    --run-command '/usr/local/libexec/varmint-provision' \
-    --run-command 'missing=""; for command in FEXBash FEXRootFSFetcher curl e2fsck fsck growpart resize2fs sgdisk sudo glxinfo pactl pulseaudio python3 unsquashfs update-initramfs vulkaninfo xclip; do command -v "$command" >/dev/null 2>&1 || missing="$missing $command"; done; [ -z "$missing" ] || { echo "missing required guest commands:$missing" >&2; exit 1; }' \
-    --run-command 'for initrd in /boot/initrd.img-*; do listing="$(lsinitramfs "$initrd")"; printf "%s\n" "$listing" | grep -Eq "(^|/)sbin/fsck$" && printf "%s\n" "$listing" | grep -Eq "(^|/)sbin/e2fsck$" && printf "%s\n" "$listing" | grep -Eq "(^|/)sbin/fsck.ext4$" || { echo "initramfs is missing ext4 fsck tools: $initrd" >&2; exit 1; }; done' \
-    --run-command 'test -f /usr/share/fex-emu/GuestThunks/libvulkan-guest.so && test -f /usr/lib/aarch64-linux-gnu/fex-emu/HostThunks/libvulkan-host.so && test -f /usr/lib/aarch64-linux-gnu/fex-emu/HostThunks_32/libvulkan-host.so' \
-    --run-command 'systemctl enable varmint-grow-root.service varmint-firstboot.service' \
-    --run-command 'passwd -l root' \
-    --run-command 'printf "varmint\n" > /etc/hostname' \
-    --run-command 'truncate -s 0 /etc/machine-id' \
-    --run-command 'rm -f /var/lib/dbus/machine-id /etc/ssh/ssh_host_* /var/lib/varmint/firstboot.done /var/lib/varmint/firstboot.user /usr/local/libexec/varmint-provision' \
-    --run-command 'rm -rf /var/lib/cloud/* /etc/systemd/system/getty@tty1.service.d /etc/systemd/system/serial-getty@*.service.d' \
-    --run-command 'apt-get clean && rm -rf /var/lib/apt/lists/* /var/log/*.log /var/log/journal/*'
+    i=0
+    while [ ! -r "$sysdev" ] && [ "$i" -lt 50 ]; do
+      sleep 0.1
+      i=$((i + 1))
+    done
+    [ -r "$sysdev" ] || {
+      echo "partition $part did not appear for $LOOP" >&2
+      exit 1
+    }
 
-if virt-cat -a "$work_image" /etc/passwd | awk -F: '$3 >= 1000 && $3 < 65534 { found = 1 } END { exit !found }'; then
-    echo "error: source image contains a regular user; expected a clean nocloud image" >&2
-    exit 1
+    devnum="$(cat "$sysdev")"
+    rm -f "$node"
+    mknod "$node" b "${devnum%%:*}" "${devnum##*:}"
+  done
+
+  test -b "${LOOP}p1"
+  test -b "${LOOP}p15"
+}
+
+echo '=== Convert Debian QCOW2 to RAW ==='
+qemu-img convert -f qcow2 -O raw -S 4k "$SOURCE_IMAGE" "$WORK_IMAGE"
+truncate -s 8G "$WORK_IMAGE"
+attach
+
+echo '=== Expand GPT and ext4 ==='
+sgdisk -e "$LOOP"
+growpart "$LOOP" 1
+losetup -d "$LOOP"
+LOOP=""
+attach
+
+# e2fsck returns 1 after fixing errors.
+set +e
+e2fsck -f -y "${LOOP}p1"
+fsck_status=$?
+set -e
+[ "$fsck_status" -le 1 ] || exit "$fsck_status"
+resize2fs "${LOOP}p1"
+e2label "${LOOP}p1" varmint-root
+
+mkdir -p "$MOUNT_DIR"
+mount -t ext4 "${LOOP}p1" "$MOUNT_DIR"
+# Varmint boots the kernel directly.
+mkdir -p "$MOUNT_DIR/boot/efi"
+
+cp -a "$SCRIPT_DIR/rootfs/." "$MOUNT_DIR/"
+
+# Use Docker DNS inside the chroot.
+if [ -e "$MOUNT_DIR/etc/resolv.conf" ] || [ -L "$MOUNT_DIR/etc/resolv.conf" ]; then
+  cp -a "$MOUNT_DIR/etc/resolv.conf" "$RESOLV_BACKUP"
+  RESOLV_PRESENT=1
+fi
+rm -f "$MOUNT_DIR/etc/resolv.conf"
+cp /etc/resolv.conf "$MOUNT_DIR/etc/resolv.conf"
+
+# Prevent package scripts from starting services.
+if [ -e "$MOUNT_DIR/usr/sbin/policy-rc.d" ] || [ -L "$MOUNT_DIR/usr/sbin/policy-rc.d" ]; then
+  cp -a "$MOUNT_DIR/usr/sbin/policy-rc.d" "$POLICY_BACKUP"
+  POLICY_PRESENT=1
+fi
+cat > "$MOUNT_DIR/usr/sbin/policy-rc.d" <<'EOF_POLICY'
+#!/bin/sh
+exit 101
+EOF_POLICY
+chmod +x "$MOUNT_DIR/usr/sbin/policy-rc.d"
+
+mount -t proc proc "$MOUNT_DIR/proc"
+mount --rbind /dev "$MOUNT_DIR/dev"
+mount --make-rslave "$MOUNT_DIR/dev"
+mount --rbind /sys "$MOUNT_DIR/sys"
+mount --make-rslave "$MOUNT_DIR/sys"
+mount --bind /run "$MOUNT_DIR/run"
+
+echo '=== Guest provisioning ==='
+chroot "$MOUNT_DIR" /usr/bin/env DEBIAN_FRONTEND=noninteractive \
+  /usr/local/libexec/varmint-provision
+
+echo '=== Validate and sanitize ==='
+chroot "$MOUNT_DIR" /bin/sh -eu -c '
+  missing=""
+  for cmd in curl e2fsck fsck growpart resize2fs sgdisk sudo glxinfo pactl pulseaudio python3 update-initramfs vulkaninfo xclip; do
+    command -v "$cmd" >/dev/null 2>&1 || missing="$missing $cmd"
+  done
+  [ -z "$missing" ] || { echo "missing guest commands:$missing" >&2; exit 1; }
+  for initrd in /boot/initrd.img-*; do
+    listing="$(lsinitramfs "$initrd")"
+    printf "%s\n" "$listing" | grep -Eq "(^|/)sbin/fsck$"
+    printf "%s\n" "$listing" | grep -Eq "(^|/)sbin/e2fsck$"
+    printf "%s\n" "$listing" | grep -Eq "(^|/)sbin/fsck.ext4$"
+  done
+  test -f /usr/share/guestos/fex-mesa/graphics_provider.json
+  test -x /usr/local/share/varmint/steam-bootstrap/steamrtarm64/steam
+  test -L /usr/local/share/varmint/steam-bootstrap/steamrt64
+  test -f /usr/local/share/varmint/steam-bootstrap/.steam-enable-steamrt64-client
+  grep -Fx publicbeta /usr/local/share/varmint/steam-bootstrap/package/beta
+  test -x /usr/local/bin/steam-edge-resize
+  test -x /usr/local/bin/varmint-steam
+  test -x /usr/local/bin/varmint-display-scale
+  test -f /etc/xdg/autostart/varmint-display-scale.desktop
+  test -x /usr/local/libexec/varmint-host-time
+  test -f /etc/systemd/system/sddm.service.d/10-varmint-home.conf
+  systemctl enable varmint-grow-root.service varmint-host-time.service varmint-home.service varmint-firstboot.service varmint-user-state.path
+  passwd -l root
+  printf "varmint\n" > /etc/hostname
+  truncate -s 0 /etc/machine-id
+  rm -f /var/lib/dbus/machine-id /etc/ssh/ssh_host_* \
+      /var/lib/varmint/firstboot.done /var/lib/varmint/firstboot.user \
+      /usr/local/libexec/varmint-provision
+  rm -rf /var/lib/cloud/* /etc/systemd/system/getty@tty1.service.d \
+      /etc/systemd/system/serial-getty@*.service.d
+  apt-get clean
+  rm -rf /var/lib/apt/lists/* /var/log/*.log /var/log/journal/*
+'
+
+if chroot "$MOUNT_DIR" /bin/sh -c \
+  "awk -F: '\$3 >= 1000 && \$3 < 65534 { found = 1 } END { exit !found }' /etc/passwd"; then
+  echo 'error: image contains a regular user' >&2
+  exit 1
 fi
 
-mapfile -t roots < <(guestfish --ro -a "$work_image" <<'EOF_GUESTFISH'
-run
-inspect-os
-EOF_GUESTFISH
-)
-[ "${#roots[@]}" -eq 1 ] || { echo "error: expected one root filesystem, found ${#roots[@]}" >&2; exit 1; }
-root_device="${roots[0]}"
-root_type="$(guestfish --ro -a "$work_image" <<EOF_GUESTFISH
-run
-vfs-type $root_device
-EOF_GUESTFISH
-)"
-[ "$root_type" = ext4 ] || { echo "error: expected ext4 root at $root_device, found: $root_type" >&2; exit 1; }
+if [ "$RESOLV_PRESENT" -eq 1 ]; then
+  cp -a "$RESOLV_BACKUP" "$MOUNT_DIR/etc/resolv.conf.original-for-restore"
+  rm -f "$MOUNT_DIR/etc/resolv.conf"
+  mv "$MOUNT_DIR/etc/resolv.conf.original-for-restore" "$MOUNT_DIR/etc/resolv.conf"
+else
+  rm -f "$MOUNT_DIR/etc/resolv.conf"
+fi
+rm -f "$MOUNT_DIR/usr/sbin/policy-rc.d"
+if [ "$POLICY_PRESENT" -eq 1 ]; then
+  cp -a "$POLICY_BACKUP" "$MOUNT_DIR/usr/sbin/policy-rc.d"
+fi
 
-guestfish --rw -a "$work_image" <<EOF_GUESTFISH
-run
-set-label $root_device varmint-root
-EOF_GUESTFISH
-
-boot_files="$(virt-ls -a "$work_image" /boot)"
-kernel_name="$(printf '%s\n' "$boot_files" | grep '^vmlinuz-' | sort -V | tail -n 1)"
-[ -n "$kernel_name" ] || { echo "error: no kernel found in /boot" >&2; exit 1; }
-kernel_version="${kernel_name#vmlinuz-}"
-initrd_name="initrd.img-$kernel_version"
-printf '%s\n' "$boot_files" | grep -Fx "$initrd_name" >/dev/null \
-    || { echo "error: missing matching initrd in /boot: $initrd_name" >&2; exit 1; }
-
-virt-copy-out -a "$work_image" "/boot/$kernel_name" "$stage"
-virt-copy-out -a "$work_image" "/boot/$initrd_name" "$stage"
-
+mkdir -p "$OUTPUT_DIR"
 PUBLISH_DIR="$(mktemp -d "$OUTPUT_DIR/.partial.XXXXXX")"
-install -m 0644 "$stage/$kernel_name" "$PUBLISH_DIR/Image"
-install -m 0644 "$stage/$initrd_name" "$PUBLISH_DIR/initrd"
+kernel_name="$(find "$MOUNT_DIR/boot" -maxdepth 1 -type f -name 'vmlinuz-*' -printf '%f\n' | sort -V | tail -n 1)"
+[ -n "$kernel_name" ] || { echo 'kernel missing from guest /boot' >&2; exit 1; }
+initrd_name="initrd.img-${kernel_name#vmlinuz-}"
+test -f "$MOUNT_DIR/boot/$initrd_name"
+cp "$MOUNT_DIR/boot/$kernel_name" "$PUBLISH_DIR/Image"
+cp "$MOUNT_DIR/boot/$initrd_name" "$PUBLISH_DIR/initrd"
 
-zstd -T0 -19 -f "$work_image" -o "$PUBLISH_DIR/varmint-debian.raw.zst"
-sha256sum \
-    "$PUBLISH_DIR/Image" \
-    "$PUBLISH_DIR/initrd" \
-    "$PUBLISH_DIR/varmint-debian.raw.zst" \
-    | sed "s#$PUBLISH_DIR/##" \
-    > "$PUBLISH_DIR/SHA256SUMS"
-printf 'url=%s\nsha512=%s\n' "${SOURCE_URL:-unknown}" "${SOURCE_SHA512:-unknown}" > "$PUBLISH_DIR/SOURCE"
+umount -R "$MOUNT_DIR"
+losetup -d "$LOOP"
+LOOP=""
+
+echo '=== Compress guest image ==='
+zstd -T0 -19 -f "$WORK_IMAGE" -o "$PUBLISH_DIR/varmint-debian.raw.zst"
+sha256sum "$PUBLISH_DIR/Image" "$PUBLISH_DIR/initrd" \
+  "$PUBLISH_DIR/varmint-debian.raw.zst" |
+  sed "s#$PUBLISH_DIR/##" > "$PUBLISH_DIR/SHA256SUMS"
+awk '$2 == "varmint-debian.raw.zst" { print $1 }' "$PUBLISH_DIR/SHA256SUMS" > "$PUBLISH_DIR/system-image-id"
+[ "$(wc -c < "$PUBLISH_DIR/system-image-id" | tr -d ' ')" -eq 65 ] || { echo "invalid system image id" >&2; exit 1; }
+printf 'url=%s\nsha512=%s\n' "${SOURCE_URL:-unknown}" \
+  "${SOURCE_SHA512:-unknown}" > "$PUBLISH_DIR/SOURCE"
 
 if [ -n "${HOST_UID:-}" ] && [ -n "${HOST_GID:-}" ]; then
-    chown "$HOST_UID:$HOST_GID" \
-        "$PUBLISH_DIR/Image" \
-        "$PUBLISH_DIR/initrd" \
-        "$PUBLISH_DIR/varmint-debian.raw.zst" \
-        "$PUBLISH_DIR/SHA256SUMS" \
-        "$PUBLISH_DIR/SOURCE" 2>/dev/null || true
+  chown "$HOST_UID:$HOST_GID" "$PUBLISH_DIR"/* 2>/dev/null || true
 fi
-
-for artifact in Image initrd varmint-debian.raw.zst SHA256SUMS SOURCE; do
-    mv -f "$PUBLISH_DIR/$artifact" "$OUTPUT_DIR/$artifact"
+for artifact in Image initrd varmint-debian.raw.zst system-image-id SHA256SUMS SOURCE; do
+  mv -f "$PUBLISH_DIR/$artifact" "$OUTPUT_DIR/$artifact"
 done
 
-printf '\nGuest runtime ready in %s\n' "$OUTPUT_DIR"
+echo "Guest image ready in $OUTPUT_DIR"

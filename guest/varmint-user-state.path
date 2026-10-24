@@ -1,0 +1,13 @@
+[Unit]
+Description=Watch Varmint user identity files
+Requires=varmint-home.service
+After=varmint-home.service
+
+[Path]
+PathChanged=/etc/passwd
+PathChanged=/etc/group
+PathChanged=/etc/shadow
+Unit=varmint-user-state.service
+
+[Install]
+WantedBy=multi-user.target

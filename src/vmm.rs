@@ -4,17 +4,14 @@ use crate::{
     devices::{HostBackends, Runtime, RuntimeEvent},
     display::{DisplayBuffer, DisplayEvent},
     machine::*,
-    macos_ui, memory, net, stdio, virtio,
+    macos_ui, memory, net, stdio, storage, virtio,
 };
 use applevisor::prelude::*;
 use std::{
-    fs::{self, File, OpenOptions},
-    io::{self, BufReader, BufWriter, Read, Write},
+    fs::File,
+    io::Read,
     path::Path,
-    sync::{
-        Mutex,
-        mpsc::{Receiver, Sender},
-    },
+    sync::{Mutex, mpsc::Receiver},
     thread,
 };
 use winit::event_loop::EventLoopProxy;
@@ -42,49 +39,9 @@ impl BootPayload {
     }
 }
 
-fn prepare_disk(config: &VmConfig) -> io::Result<()> {
-    if config.disk.exists() {
-        return Ok(());
-    }
-
-    let parent = config.disk.parent().unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent)?;
-    let name = config.disk.file_name().and_then(|name| name.to_str()).unwrap_or("disk");
-    let temporary = parent.join(format!(".{name}.partial.{}", std::process::id()));
-    let _ = fs::remove_file(&temporary);
-
-    let result = (|| {
-        let source = File::open(&config.base_image)?;
-        let output = OpenOptions::new().write(true).create_new(true).open(&temporary)?;
-        let mut output = BufWriter::new(output);
-        zstd::stream::copy_decode(BufReader::new(source), &mut output)?;
-        output.flush()?;
-        let output = output.into_inner().map_err(|error| error.into_error())?;
-        output.sync_all()?;
-
-        match fs::hard_link(&temporary, &config.disk) {
-            Ok(()) => Ok(true),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(false),
-            Err(error) => Err(error),
-        }
-    })();
-
-    let _ = fs::remove_file(&temporary);
-    if matches!(result, Ok(true)) {
-        eprintln!(
-            "created VM disk {} from {}",
-            config.disk.display(),
-            config.base_image.display()
-        );
-    }
-
-    result.map(|_| ())
-}
-
 fn vmm_thread(
     vm: &VirtualMachineInstance<GicEnabled>,
     display: &Mutex<DisplayBuffer>,
-    runtime_event_tx: Sender<RuntimeEvent>,
     runtime_event_rx: Receiver<RuntimeEvent>,
     audio_event_rx: Receiver<audio::BackendEvent>,
     display_proxy: EventLoopProxy<DisplayEvent>,
@@ -98,10 +55,17 @@ fn vmm_thread(
         let end = checked_end(INITRD_START, data.len(), "initrd");
         (INITRD_START, end)
     });
+
+    let mut kernel_args = config.kernel_args.clone();
+    kernel_args.push_str(" varmint.data_disk=1");
+    if let Ok(since_epoch) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        kernel_args.push_str(&format!(" varmint.host_time={}", since_epoch.as_secs()));
+    }
+
     let dtb = build_fdt(
         config.memory_size as u64,
         config.vcpus,
-        &config.kernel_args,
+        &kernel_args,
         initrd_range,
         gicd_size,
         gicr_size,
@@ -118,13 +82,7 @@ fn vmm_thread(
     }
     mem.write(DTB_START, &dtb)?;
 
-    Runtime::new(vm, runtime_event_tx, backends, config.vcpus)?.run(
-        &mem,
-        display,
-        runtime_event_rx,
-        audio_event_rx,
-        &display_proxy,
-    )?;
+    Runtime::new(vm, backends, config.vcpus)?.run(&mem, display, runtime_event_rx, audio_event_rx, &display_proxy)?;
 
     Ok(())
 }
@@ -160,6 +118,10 @@ pub fn run(config_path: &Path) -> Result<()> {
 
     let ui_scale = macos_ui::backing_scale_factor();
     config.kernel_args.push_str(&format!(" varmint.ui_scale={ui_scale}"));
+
+    if let Some(time_zone) = macos_ui::time_zone_identifier() {
+        config.kernel_args.push_str(&format!(" varmint.tz={time_zone}"));
+    }
 
     for (name, value) in &config.host_environment {
         if std::env::var_os(name).is_none() {
@@ -219,15 +181,8 @@ pub fn run(config_path: &Path) -> Result<()> {
         }
     }
 
-    prepare_disk(&config).unwrap_or_else(|error| {
-        panic!(
-            "failed to create VM disk {} from {}: {error}",
-            config.disk.display(),
-            config.base_image.display()
-        )
-    });
-    let disk = virtio::Blk::new(&config.disk, config.disk_size)
-        .unwrap_or_else(|error| panic!("failed to open VM disk {}: {error}", config.disk.display()));
+    let _storage = storage::prepare(&config).unwrap_or_else(|error| panic!("failed to prepare VM storage: {error}"));
+
     let boot = BootPayload::load(&config);
 
     let gicd_size = GicConfig::get_distributor_size()? as u64;
@@ -257,6 +212,17 @@ pub fn run(config_path: &Path) -> Result<()> {
     let display = Mutex::new(DisplayBuffer::new());
 
     let (runtime_event_tx, runtime_event_rx) = std::sync::mpsc::channel();
+    let blk_tx = runtime_event_tx.clone();
+    let disk = virtio::Blk::new(&config.disk, move |event| {
+        let _ = blk_tx.send(RuntimeEvent::BlkIo(event));
+    })
+    .unwrap_or_else(|error| panic!("failed to open VM disk {}: {error}", config.disk.display()));
+
+    let data_blk_tx = runtime_event_tx.clone();
+    let data_disk = virtio::Blk::new(&config.data_disk, move |completion| {
+        let _ = data_blk_tx.send(RuntimeEvent::DataBlkIo(completion));
+    })
+    .unwrap_or_else(|error| panic!("failed to open data disk {}: {error}", config.data_disk.display()));
 
     let net_rx_tx = runtime_event_tx.clone();
     let network = net::start(move |frame| {
@@ -265,10 +231,10 @@ pub fn run(config_path: &Path) -> Result<()> {
     .unwrap_or_else(|error| panic!("failed to start vmnet networking: {error}"));
 
     let (audio_event_tx, audio_event_rx) = std::sync::mpsc::channel();
-    let (_audio_backend, period_sink) = audio::Backend::new(move |event| {
+    let (_audio_backend, period_sink, capture_source) = audio::Backend::new(move |event| {
         let _ = audio_event_tx.send(event);
     })
-    .unwrap_or_else(|error| panic!("failed to start audio output: {error}"));
+    .unwrap_or_else(|error| panic!("failed to start audio backend: {error}"));
 
     let clipboard_change_tx = runtime_event_tx.clone();
     let clipboard = clipboard::start(move |payload| {
@@ -282,8 +248,10 @@ pub fn run(config_path: &Path) -> Result<()> {
 
     let backends = HostBackends {
         disk,
+        data_disk,
         net: network,
         audio: period_sink,
+        capture: capture_source,
         clipboard,
         serial,
     };
@@ -292,7 +260,6 @@ pub fn run(config_path: &Path) -> Result<()> {
     let display_proxy = event_loop.create_proxy();
 
     thread::scope(|scope| {
-        let vmm_runtime_event_tx = runtime_event_tx.clone();
         let vm = &vm;
         let display = &display;
         let config = &config;
@@ -300,7 +267,6 @@ pub fn run(config_path: &Path) -> Result<()> {
             vmm_thread(
                 vm,
                 display,
-                vmm_runtime_event_tx,
                 runtime_event_rx,
                 audio_event_rx,
                 display_proxy,

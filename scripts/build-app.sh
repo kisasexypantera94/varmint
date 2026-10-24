@@ -14,24 +14,23 @@ DEPS_VENV="$BUILD_ROOT/deps/venv"
 APP_BUNDLE="$ROOT/dist/Varmint.app"
 MANIFEST="$ROOT/runtime/manifest.toml"
 MOLTENVK_PATCHES=(
-  "$ROOT/patches/moltenvk/0001-guard-null-multisample-state-in-mesh-pipeline.patch"
-  "$ROOT/patches/moltenvk/0002-fix-query-device-available-range.patch"
-  "$ROOT/patches/moltenvk/0003-fix-query-copy-availability-offset.patch"
-  "$ROOT/patches/moltenvk/0004-handle-null-descriptor-sets.patch"
-  "$ROOT/patches/moltenvk/0005-defer-temp-buffer-pool-destruction.patch"
+  "$ROOT/patches/moltenvk/core/0001-handle-null-descriptor-sets.patch"
+  "$ROOT/patches/moltenvk/core/0002-fix-geometry-shader-vertex-fetch.patch"
+  "$ROOT/patches/moltenvk/core/0003-honor-explicit-linear-dmabuf-row-pitch.patch"
+)
+SPIRV_CROSS_PATCHES=(
+  "$ROOT/patches/spirv-cross/core/0001-fix-geometry-shader-vertex-fetch.patch"
+  "$ROOT/patches/spirv-cross/core/0002-reserve-msl-type-variable-names.patch"
 )
 VIRGL_GENERATED_PATCH="$ROOT/patches/neptune-generated/virglrenderer.patch"
 VIRGL_PATCH_SERIES="$ROOT/patches/virglrenderer/series"
 DXMT_PATCHES=(
-  "$ROOT/patches/dxmt/0001-fix-neptune-staging-and-vertex-sample-flicker.patch"
-  "$ROOT/patches/dxmt/0002-add-neptune-d3d11-dynamic-buffer-zerocopy.patch"
+  "$ROOT/patches/dxmt/0001-fix-neptune-vertex-sample-flicker.patch"
   "$ROOT/patches/dxmt/0003-add-neptune-r10-bgra8-present-conversion.patch"
-  "$ROOT/patches/dxmt/0004-fix-dxmt-occlusion-query-empty-tail.patch"
   "$ROOT/patches/dxmt/0005-fix-d3d11-event-repeated-stall.patch"
+  "$ROOT/patches/dxmt/0006-bootstrap-neptune-d3d11-external-buffers.patch"
 )
-D3DMETAL_PATCHES=(
-  "$ROOT/patches/d3dmetal-native/0001-fix-macos-shm-open-cloexec.patch"
-)
+D3DMETAL_PATCHES=()
 ENTITLEMENTS="$ROOT/runtime/entitlements.plist"
 VMNET_HELPER_ENTITLEMENTS="$ROOT/runtime/vmnet-helper-entitlements.plist"
 ICON_SOURCE="$ROOT/assets/icon.icon"

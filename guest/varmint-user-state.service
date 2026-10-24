@@ -1,0 +1,9 @@
+[Unit]
+Description=Persist Varmint user identity
+Requires=varmint-home.service
+After=varmint-home.service varmint-firstboot.service
+ConditionPathIsMountPoint=/home
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/varmint-user-state save

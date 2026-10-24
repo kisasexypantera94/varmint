@@ -5,6 +5,7 @@ ninja-build
 pkg-config
 python3-mako
 python3-yaml
+libc6-dev
 gcc
 gcc-x86-64-linux-gnu
 g++-x86-64-linux-gnu

@@ -55,6 +55,18 @@ cpu = 'x86_64'
 endian = 'little'
 EOF_NATIVE
 
+checkout_commit() {
+    repo=$1
+    url=$2
+    commit=$3
+
+    rm -rf "$repo"
+    git init -q "$repo"
+    git -C "$repo" remote add origin "$url"
+    git -C "$repo" fetch --depth=1 origin "$commit"
+    git -C "$repo" checkout -q --detach FETCH_HEAD
+}
+
 apply_series() {
     repo=$1
     series_dir=$2
@@ -67,14 +79,16 @@ apply_series() {
     done < "$series_dir/series"
 }
 
-rm -rf "$SRC/neptune-protocol" "$SRC/virtio-win-mesa"
-
-git clone https://github.com/osy/neptune-protocol.git "$SRC/neptune-protocol"
-git -C "$SRC/neptune-protocol" checkout --detach "$NEPTUNE_PROTOCOL_COMMIT"
+checkout_commit \
+    "$SRC/neptune-protocol" \
+    https://github.com/osy/neptune-protocol.git \
+    "$NEPTUNE_PROTOCOL_COMMIT"
 apply_series "$SRC/neptune-protocol" "$PATCHES/neptune-protocol"
 
-git clone https://github.com/osy/virtio-win-mesa.git "$SRC/virtio-win-mesa"
-git -C "$SRC/virtio-win-mesa" checkout --detach "$VIRTIO_WIN_MESA_COMMIT"
+checkout_commit \
+    "$SRC/virtio-win-mesa" \
+    https://github.com/osy/virtio-win-mesa.git \
+    "$VIRTIO_WIN_MESA_COMMIT"
 
 # Generated protocol is the consumer baseline. Local Mesa patches,
 # including temporary patches to generated files, are applied on top.

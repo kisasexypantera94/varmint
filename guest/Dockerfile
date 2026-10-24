@@ -1,70 +1,103 @@
-ARG FEX_COMMIT=0df84d3844bcdb87bb7d3f5b8fb0959cd009c038
+FROM debian:trixie-slim AS fex-rootfs
 
-FROM debian:trixie-slim AS fex-builder
-
-ARG FEX_COMMIT
-ENV DEBIAN_FRONTEND=noninteractive
+ARG FEX_ROOTFS_URL=https://rootfs.fex-emu.gg/Ubuntu_24_04/2026-08-11/Ubuntu_24_04.sqsh
+ARG FEX_ROOTFS_XXH3=3517e0e5ea25a473
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
-        clang \
-        clang-tools \
-        cmake \
-        git \
-        libasound2-dev \
-        libc6-dev-amd64-cross \
-        libc6-dev-i386-cross \
-        libclang-19-dev \
-        libdrm-dev \
-        libegl-dev \
-        libgl-dev \
-        libssl-dev \
-        libstdc++-14-dev-amd64-cross \
-        libstdc++-14-dev-i386-cross \
-        libwayland-dev \
-        libx11-dev \
-        libxcb1-dev \
-        libxrandr-dev \
-        libxrender-dev \
-        lld \
-        llvm-19-dev \
-        ninja-build \
-        pkgconf && \
+        curl \
+        squashfs-tools \
+        xxhash && \
     rm -rf /var/lib/apt/lists/*
 
-RUN git clone https://github.com/FEX-Emu/FEX.git /src/FEX && \
-    git -C /src/FEX checkout "$FEX_COMMIT" && \
-    git -C /src/FEX submodule update --init --recursive && \
-    sed -i '/Opening host-side X11 display:/s/fprintf/\/\/ fprintf/' /src/FEX/ThunkLibs/include/common/X11Manager.h && \
-    sed -i '/Linking address %p to host invoker/s/fprintf/\/\/ fprintf/' /src/FEX/ThunkLibs/libvulkan/Guest.cpp
+RUN curl \
+        --fail \
+        --location \
+        --retry 3 \
+        --retry-delay 2 \
+        --output /tmp/fex-rootfs.sqsh \
+        "$FEX_ROOTFS_URL" && \
+    actual="$(xxhsum -H3 /tmp/fex-rootfs.sqsh | awk '{print $1}' | sed 's/^XXH3_//')" && \
+    printf 'FEX RootFS XXH3 actual=%s expected=%s\\n' "$actual" "$FEX_ROOTFS_XXH3" && \
+    test "$actual" = "$FEX_ROOTFS_XXH3" && \
+    mkdir -p /opt/fex-rootfs && \
+    unsquashfs -f -d /opt/fex-rootfs /tmp/fex-rootfs.sqsh >/dev/null && \
+    printf '%s\\n' '=== FEX rootfs top-level ===' && \
+    find /opt/fex-rootfs -maxdepth 2 -name graphics_provider.json -o -maxdepth 1 -type f -print && \
+    test -f /opt/fex-rootfs/graphics_provider.json && \
+    rm -f /tmp/fex-rootfs.sqsh
 
-RUN cmake \
-        -S /src/FEX \
-        -B /src/FEX/build \
-        -G Ninja \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_C_COMPILER=/usr/bin/clang-19 \
-        -DCMAKE_CXX_COMPILER=/usr/bin/clang++-19 \
-        -DCMAKE_INSTALL_PREFIX=/usr \
-        -DCMAKE_INSTALL_LIBDIR=lib/aarch64-linux-gnu \
-        -DBUILD_FEXCONFIG=OFF \
-        -DBUILD_FEX_LINUX_TESTS=OFF \
-        -DBUILD_TESTING=OFF \
-        -DBUILD_THUNKS=ON \
-        -DENABLE_ASSERTIONS=OFF \
-        -DENABLE_CLANG_THUNKS=ON \
-        -DTUNE_ARCH=generic \
-        -DTUNE_CPU=generic \
-        -DUSE_LINKER=lld \
-        -DX86_DEV_ROOTFS=/ && \
-    cmake --build /src/FEX/build --parallel && \
-    DESTDIR=/opt/fex-install cmake --install /src/FEX/build && \
-    test -x /opt/fex-install/usr/bin/FEXBash && \
-    test -x /opt/fex-install/usr/bin/FEXRootFSFetcher && \
-    test -f /opt/fex-install/usr/share/fex-emu/GuestThunks/libvulkan-guest.so && \
-    test -f /opt/fex-install/usr/lib/aarch64-linux-gnu/fex-emu/HostThunks/libvulkan-host.so && \
-    test -f /opt/fex-install/usr/lib/aarch64-linux-gnu/fex-emu/HostThunks_32/libvulkan-host.so
+FROM debian:trixie-slim AS steam-helper-builder
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        gcc \
+        libc6-dev \
+        libx11-dev \
+        libxi-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY guest/steam-edge-resize.c /src/steam-edge-resize.c
+
+RUN gcc \
+        -O2 \
+        -Wall \
+        -Wextra \
+        -Werror \
+        -o /usr/local/bin/steam-edge-resize \
+        /src/steam-edge-resize.c \
+        -lX11 \
+        -lXi && \
+    test -x /usr/local/bin/steam-edge-resize
+
+FROM debian:trixie-slim AS steam-bootstrap
+
+ARG STEAM_BRANCH=publicbeta
+ARG STEAM_MANIFEST_BASE=https://client-update.steamstatic.com
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        unzip && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /opt/steam-bootstrap/package && \
+    curl \
+        --fail \
+        --location \
+        --retry 3 \
+        --retry-delay 2 \
+        --output /tmp/steam-arm64.manifest \
+        "$STEAM_MANIFEST_BASE/steam_client_${STEAM_BRANCH}_linuxarm64" && \
+    payload="$(grep -E '"file"[[:space:]]+"bins_linuxarm64_linuxarm64\.zip' \
+        /tmp/steam-arm64.manifest \
+        | cut -d '"' -f4 \
+        | head -1)" && \
+    test -n "$payload" && \
+    printf 'Steam ARM64 bootstrap payload: %s\n' "$payload" && \
+    curl \
+        --fail \
+        --location \
+        --retry 3 \
+        --retry-delay 2 \
+        --output /tmp/steam-arm64.zip \
+        "$STEAM_MANIFEST_BASE/$payload" && \
+    unzip -q /tmp/steam-arm64.zip -d /opt/steam-bootstrap && \
+    test -f /opt/steam-bootstrap/steamrtarm64/steam && \
+    chmod +x \
+        /opt/steam-bootstrap/steamrtarm64/steam \
+        /opt/steam-bootstrap/steamrtarm64/steamwebhelper \
+        /opt/steam-bootstrap/steamrtarm64/steamwebhelper.sh \
+        /opt/steam-bootstrap/steamrtarm64/gldriverquery \
+        /opt/steam-bootstrap/steamrtarm64/vulkandriverquery \
+        /opt/steam-bootstrap/steamrtarm64/steamsysinfo && \
+    test -x /opt/steam-bootstrap/steamrtarm64/steam && \
+    ln -sfn steamrtarm64 /opt/steam-bootstrap/steamrt64 && \
+    touch /opt/steam-bootstrap/.steam-enable-steamrt64-client && \
+    printf '%s\n' "$STEAM_BRANCH" > /opt/steam-bootstrap/package/beta && \
+    rm -f /tmp/steam-arm64.manifest /tmp/steam-arm64.zip
 
 FROM --platform=linux/amd64 debian:trixie-slim AS neptune-builder
 
@@ -87,21 +120,22 @@ RUN /usr/local/bin/varmint-neptune-provision && \
 
 FROM debian:trixie-slim
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    LIBGUESTFS_BACKEND=direct \
-    LIBGUESTFS_BACKEND_SETTINGS=force_tcg
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
-        libguestfs-tools \
-        linux-image-arm64 \
-        ipxe-qemu \
         qemu-utils \
+        cloud-guest-utils \
+        gdisk \
+        e2fsprogs \
+        util-linux \
         zstd && \
     rm -rf /var/lib/apt/lists/*
 
-COPY --from=fex-builder /opt/fex-install /opt/varmint/fex-install
+COPY --from=fex-rootfs /opt/fex-rootfs /opt/varmint/rootfs/usr/share/guestos/fex-mesa
+COPY --from=steam-bootstrap /opt/steam-bootstrap /opt/varmint/rootfs/usr/local/share/varmint/steam-bootstrap
+COPY --from=steam-helper-builder /usr/local/bin/steam-edge-resize /opt/varmint/rootfs/usr/local/bin/steam-edge-resize
 COPY --from=neptune-builder /usr/local/lib/varmint/neptune /opt/varmint/rootfs/usr/local/lib/varmint/neptune
 COPY guest /opt/varmint/source
 COPY guest/neptune/versions.env /opt/varmint/rootfs/usr/local/share/varmint/neptune/versions.env
@@ -113,17 +147,30 @@ COPY patches/virtio-win-mesa /opt/varmint/rootfs/usr/local/share/varmint/neptune
 RUN install -Dm0755 /opt/varmint/source/build-image-container.sh /usr/local/bin/build-varmint-guest && \
     install -Dm0755 /opt/varmint/source/varmint-gpu-check /opt/varmint/rootfs/usr/local/bin/varmint-gpu-check && \
     install -Dm0755 /opt/varmint/source/varmint-steam /opt/varmint/rootfs/usr/local/bin/varmint-steam && \
+    install -Dm0755 /opt/varmint/source/varmint-display-scale /opt/varmint/rootfs/usr/local/share/varmint/varmint-display-scale && \
     install -Dm0755 /opt/varmint/source/neptune/build.sh /opt/varmint/rootfs/usr/local/bin/varmint-neptune-build && \
-    install -Dm0755 /opt/varmint/source/neptune/game-graphics.sh /opt/varmint/rootfs/usr/local/bin/varmint-game-graphics && \
+    install -Dm0755 /opt/varmint/source/neptune/graphics.py /opt/varmint/rootfs/usr/local/bin/varmint-graphics && \
     install -Dm0755 /opt/varmint/source/neptune/dev-setup.sh /opt/varmint/rootfs/usr/local/bin/varmint-neptune-dev-setup && \
     install -Dm0755 /opt/varmint/source/varmint-clipboard-agent /opt/varmint/rootfs/usr/local/libexec/varmint-clipboard-agent && \
+    install -Dm0755 /opt/varmint/source/varmint-audio-watchdog /opt/varmint/rootfs/usr/local/libexec/varmint-audio-watchdog && \
+    install -Dm0755 /opt/varmint/source/varmint-host-time /opt/varmint/rootfs/usr/local/libexec/varmint-host-time && \
     install -Dm0755 /opt/varmint/source/varmint-firstboot /opt/varmint/rootfs/usr/local/libexec/varmint-firstboot && \
+    install -Dm0755 /opt/varmint/source/varmint-home /opt/varmint/rootfs/usr/local/libexec/varmint-home && \
+    install -Dm0755 /opt/varmint/source/varmint-user-state /opt/varmint/rootfs/usr/local/libexec/varmint-user-state && \
     install -Dm0755 /opt/varmint/source/varmint-grow-root /opt/varmint/rootfs/usr/local/libexec/varmint-grow-root && \
     install -Dm0755 /opt/varmint/source/varmint-provision /opt/varmint/rootfs/usr/local/libexec/varmint-provision && \
     install -Dm0755 /opt/varmint/source/varmint-initramfs-fsck-hook /opt/varmint/rootfs/etc/initramfs-tools/hooks/varmint-fsck && \
+    install -Dm0644 /opt/varmint/source/varmint-host-time.service /opt/varmint/rootfs/etc/systemd/system/varmint-host-time.service && \
+    install -Dm0644 /opt/varmint/source/varmint-audio-watchdog.service /opt/varmint/rootfs/etc/systemd/user/varmint-audio-watchdog.service && \
     install -Dm0644 /opt/varmint/source/varmint-firstboot.service /opt/varmint/rootfs/etc/systemd/system/varmint-firstboot.service && \
+    install -Dm0644 /opt/varmint/source/varmint-home.service /opt/varmint/rootfs/etc/systemd/system/varmint-home.service && \
+    install -Dm0644 /opt/varmint/source/varmint-home-sddm.conf /opt/varmint/rootfs/etc/systemd/system/sddm.service.d/10-varmint-home.conf && \
+    install -Dm0644 /opt/varmint/source/varmint-user-state.service /opt/varmint/rootfs/etc/systemd/system/varmint-user-state.service && \
+    install -Dm0644 /opt/varmint/source/varmint-user-state.path /opt/varmint/rootfs/etc/systemd/system/varmint-user-state.path && \
     install -Dm0644 /opt/varmint/source/varmint-grow-root.service /opt/varmint/rootfs/etc/systemd/system/varmint-grow-root.service && \
     install -Dm0644 /opt/varmint/source/varmint-clipboard.desktop /opt/varmint/rootfs/etc/xdg/autostart/varmint-clipboard.desktop && \
+    install -Dm0644 /opt/varmint/source/steam-edge-resize.desktop /opt/varmint/rootfs/etc/xdg/autostart/steam-edge-resize.desktop && \
+    install -Dm0644 /opt/varmint/source/varmint-display-scale.desktop /opt/varmint/rootfs/usr/local/share/varmint/varmint-display-scale.desktop && \
     install -Dm0644 /opt/varmint/source/steam.desktop /opt/varmint/rootfs/usr/local/share/applications/steam.desktop && \
     rm -rf /opt/varmint/source
 

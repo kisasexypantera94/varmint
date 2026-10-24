@@ -1,0 +1,113 @@
+From a2dacab16741fd57f917ad073cb847405b77813b Mon Sep 17 00:00:00 2001
+From: steamac <steamac@localhost>
+Date: Sat, 3 Oct 2026 23:07:11 +0300
+Subject: [PATCH 12/15] Honor the explicit LINEAR row pitch of imported dma-buf
+ images
+
+virglrenderer creates host VK_IMAGE_TILING_LINEAR images for dma-buf imports and keeps
+the guest's VkImageDrmFormatModifierExplicitCreateInfoEXT (LINEAR modifier, row pitch of
+the exporting allocator, e.g. 1280 for a 300 px BGRA buffer with 256-byte aligned rows)
+chained. MoltenVK ignored it and used its own pitch (1200), so virglrenderer refused the
+image and X11 swapchains through Xwayland failed.
+
+For single-plane, single-level, single-layer linear images at offset 0, use the explicit row
+pitch for the image layout (vkGetImageSubresourceLayout, vkGetDeviceImageSubresourceLayout),
+the memory size and the MTLTexture created on the buffer. A pitch below the natural row size
+or not a multiple of the linear texture alignment fails with
+VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT.
+---
+ MoltenVK/MoltenVK/GPUObjects/MVKImage.h  |  2 ++
+ MoltenVK/MoltenVK/GPUObjects/MVKImage.mm | 30 ++++++++++++++++++++++++
+ 2 files changed, 32 insertions(+)
+
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKImage.h b/MoltenVK/MoltenVK/GPUObjects/MVKImage.h
+index cde38cec..08347d5e 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKImage.h
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKImage.h
+@@ -358,6 +358,7 @@ protected:
+ 
+ 	void propagateDebugName() override;
+ 	void validateConfig(const VkImageCreateInfo* pCreateInfo, bool isAttachment);
++	void validateExplicitRowPitch(const VkImageDrmFormatModifierExplicitCreateInfoEXT* pDrmExplicitInfo);
+ 	VkSampleCountFlagBits validateSamples(const VkImageCreateInfo* pCreateInfo, bool isAttachment);
+ 	uint32_t validateMipLevels(const VkImageCreateInfo* pCreateInfo, bool isAttachment);
+ 	bool validateLinear(const VkImageCreateInfo* pCreateInfo, bool isAttachment);
+@@ -391,6 +392,7 @@ protected:
+     std::mutex _lock;
+     IOSurfaceRef _ioSurface;
+ 	VkDeviceSize _rowByteAlignment;
++	VkDeviceSize _explicitRowPitch = 0;		// Row pitch from VkImageDrmFormatModifierExplicitCreateInfoEXT (LINEAR), or 0
+     bool _isDepthStencilAttachment;
+     bool _hasExpectedTexelSize;
+     bool _hasChromaSubsampling;
+diff --git a/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm b/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm
+index 3063472f..a5a07eb4 100644
+--- a/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm
++++ b/MoltenVK/MoltenVK/GPUObjects/MVKImage.mm
+@@ -822,6 +822,7 @@ static MTLRegion getMTLRegion(const ImgRgn& imgRgn) {
+ }
+ 
+ VkDeviceSize MVKImage::getBytesPerRow(MTLPixelFormat planePixelFormat, uint32_t mipWidth) {
++	if (_explicitRowPitch) { return _explicitRowPitch; }	// Single plane, single mip level (validateExplicitRowPitch())
+     size_t bytesPerRow = getPixelFormats()->getBytesPerRow(planePixelFormat, mipWidth);
+     return mvkAlignByteCount(bytesPerRow, _rowByteAlignment);
+ }
+@@ -1162,12 +1163,17 @@ static MTLRegion getMTLRegion(const ImgRgn& imgRgn) {
+ 	_stencilUsage = _usage;
+ 
+ 	const VkExternalMemoryImageCreateInfo* pExtMemInfo = nullptr;
++	const VkImageDrmFormatModifierExplicitCreateInfoEXT* pDrmExplicitInfo = nullptr;
+ 	for (const auto* next = (const VkBaseInStructure*)pCreateInfo->pNext; next; next = next->pNext) {
+ 		switch (next->sType) {
+ 			case VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO: {
+ 				pExtMemInfo = (const VkExternalMemoryImageCreateInfo*)next;
+ 				break;
+ 			}
++			case VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT: {
++				pDrmExplicitInfo = (const VkImageDrmFormatModifierExplicitCreateInfoEXT*)next;
++				break;
++			}
+ 			case VK_STRUCTURE_TYPE_IMAGE_FORMAT_LIST_CREATE_INFO: {
+ 				// Must set before calls to getIsValidViewFormat() below.
+ 				auto* pFmtListInfo = (const VkImageFormatListCreateInfo*)next;
+@@ -1224,6 +1230,7 @@ static MTLRegion getMTLRegion(const ImgRgn& imgRgn) {
+ 	_isDepthStencilAttachment = (mvkAreAllFlagsEnabled(pCreateInfo->usage, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) ||
+ 								 mvkAreAllFlagsEnabled(pixFmts->getVkFormatProperties3(pCreateInfo->format).optimalTilingFeatures, VK_FORMAT_FEATURE_2_DEPTH_STENCIL_ATTACHMENT_BIT));
+ 	_rowByteAlignment = _isLinear || _isLinearForAtomics ? _device->getVkFormatTexelBufferAlignment(pCreateInfo->format, this) : mvkEnsurePowerOfTwo(pixFmts->getBytesPerBlock(pCreateInfo->format));
++	if (pDrmExplicitInfo) { validateExplicitRowPitch(pDrmExplicitInfo); }
+ 
+     VkExtent2D blockTexelSizeOfPlane[3];
+     uint32_t bytesPerBlockOfPlane[3];
+@@ -1340,6 +1347,29 @@ static MTLRegion getMTLRegion(const ImgRgn& imgRgn) {
+ 	return validSamples;
+ }
+ 
++// A linear image imported from a dma-buf (virglrenderer passes VkImageDrmFormatModifierExplicitCreateInfoEXT
++// with the LINEAR modifier through to a VK_IMAGE_TILING_LINEAR image) must use the row pitch of the buffer.
++// Supported for single-plane, single-level, single-layer 2D images at offset 0.
++void MVKImage::validateExplicitRowPitch(const VkImageDrmFormatModifierExplicitCreateInfoEXT* pDrmExplicitInfo) {
++	static constexpr uint64_t kDRMFormatModLinear = 0;
++	if ( !_isLinear || pDrmExplicitInfo->drmFormatModifier != kDRMFormatModLinear ||
++		 pDrmExplicitInfo->drmFormatModifierPlaneCount != 1 || !pDrmExplicitInfo->pPlaneLayouts ) { return; }
++
++	const VkSubresourceLayout& planeLayout = pDrmExplicitInfo->pPlaneLayouts[0];
++	MVKPixelFormats* pixFmts = getPixelFormats();
++	VkDeviceSize naturalRowPitch = pixFmts->getBytesPerRow(pixFmts->getMTLPixelFormat(_vkFormat), _extent.width);
++	if (pixFmts->getChromaSubsamplingPlaneCount(_vkFormat) > 0 || _mipLevels != 1 || _arrayLayers != 1 ||
++		_extent.depth != 1 || planeLayout.offset != 0 || planeLayout.rowPitch < naturalRowPitch ||
++		(planeLayout.rowPitch % _rowByteAlignment) != 0) {
++		setConfigurationResult(reportError(VK_ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT,
++										   "vkCreateImage() : Explicit LINEAR plane layout (offset %llu, rowPitch %llu) is not supported for this %ux%u image (row pitch at least %llu, multiple of %llu, offset 0, one level and layer).",
++										   planeLayout.offset, planeLayout.rowPitch, _extent.width, _extent.height,
++										   naturalRowPitch, _rowByteAlignment));
++		return;
++	}
++	_explicitRowPitch = planeLayout.rowPitch;
++}
++
+ void MVKImage::validateConfig(const VkImageCreateInfo* pCreateInfo, bool isAttachment) {
+ 	MVKPixelFormats* pixFmts = getPixelFormats();
+ 
+-- 
+2.50.1 (Apple Git-155)
+

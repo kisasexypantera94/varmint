@@ -23,8 +23,17 @@ jobs:
 
       - name: Shell syntax
         run: |
-          find scripts guest -type f -name '*.sh' -print0 |
-            xargs -0 -n1 bash -n
+          while IFS= read -r -d '' file; do
+            case "$(head -n 1 "$file")" in
+              '#!'*sh*) bash -n "$file" ;;
+            esac
+          done < <(find scripts guest -type f -print0)
+
+      - name: Python syntax
+        run: |
+          python3 -m py_compile \
+            guest/neptune/graphics.py \
+            guest/varmint-clipboard-agent
 
   guest:
     needs: lint
@@ -127,6 +136,9 @@ jobs:
 
       - name: Build host dependencies
         run: make dependencies
+
+      - name: Run Rust tests
+        run: make test
 
       - name: Free dependency build space
         run: |

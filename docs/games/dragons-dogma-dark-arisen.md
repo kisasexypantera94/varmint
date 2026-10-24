@@ -10,7 +10,7 @@ Use the following configuration:
 
 ```text
 Proton version: Proton 10.0
-Renderer:       DirectX 9
+Renderer:       Venus
 ```
 
 ### 1. Select Proton 10
@@ -19,8 +19,7 @@ In Steam:
 
 1. Open **Properties** for Dragon’s Dogma: Dark Arisen.
 2. Open **Compatibility**.
-3. Enable **Force the use of a specific Steam Play compatibility tool**.
-4. Select **Proton 10.0**.
+3. Under **Select compatibility tool**, select **Proton 10.0**.
 
 ### 2. Convert the movie files
 
@@ -160,6 +159,7 @@ done
 Dragon’s Dogma: Dark Arisen
 Steam App ID 367500
 Proton 10.0
-DirectX 9 through DXVK
+DirectX 9
+Venus
 AVI/MJPEG movie conversion applied
 ```

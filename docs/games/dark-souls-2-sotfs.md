@@ -7,38 +7,20 @@ DARK SOULS II: Scholar of the First Sin is playable in Varmint using Neptune.
 Use the following configuration:
 
 ```text
-Proton version: Proton 11.0
+Proton version: Proton Experimental
 Renderer:       Neptune
-Launch options: WINEDLLOVERRIDES='d3d11,dxgi=n,b;nptunix=b;d3d12,d3d12core=;nvapi,nvapi64=' %command%
+Launch options: varmint-graphics neptune %command%
 ```
 
-### 1. Select Proton Hotfix
+### 1. Enable Neptune
 
-In Steam:
-
-1. Open **Properties** for DARK SOULS II: Scholar of the First Sin.
-2. Open **Compatibility**.
-3. Enable **Force the use of a specific Steam Play compatibility tool**.
-4. Select **Proton Hotfix**.
-
-### 2. Enable Neptune
-
-From a terminal inside Varmint, run:
-
-```bash
-VARMINT_PROTON_ROOT="$HOME/.local/share/Steam/steamapps/common/Proton 11.0" \
-  varmint-game-graphics 335300 neptune 'Game/DarkSoulsII.exe'
-```
-
-Then set the following Steam launch options:
+Set the Steam launch options to:
 
 ```text
-WINEDLLOVERRIDES='d3d11,dxgi=n,b;nptunix=b;d3d12,d3d12core=;nvapi,nvapi64=' %command%
+varmint-graphics neptune %command%
 ```
 
-No additional configuration is required.
-
-### 3. Switch Steam to Offline Mode
+### 2. Switch Steam to Offline Mode
 
 Before starting the game, switch Steam to **Offline Mode**.
 
@@ -50,10 +32,12 @@ The same behavior has also been observed when running the game through CrossOver
 
 The exact cause is currently unknown.
 
-If you find a better workaround or a fix, please let me know.
-
 ## Tested configuration
 
 ```text
 DARK SOULS II: Scholar of the First Sin
-Proton 11.0
+Proton Experimental
+DirectX 11
+Neptune
+Steam Offline Mode
+```

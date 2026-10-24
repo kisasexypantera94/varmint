@@ -1,0 +1,14 @@
+#!/bin/sh
+set -u
+
+scale=1
+if [ -r /etc/varmint/ui-scale ]; then
+    IFS= read -r configured_scale < /etc/varmint/ui-scale || true
+    case "$configured_scale" in
+        1|2) scale="$configured_scale" ;;
+    esac
+fi
+
+# Varmint currently exposes a single virtual display to the guest.
+# KScreen assigns it output id 1.
+exec kscreen-doctor "output.1.scale.${scale}"

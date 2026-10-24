@@ -16,8 +16,7 @@ In Steam:
 
 1. Open **Properties** for SCP – Containment Breach.
 2. Open **Compatibility**.
-3. Enable **Force the use of a specific Steam Play compatibility tool**.
-4. Select **Proton 10.0**.
+3. Under **Select compatibility tool**, select **Proton 10.0**.
 
 ### 2. Start the game
 
