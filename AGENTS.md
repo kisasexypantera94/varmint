@@ -109,6 +109,8 @@ Avoid building a general capture/replay, tracing, or telemetry framework unless 
 
 ## Tests
 
+Keep production code easy to read from top to bottom. Small inline unit-test modules belong at the end of the source file, after all production code. Substantial test modules should preferably live in sibling test files. Do not expose private implementation details solely to make them testable.
+
 A bug fix should include the smallest practical regression test or reproducer.
 
 Tests should target the semantics that were wrong, rather than encoding incidental behavior of one game.
