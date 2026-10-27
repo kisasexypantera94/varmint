@@ -23,6 +23,7 @@ struct Rect {
 
 pub struct DisplayUpdate {
     pub sequence: u64,
+    pub update_count: u64,
     pub width: usize,
     pub height: usize,
     pub dirty_rect: (usize, usize, usize, usize),
@@ -159,6 +160,7 @@ impl DisplayBuffer {
 
         Some(DisplayUpdate {
             sequence: self.sequence,
+            update_count: self.sequence.wrapping_sub(last_sequence),
             width: self.width,
             height: self.height,
             dirty_rect,
@@ -176,4 +178,28 @@ fn merge_rects(
     let x1 = old_x.saturating_add(old_width).max(new_x.saturating_add(new_width));
     let y1 = old_y.saturating_add(old_height).max(new_y.saturating_add(new_height));
     (x0, y0, x1 - x0, y1 - y0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DisplayBuffer, Rect};
+
+    #[test]
+    fn update_count_uses_sequence_delta() {
+        let mut display = DisplayBuffer::new();
+        display.resize(2, 2);
+
+        let rect = Rect {
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 2,
+        };
+        let pixels = [0u8; 16];
+        assert!(display.publish_pixels(&pixels, 8, rect, rect));
+        assert!(display.publish_pixels(&pixels, 8, rect, rect));
+
+        let update = display.take_update(0, &mut Vec::new()).unwrap();
+        assert_eq!(update.update_count, 3);
+    }
 }

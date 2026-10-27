@@ -147,6 +147,7 @@ struct AppState<'a> {
     dirty_rect: Option<(usize, usize, usize, usize)>,
     iosurface_id: Option<u32>,
     last_seq: u64,
+    pending_display_updates: u64,
     frame_pending: bool,
     present_interval: Duration,
     next_present: Instant,
@@ -174,6 +175,7 @@ impl<'a> AppState<'a> {
             dirty_rect: None,
             iosurface_id: None,
             last_seq: 0,
+            pending_display_updates: 0,
             frame_pending: false,
             present_interval: Duration::from_nanos(16_666_667),
             next_present: Instant::now(),
@@ -204,6 +206,11 @@ impl<'a> AppState<'a> {
 
         let full = (0, 0, self.present_w, self.present_h);
         let (x, y, width, height) = self.dirty_rect.unwrap_or(full);
+        let display_updates = if mode == PresentMode::NewFrame {
+            self.pending_display_updates
+        } else {
+            0
+        };
         let presented = presenter.present_iosurface_or_rect(
             self.iosurface_id,
             &self.front,
@@ -214,11 +221,13 @@ impl<'a> AppState<'a> {
             width as u32,
             height as u32,
             mode,
+            display_updates,
         );
 
         if presented && mode == PresentMode::NewFrame {
             self.dirty_rect = None;
             self.frame_pending = false;
+            self.pending_display_updates = 0;
         }
 
         presented
@@ -254,6 +263,10 @@ impl<'a> AppState<'a> {
         };
 
         self.last_seq = update.sequence;
+        self.pending_display_updates = self.pending_display_updates.saturating_add(update.update_count);
+        if let Some(presenter) = self.presenter.as_mut() {
+            presenter.record_display_updates(update.update_count);
+        }
         self.present_w = update.width;
         self.present_h = update.height;
         self.iosurface_id = update.iosurface_id;
@@ -522,6 +535,10 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
 
         if !self.frame_pending && Instant::now() >= self.next_keepalive {
             self.present(PresentMode::Redraw);
+        }
+
+        if let Some(presenter) = self.presenter.as_mut() {
+            presenter.refresh_stats();
         }
 
         let deadline = if self.frame_pending {

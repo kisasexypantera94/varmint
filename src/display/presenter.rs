@@ -1,6 +1,6 @@
 use super::{
     iosurface::ScopedIOSurface,
-    stats::{HEIGHT as STATS_HEIGHT, MARGIN as STATS_MARGIN, StatsHud, WIDTH as STATS_WIDTH},
+    stats::{DisplayStats, HEIGHT as STATS_HEIGHT, MARGIN as STATS_MARGIN, WIDTH as STATS_WIDTH},
 };
 use objc2::{rc::Retained, runtime::ProtocolObject};
 use objc2_foundation::NSSize;
@@ -47,7 +47,7 @@ pub struct Presenter {
     drawable_w: u32,
     drawable_h: u32,
 
-    stats: StatsHud,
+    stats: DisplayStats,
     stats_texture: Option<Retained<MetalTexture>>,
 }
 
@@ -113,7 +113,7 @@ impl Presenter {
             iosurface_texture: None,
             drawable_w: width.max(1),
             drawable_h: height.max(1),
-            stats: StatsHud::new(),
+            stats: DisplayStats::new(),
             stats_texture: None,
         }
     }
@@ -134,6 +134,15 @@ impl Presenter {
 
     pub fn set_stats_visible(&mut self, visible: bool) {
         self.stats.set_visible(visible);
+        self.sync_stats_texture();
+    }
+
+    pub fn record_display_updates(&mut self, count: u64) {
+        self.stats.record_display_updates(count);
+    }
+
+    pub fn refresh_stats(&mut self) {
+        self.stats.refresh();
         self.sync_stats_texture();
     }
 
@@ -291,8 +300,9 @@ impl Presenter {
         dirty_w: u32,
         dirty_h: u32,
         mode: PresentMode,
+        display_updates: u64,
     ) -> bool {
-        let started = (mode == PresentMode::NewFrame && self.stats.is_visible()).then(Instant::now);
+        let started = (mode == PresentMode::NewFrame).then(Instant::now);
 
         let presented = if let Some(iosurface_id) = iosurface_id {
             self.present_iosurface(iosurface_id, pw, ph, mode)
@@ -301,10 +311,9 @@ impl Presenter {
         };
 
         if let Some(started) = started {
-            self.stats.record_frame(presented, started.elapsed());
+            self.stats.record_present(presented, display_updates, started.elapsed());
         }
-        self.stats.refresh();
-        self.sync_stats_texture();
+        self.refresh_stats();
 
         presented
     }
