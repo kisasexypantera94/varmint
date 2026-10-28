@@ -1,0 +1,81 @@
+diff --git a/src/neptune/npt_cs.c b/src/neptune/npt_cs.c
+index a7b10d3a..d1878a02 100644
+--- a/src/neptune/npt_cs.c
++++ b/src/neptune/npt_cs.c
+@@ -35,7 +35,7 @@ npt_cs_encoder_set_stream_locked(struct npt_cs_encoder *enc,
+    enc->stream.offset = offset;
+    enc->stream.size = size;
+
+-   enc->end = res->u.data + res->size;
++   enc->end = res->u.data + offset + size;
+
+    npt_cs_encoder_seek_stream_locked(enc, 0);
+ }
+diff --git a/tests/meson.build b/tests/meson.build
+index 884a0051..69c0e854 100644
+--- a/tests/meson.build
++++ b/tests/meson.build
+@@ -127,6 +127,7 @@ if with_neptune
+
+    neptune_tests = [
+       ['test_neptune_init', 'test_neptune_init.c'],
++      ['test_neptune_cs', 'test_neptune_cs.c'],
+    ]
+
+    # Neptune init forks the render server, so point at the in-tree
+diff --git a/tests/test_neptune_cs.c b/tests/test_neptune_cs.c
+new file mode 100644
+index 00000000..cbc7d579
+--- /dev/null
++++ b/tests/test_neptune_cs.c
+@@ -0,0 +1,50 @@
++/*
++ * Copyright 2026 Turing Software LLC
++ * SPDX-License-Identifier: MIT
++ */
++
++#include "config.h"
++
++#include <stdint.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include "neptune/npt_context.h"
++
++int
++main(void)
++{
++   uint8_t data[32];
++   memset(data, 0xa5, sizeof(data));
++
++   struct npt_resource res = {
++      .u.data = data,
++      .size = sizeof(data),
++   };
++   bool fatal = false;
++   struct npt_cs_encoder enc;
++   if (npt_cs_encoder_init(&enc, &fatal))
++      return EXIT_FAILURE;
++
++   const size_t offset = 8;
++   const size_t window_size = 4;
++   npt_cs_encoder_set_stream(&enc, &res, offset, window_size);
++
++   const uint32_t value = 0x11223344;
++   npt_cs_encoder_write(&enc, sizeof(value), &value, sizeof(value));
++   if (fatal || enc.cur != data + offset + window_size)
++      return EXIT_FAILURE;
++
++   const uint8_t overflow = 0xff;
++   npt_cs_encoder_write(&enc, sizeof(overflow), &overflow, sizeof(overflow));
++   if (!fatal || enc.cur != data + offset + window_size)
++      return EXIT_FAILURE;
++
++   for (size_t i = offset + window_size; i < sizeof(data); i++) {
++      if (data[i] != 0xa5)
++         return EXIT_FAILURE;
++   }
++
++   npt_cs_encoder_fini(&enc);
++   return EXIT_SUCCESS;
++}

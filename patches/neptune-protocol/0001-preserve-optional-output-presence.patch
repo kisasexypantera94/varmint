@@ -1,0 +1,430 @@
+diff --git a/npt_registry.json b/npt_registry.json
+index 2115286..eaa56e4 100644
+--- a/npt_registry.json
++++ b/npt_registry.json
+@@ -1,5 +1,5 @@
+ {
+-  "version": 2,
++  "version": 3,
+   "source_files": [
+     "dxgiformat.idl",
+     "dxgicommon.idl",
+diff --git a/npt_registry_overlay.json b/npt_registry_overlay.json
+index 4879b35..e22bfb6 100644
+--- a/npt_registry_overlay.json
++++ b/npt_registry_overlay.json
+@@ -1,5 +1,5 @@
+ {
+-  "version": 2,
++  "version": 3,
+   "types": [
+     {"name": "DWORD", "primitive": "uint32_t"},
+     {"name": "int", "primitive": "int32_t"},
+diff --git a/templates/commands.h b/templates/commands.h
+index 4157a00..10935a4 100644
+--- a/templates/commands.h
++++ b/templates/commands.h
+@@ -61,6 +61,9 @@ struct npt_command_${fname} {
+     ${GEN.c_type(p)} ${p.name};
+ % endfor
+ % for p in method.params:
++% if GEN.has_output_presence(p):
++    uint8_t _present_${p.name};
++% endif
+ % if GEN.is_output_com_handle_single(p):
+     /* Shadow: the guest-allocated id for ${p.name} arrives in the command
+      * body (no reply round-trip).  The post-dispatch register pass reads
+@@ -575,6 +578,9 @@ struct npt_command_${fname} {
+     ${GEN.c_type(p)} ${p.name};
+ % endfor
+ % for p in func.params:
++% if GEN.has_output_presence(p):
++    uint8_t _present_${p.name};
++% endif
+ % if GEN.is_output_com_handle_single(p):
+     /* Shadow: guest-allocated id for ${p.name}. */
+     uint64_t _guest_id_${p.name};
+diff --git a/tests/test_roundtrip_manual.c b/tests/test_roundtrip_manual.c
+index 25d6765..50fd7f8 100644
+--- a/tests/test_roundtrip_manual.c
++++ b/tests/test_roundtrip_manual.c
+@@ -942,6 +942,8 @@ static int test_manual_dispatch_OMGetBlendState(void)
+     struct npt_cs_encoder enc = npt_test_encoder_init(cmd_buf, sizeof(cmd_buf));
+     uint64_t fake_gid = 0xdeadbeefcafef00dULL;
+     npt_encode_uint64_t(&enc, &fake_gid);
++    (void)npt_encode_simple_pointer(&enc, (const void *)1);
++    (void)npt_encode_simple_pointer(&enc, (const void *)1);
+     size_t cmd_size = npt_test_encoder_written(&enc, cmd_buf);
+
+     struct npt_cs_decoder dec = npt_test_decoder_init(cmd_buf, cmd_size);
+@@ -993,6 +995,7 @@ static int test_manual_dispatch_Map(void)
+     UINT subresource = 0;
+     npt_encode_UINT(&enc, &subresource);
+     (void)npt_encode_simple_pointer(&enc, NULL); /* pReadRange = NULL */
++    (void)npt_encode_simple_pointer(&enc, (const void *)1); /* ppData */
+     size_t cmd_size = npt_test_encoder_written(&enc, cmd_buf);
+
+     struct npt_cs_decoder dec = npt_test_decoder_init(cmd_buf, cmd_size);
+@@ -1144,6 +1147,68 @@ static int test_manual_reply_unsupported_encode_DRED(void)
+     return 0;
+ }
+
++extern size_t npt_guest_encode_get_copyable_footprints(
++    uint8_t *buf, size_t size, unsigned mask, size_t *reply_size);
++extern int npt_guest_decode_get_copyable_footprints_reply(
++    const uint8_t *buf, size_t size, unsigned mask);
++
++static int test_manual_get_copyable_footprints_optional_outputs(void)
++{
++    static const unsigned masks[] = {
++        15, /* all outputs */
++        9,  /* pLayouts + pTotalBytes */
++        10, /* pNumRows + pTotalBytes */
++        12, /* pRowSizeInBytes + pTotalBytes */
++        0,  /* all optional outputs absent */
++    };
++
++    for (size_t i = 0; i < sizeof(masks) / sizeof(masks[0]); i++) {
++        const unsigned mask = masks[i];
++        uint8_t cmd[256] = {0};
++        size_t reserved = 0;
++        size_t cmd_size = npt_guest_encode_get_copyable_footprints(
++            cmd, sizeof(cmd), mask, &reserved);
++        struct npt_cs_decoder dec = npt_test_decoder_init(
++            cmd + sizeof(struct npt_command_header),
++            cmd_size - sizeof(struct npt_command_header));
++        struct npt_command_ID3D12Device_GetCopyableFootprints args = {0};
++        npt_decode_ID3D12Device_GetCopyableFootprints_args_temp(&dec, &args);
++
++        if (dec.fatal || dec.cur != dec.end ||
++            (!!args.pLayouts != !!(mask & 1)) ||
++            (!!args.pNumRows != !!(mask & 2)) ||
++            (!!args.pRowSizeInBytes != !!(mask & 4)) ||
++            (!!args.pTotalBytes != !!(mask & 8))) {
++            fprintf(stderr, "FAIL: GetCopyableFootprints presence mask 0x%x\n",
++                    mask);
++            npt_test_cleanup(&dec);
++            return -1;
++        }
++
++        if (args.pLayouts) args.pLayouts[0].Offset = 64;
++        if (args.pNumRows) args.pNumRows[0] = 7;
++        if (args.pRowSizeInBytes) args.pRowSizeInBytes[0] = 512;
++        if (args.pTotalBytes) *args.pTotalBytes = 4096;
++
++        uint8_t *reply = calloc(1, reserved ? reserved : 1);
++        struct npt_cs_encoder enc = npt_test_encoder_init(reply, reserved);
++        npt_encode_ID3D12Device_GetCopyableFootprints_reply(&enc, &args);
++        size_t actual = npt_test_encoder_written(&enc, reply);
++        if (actual != reserved ||
++            npt_guest_decode_get_copyable_footprints_reply(reply, actual, mask)) {
++            fprintf(stderr, "FAIL: GetCopyableFootprints mask 0x%x: "
++                    "guest reserved %zu, host encoded %zu\n",
++                    mask, reserved, actual);
++            free(reply);
++            npt_test_cleanup(&dec);
++            return -1;
++        }
++        free(reply);
++        npt_test_cleanup(&dec);
++    }
++    return 0;
++}
++
+ /* ================================================================== */
+ /* Dispatch table                                                     */
+ /* ================================================================== */
+@@ -1794,6 +1859,8 @@ static const struct manual_test_entry manual_tests[] = {
+       test_manual_dispatch_D3D12CreateVersionedRootSignatureDeserializer },
+     { "reply unsupported DRED encode writes nothing",
+       test_manual_reply_unsupported_encode_DRED },
++    { "GetCopyableFootprints optional output presence and reply layout",
++      test_manual_get_copyable_footprints_optional_outputs },
+ };
+
+ #define MANUAL_TEST_COUNT \
+diff --git a/tests/test_roundtrip_manual_guest.c b/tests/test_roundtrip_manual_guest.c
+index da9ed1d..491960f 100644
+--- a/tests/test_roundtrip_manual_guest.c
++++ b/tests/test_roundtrip_manual_guest.c
+@@ -262,6 +262,59 @@ static int test_guest_unsupported_reply_DRED_decode(void)
+     return 0;
+ }
+
++size_t npt_guest_encode_get_copyable_footprints(uint8_t *buf, size_t size,
++                                                unsigned mask,
++                                                size_t *reply_size)
++{
++    D3D12_RESOURCE_DESC desc;
++    D3D12_PLACED_SUBRESOURCE_FOOTPRINT layout;
++    UINT num_rows;
++    UINT64 row_size;
++    UINT64 total_bytes;
++    memset(&desc, 0, sizeof(desc));
++    memset(&layout, 0, sizeof(layout));
++    *reply_size = npt_sizeof_ID3D12Device_GetCopyableFootprints_reply(
++        &desc, 0, 1, 0,
++        (mask & 1) ? &layout : NULL,
++        (mask & 2) ? &num_rows : NULL,
++        (mask & 4) ? &row_size : NULL,
++        (mask & 8) ? &total_bytes : NULL);
++
++    struct npt_cs_encoder enc = npt_test_encoder_init(buf, size);
++    npt_encode_ID3D12Device_GetCopyableFootprints(
++        &enc, NPT_CMD_FLAG_REPLY, 0xDEAD, &desc, 0, 1, 0,
++        (mask & 1) ? &layout : NULL,
++        (mask & 2) ? &num_rows : NULL,
++        (mask & 4) ? &row_size : NULL,
++        (mask & 8) ? &total_bytes : NULL);
++    return npt_test_encoder_written(&enc, buf);
++}
++
++int npt_guest_decode_get_copyable_footprints_reply(const uint8_t *buf,
++                                                    size_t size,
++                                                    unsigned mask)
++{
++    D3D12_PLACED_SUBRESOURCE_FOOTPRINT layout;
++    UINT num_rows = 0;
++    UINT64 row_size = 0;
++    UINT64 total_bytes = 0;
++    memset(&layout, 0, sizeof(layout));
++    struct npt_cs_decoder dec = npt_test_decoder_init(buf, size);
++    npt_decode_ID3D12Device_GetCopyableFootprints_reply(
++        &dec,
++        (mask & 1) ? &layout : NULL,
++        (mask & 2) ? &num_rows : NULL,
++        (mask & 4) ? &row_size : NULL,
++        (mask & 8) ? &total_bytes : NULL);
++    int result = dec.fatal || dec.cur != dec.end;
++    result |= (mask & 1) && layout.Offset != 64;
++    result |= (mask & 2) && num_rows != 7;
++    result |= (mask & 4) && row_size != 512;
++    result |= (mask & 8) && total_bytes != 4096;
++    npt_test_cleanup(&dec);
++    return result ? -1 : 0;
++}
++
+ /* ================================================================== */
+ /* Dispatch table                                                     */
+ /* ================================================================== */
+diff --git a/tools/npt_codegen.py b/tools/npt_codegen.py
+index 93f2a44..be50f4d 100644
+--- a/tools/npt_codegen.py
++++ b/tools/npt_codegen.py
+@@ -201,8 +201,8 @@ class Gen:
+                      indent: int = 1, for_output: bool = False) -> str:
+         """Generate sizeof statement(s) for a field. Returns C code.
+
+-        When ``for_output`` is True (reply sizing), simple pointers are
+-        assumed non-NULL because the host always allocates output storage.
++        When ``for_output`` is True (reply sizing), required simple pointers
++        are assumed non-NULL because the host always allocates their storage.
+
+         Anonymous unions (typically discriminator-tagged variants inside
+         a struct, e.g. the inner union of ``D3D11_SHADER_RESOURCE_VIEW_DESC``)
+@@ -421,6 +421,11 @@ class Gen:
+     def is_output_com_handle_single(self, field: NptField) -> bool:
+         return self.is_output_com_handle(field) and field.count is None
+
++    def has_output_presence(self, field: NptField) -> bool:
++        """Whether an output-only pointer needs presence on the command wire."""
++        return (field.output and not field.input and field.optional
++                and not self.is_output_com_handle(field))
++
+     def sizeof_input_param(self, field: NptField, prefix: str, dst: str) -> str:
+         """Sizeof for a command input parameter."""
+         if self.is_output_com_handle(field):
+@@ -430,6 +435,9 @@ class Gen:
+                         f'(size_t)({count_expr}) : 0) * sizeof(uint64_t);'
+                         f'  /* {field.name}: array_count + N guest ids */')
+             return f'{dst} += sizeof(uint64_t);  /* {field.name}: guest id */'
++        if self.has_output_presence(field):
++            return (f'{dst} += npt_sizeof_simple_pointer({prefix}{field.name});'
++                    f'  /* {field.name}: output presence */')
+         if not field.input:
+             return f'/* skip {prefix}{field.name} (output only) */'
+         return self.sizeof_field(field, prefix, dst)
+@@ -467,6 +475,9 @@ class Gen:
+                 f'    npt_encode_uint64_t(enc, &_gid_{field.name});',
+                 f'}}',
+             ])
++        if self.has_output_presence(field):
++            return (f'(void)npt_encode_simple_pointer(enc, '
++                    f'{prefix}{field.name});')
+         if not field.input:
+             return f'/* skip {prefix}{field.name} (output only) */'
+         return self.encode_field(field, prefix)
+@@ -474,11 +485,10 @@ class Gen:
+     def decode_input_param(self, field: NptField, prefix: str,
+                            indent: int = 1, canonical: bool = False) -> str:
+         """Decode a command input parameter (host-side, temp alloc).
+-        Output-only fields are skipped — nothing is on the wire for them,
+-        EXCEPT output COM handles which now carry a guest-allocated id
+-        in the command body; we read it into a shadow field so the
+-        post-dispatch register pass knows which id maps to the host
+-        pointer dxvk fills in."""
++        Optional output-only fields carry a presence marker.  Output COM
++        handles instead carry a guest-allocated id; we read it into a shadow
++        field so the post-dispatch register pass knows which id maps to the
++        host pointer dxvk fills in."""
+         ind = '    ' * indent
+         if self.is_output_com_handle(field):
+             count_expr = self._get_count_expr(field, prefix)
+@@ -534,6 +544,9 @@ class Gen:
+                 f'{ind}    }}',
+                 f'{ind}}}',
+             ])
++        if self.has_output_presence(field):
++            return (f'{ind}{prefix}_present_{field.name} = '
++                    f'npt_decode_simple_pointer(dec);')
+         if not field.input:
+             return ''
+         return self.decode_field(field, prefix, alloc_temp=True, indent=indent,
+@@ -555,9 +568,9 @@ class Gen:
+                             canonical: bool = False) -> str:
+         """Sizeof for a reply output parameter.
+
+-        Uses for_output=True so that simple pointers are assumed non-NULL
+-        (the host always allocates output storage, even when the guest
+-        caller passed NULL for an optional param).  Output COM handles
++        Uses for_output=True so required simple pointers are assumed non-NULL.
++        Optional output presence travels in the command, keeping host storage
++        and reply layout aligned with the guest caller.  Output COM handles
+         are registered on the host under their pre-allocated guest_id and
+         ride in the reply only for a canonical method, as one
+         npt_wire_object_ref per slot (an array: count + refs, the count
+@@ -1205,9 +1218,9 @@ class Gen:
+
+         if count_expr is None:
+             if for_output:
+-                # Output simple pointer: host always allocates, so the
+-                # reply always includes the presence flag + data, even
+-                # if the guest caller passed NULL for an optional param.
++                # Required output simple pointers are always allocated by the
++                # host.  Optional output presence comes from the command, so
++                # size the reply from the caller's actual pointer.
+                 # The payload size cannot use `npt_sizeof_T(&(const
+                 # T){0})` — passing zero-initialised data silences any
+                 # discriminator-conditional union arms inside T's
+@@ -1223,11 +1236,23 @@ class Gen:
+                 # `method_reply_is_unsupported` and the template emits
+                 # a fatal-flag stub instead of a working reply path.
+                 if field.type_name == 'void':
++                    if field.optional:
++                        return [
++                            f'{dst} += npt_sizeof_simple_pointer({acc});',
++                            f'if ({acc})',
++                            f'    {dst} += npt_sizeof_void(NULL, max_mode);',
++                        ]
+                     return [
+                         f'{dst} += npt_sizeof_simple_pointer((const void *)1);',
+                         f'{dst} += npt_sizeof_void(NULL, max_mode);',
+                     ]
+                 payload = self.reply_payload_size_expr(field.type_name)
++                if field.optional:
++                    return [
++                        f'{dst} += npt_sizeof_simple_pointer({acc});',
++                        f'if ({acc})',
++                        f'    {dst} += {payload};',
++                    ]
+                 return [
+                     f'{dst} += npt_sizeof_simple_pointer((const void *)1);',
+                     f'{dst} += {payload};',
+@@ -2005,6 +2030,8 @@ class Gen:
+         """For output-only params on host decode: just allocate temp storage."""
+         acc = self._acc(field, prefix)
+         ind = '    ' * indent
++        present = (f'{prefix}_present_{field.name}'
++                   if self.has_output_presence(field) else None)
+         if field.indirection == 2 and field.is_com_handle:
+             count_expr = self._get_count_expr(field, prefix)
+             if count_expr:
+@@ -2022,12 +2049,12 @@ class Gen:
+             size_expr = self._get_count_expr(field, prefix)
+             if size_expr and field.type_name in ('void', 'VOID'):
+                 return self._alloc_temp_guarded(
+-                    acc, size_expr,
++                    acc, f'{present} ? ({size_expr}) : 0' if present else size_expr,
+                     f'npt_cs_decoder_alloc_temp(dec, {size_expr})',
+                     size_expr, ind)
+             if size_expr:
+                 return self._alloc_temp_guarded(
+-                    acc, size_expr,
++                    acc, f'{present} ? ({size_expr}) : 0' if present else size_expr,
+                     f'npt_cs_decoder_alloc_temp_array(dec, sizeof({field.type_name}), {size_expr})',
+                     f'sizeof({field.type_name}) * {size_expr}', ind)
+             # Unsized void* output (e.g. ID3D11Device3::ReadFromSubresource
+@@ -2036,6 +2063,11 @@ class Gen:
+             # call doesn't crash.  `sizeof(void)` is a GNU extension; use a
+             # one-byte fallback that's portable across compilers.
+             elem_size = '1' if field.type_name in ('void', 'VOID') else f'sizeof({field.type_name})'
++            if present:
++                return self._alloc_temp_guarded(
++                    acc, present,
++                    f'npt_cs_decoder_alloc_temp(dec, {elem_size})',
++                    elem_size, ind)
+             return '\n'.join([
+                 f'{ind}{acc} = npt_cs_decoder_alloc_temp(dec, {elem_size});',
+                 f'{ind}if (!{acc}) return;',
+@@ -2047,6 +2079,11 @@ class Gen:
+         # storage before the original is called.
+         if field.indirection == 0 and field.is_fixed_array and field.output:
+             count_expr = self._get_count_expr(field, prefix)
++            if present:
++                return self._alloc_temp_guarded(
++                    acc, present,
++                    f'npt_cs_decoder_alloc_temp_array(dec, sizeof({field.type_name}), {count_expr})',
++                    f'sizeof({field.type_name}) * ({count_expr})', ind)
+             return '\n'.join([
+                 f'{ind}{acc} = npt_cs_decoder_alloc_temp_array(dec, sizeof({field.type_name}), {count_expr});',
+                 f'{ind}if (!{acc}) return;',
+@@ -2056,6 +2093,11 @@ class Gen:
+         # <ptr>`, so allocate one pointer slot.  A count (when present)
+         # describes the data behind the slot, not the slot itself.
+         if field.indirection == 2 and field.output:
++            if present:
++                return self._alloc_temp_guarded(
++                    acc, present,
++                    'npt_cs_decoder_alloc_temp(dec, sizeof(void *))',
++                    'sizeof(void *)', ind)
+             return '\n'.join([
+                 f'{ind}{acc} = npt_cs_decoder_alloc_temp(dec, sizeof(void *));',
+                 f'{ind}if (!{acc}) return;',
+diff --git a/tools/npt_testgen.py b/tools/npt_testgen.py
+index fb58dcc..32085da 100644
+--- a/tools/npt_testgen.py
++++ b/tools/npt_testgen.py
+@@ -1239,6 +1239,11 @@ def _is_output_com_handle(p):
+             and not p.input)
+
+
++def _has_output_presence(p):
++    return (p.output and not p.input and p.optional
++            and not _is_output_com_handle(p))
++
++
+ def method_is_canonical(method):
+     """The registry's resolved `canonical` is true or "memo": the reply
+     carries one npt_wire_object_ref per output COM handle slot.  Mirrors
+@@ -1509,6 +1514,10 @@ def _gen_host_verify_command(out, reg, iface, method, fname, is_toplevel, idx):
+         is_output_com = (p.handle == 'com'
+                          and p.indirection == 2
+                          and p.output)
++        if _has_output_presence(p):
++            out.write(f'    (void)npt_encode_simple_pointer(&enc, '
++                      f'args._present_{p.name} ? (const void *)1 : NULL);\n')
++            continue
+         if not p.input and not is_output_com:
+             continue
+         _gen_reencode_param(out, reg, p, 'args.', fields_map,
+@@ -2566,6 +2575,10 @@ def _gen_method_param_init_guest(out, reg, params, fields_map, prefix):
+     for p in params:
+         if p.name is None:
+             continue
++        if _has_output_presence(p):
++            out.write(f'    if (style != NPT_STYLE_COUNT_ZERO_PTR_NULL)\n')
++            out.write(f'        {prefix}{p.name} = npt_test_alloc(1);\n')
++            continue
+         if (_is_output_com_handle(p) and p.count is not None
+                 and not p.optional):
+             # A required output array must be there for the callee to
