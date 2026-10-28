@@ -124,7 +124,10 @@ find "$dst" -maxdepth 1 -type f \( \
 
 cp "$tmp/generated/guest/"* "$dst/"
 
-git -C "$mesa_wt" diff --binary "$VIRTIO_WIN_MESA_COMMIT" \
+# suppressBlankEmpty drops the space git writes on blank context lines,
+# which would otherwise make the checked-in patch fail git diff --check.
+git -C "$mesa_wt" -c diff.suppressBlankEmpty=true \
+    diff --binary "$VIRTIO_WIN_MESA_COMMIT" \
     > "$tmp/virtio-win-mesa.patch"
 
 mkdir "$tmp/bundle"
@@ -156,7 +159,8 @@ find "$host_dst" -maxdepth 1 -type f \( \
 
 cp "$tmp/guest-bundle/host/"* "$host_dst/"
 
-git -C "$host_wt" diff --binary "$VIRGL_COMMIT" \
+git -C "$host_wt" -c diff.suppressBlankEmpty=true \
+    diff --binary "$VIRGL_COMMIT" \
     > "$tmp/virglrenderer.patch"
 
 guest_patch="$tmp/guest-bundle/virtio-win-mesa.patch"
