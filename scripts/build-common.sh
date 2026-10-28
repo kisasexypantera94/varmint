@@ -83,6 +83,9 @@ checkout_repo() {
   fi
 
   git -C "$destination" reset --hard HEAD >/dev/null
+  # Files created by previously applied patches are untracked and would
+  # make the next patch apply fail.
+  git -C "$destination" clean -fdq
   git -C "$destination" fetch origin \
     '+refs/heads/*:refs/remotes/origin/*' \
     '+refs/tags/*:refs/tags/*'
