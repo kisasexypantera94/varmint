@@ -78,6 +78,9 @@ mkdir -p "$BUILD_ROOT/bin" "$BUILD_ROOT/compatdata-$API"
 EXE="$BUILD_ROOT/bin/$API-$TEST.exe"
 
 echo "building $API $TEST" >&2
+# GUI subsystem, like a game. Wine gives a console executable a windowed
+# conhost, which cannot start without a display (e.g. over SSH), and every
+# console write then blocks until the run is killed.
 "$CXX" \
     -std=c++17 \
     -O2 \
@@ -85,6 +88,7 @@ echo "building $API $TEST" >&2
     -Wextra \
     -static-libgcc \
     -static-libstdc++ \
+    -mwindows \
     -I"$ROOT/common" \
     "$ROOT/$API/$TEST.cpp" \
     -o "$EXE" \
