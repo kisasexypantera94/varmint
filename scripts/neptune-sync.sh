@@ -56,7 +56,7 @@ sync_repo() {
 
         # Keep upstream/local branch refs untouched: the working tree itself
         # follows the pinned revision in detached HEAD state.
-        git -C "$repo" checkout --detach "$commit"
+        git -C "$repo" checkout --force --detach "$commit"
         git -C "$repo" reset --hard "$commit"
 
         # Deliberately no git clean: build directories and other untracked
