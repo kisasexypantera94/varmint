@@ -15,18 +15,12 @@ APP_BUNDLE="$ROOT/dist/Varmint.app"
 MANIFEST="$ROOT/runtime/manifest.toml"
 MOLTENVK_PATCHES=(
   "$ROOT/patches/moltenvk/core/0001-handle-null-descriptor-sets.patch"
-  "$ROOT/patches/moltenvk/core/0002-fix-geometry-shader-vertex-fetch.patch"
-  "$ROOT/patches/moltenvk/core/0003-honor-explicit-linear-dmabuf-row-pitch.patch"
 )
-SPIRV_CROSS_PATCHES=(
-  "$ROOT/patches/spirv-cross/core/0001-fix-geometry-shader-vertex-fetch.patch"
-  "$ROOT/patches/spirv-cross/core/0002-reserve-msl-type-variable-names.patch"
-)
+SPIRV_CROSS_PATCHES=()
 VIRGL_GENERATED_PATCH="$ROOT/patches/neptune-generated/virglrenderer.patch"
 VIRGL_PATCH_SERIES="$ROOT/patches/virglrenderer/series"
 DXMT_PATCHES=(
   "$ROOT/patches/dxmt/0001-fix-neptune-vertex-sample-flicker.patch"
-  "$ROOT/patches/dxmt/0003-add-neptune-r10-bgra8-present-conversion.patch"
   "$ROOT/patches/dxmt/0005-fix-d3d11-event-repeated-stall.patch"
   "$ROOT/patches/dxmt/0006-bootstrap-neptune-d3d11-external-buffers.patch"
 )

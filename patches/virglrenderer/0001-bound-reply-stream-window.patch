@@ -12,13 +12,13 @@ index a7b10d3a..d1878a02 100644
     npt_cs_encoder_seek_stream_locked(enc, 0);
  }
 diff --git a/tests/meson.build b/tests/meson.build
-index 884a0051..69c0e854 100644
+index 8e0a2839..417d979a 100644
 --- a/tests/meson.build
 +++ b/tests/meson.build
-@@ -127,6 +127,7 @@ if with_neptune
-
+@@ -128,6 +128,7 @@ if with_neptune
     neptune_tests = [
        ['test_neptune_init', 'test_neptune_init.c'],
+       ['test_neptune_async_create', 'test_neptune_async_create.c'],
 +      ['test_neptune_cs', 'test_neptune_cs.c'],
     ]
 

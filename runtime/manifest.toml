@@ -22,22 +22,22 @@ commit = "bf98587477fe68d07b93319ece7b40a7d0e2eabe"
 
 [dependencies.moltenvk]
 repository = "https://github.com/utmapp/MoltenVK.git"
-commit = "0790efd55b6b302e19487e5654f7fc30f0bdf3df"
+commit = "b5680e33d7dca891667adea0b4c35ffe905d1a66"
 version = "1.4.1-utm-geometry"
 
 
 [dependencies.spirv_cross]
 repository = "https://github.com/utmapp/SPIRV-Cross.git"
-commit = "939b40b33a44443c404c4078823c406e3c94866f"
+commit = "84173e8d2ba913b65276062d90e8c19dcbc0136d"
 
 [dependencies.virglrenderer]
 repository = "https://github.com/utmapp/virglrenderer.git"
-commit = "451505ad0aa449290f2c0672da6877d57ee770e5"
+commit = "b6c4d36e12409fa92eeef4d40322c75292f10bb9"
 
 [dependencies.dxmt]
 repository = "https://github.com/utmapp/dxmt.git"
-commit = "66e27f3759ff79e41a791ec40e2a70ef6d0c964c"
+commit = "8b9d33470d6417734bf156d87d265ca2ede0aaa8"
 
 [dependencies.d3dmetal]
 repository = "https://github.com/utmapp/d3dmetal-native.git"
-commit = "fd09f2edd6f972f28b0f65117b39c361ecf99ad1"
+commit = "af1ee1710711fadff41dead87960d0f1336c1047"

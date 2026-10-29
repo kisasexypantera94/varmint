@@ -158,7 +158,7 @@ build_moltenvk() {
     "$SPIRV_CROSS_COMMIT" \
     "$spirv_cross"
 
-  for patch in "${SPIRV_CROSS_PATCHES[@]}"; do
+  for patch in "${SPIRV_CROSS_PATCHES[@]+"${SPIRV_CROSS_PATCHES[@]}"}"; do
     apply_dependency_patch "$spirv_cross" "$patch"
   done
   (
@@ -392,7 +392,7 @@ dependency_recipe_hash() {
   cat \
     "$MANIFEST" \
     "${MOLTENVK_PATCHES[@]}" \
-    "${SPIRV_CROSS_PATCHES[@]}" \
+    "${SPIRV_CROSS_PATCHES[@]+"${SPIRV_CROSS_PATCHES[@]}"}" \
     "$VIRGL_GENERATED_PATCH" \
     "$VIRGL_PATCH_SERIES"
 
@@ -415,7 +415,7 @@ build_dependencies() {
 
   for patch in \
     "${MOLTENVK_PATCHES[@]}" \
-    "${SPIRV_CROSS_PATCHES[@]}" \
+    "${SPIRV_CROSS_PATCHES[@]+"${SPIRV_CROSS_PATCHES[@]}"}" \
     "$VIRGL_GENERATED_PATCH" \
     "$VIRGL_PATCH_SERIES" \
     "${D3DMETAL_PATCHES[@]+"${D3DMETAL_PATCHES[@]}"}" \

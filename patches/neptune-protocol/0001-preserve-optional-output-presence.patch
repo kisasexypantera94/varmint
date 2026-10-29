@@ -10,7 +10,7 @@ index 2115286..eaa56e4 100644
      "dxgiformat.idl",
      "dxgicommon.idl",
 diff --git a/npt_registry_overlay.json b/npt_registry_overlay.json
-index 4879b35..e22bfb6 100644
+index fd8e42f..685f585 100644
 --- a/npt_registry_overlay.json
 +++ b/npt_registry_overlay.json
 @@ -1,5 +1,5 @@
@@ -21,7 +21,7 @@ index 4879b35..e22bfb6 100644
      {"name": "DWORD", "primitive": "uint32_t"},
      {"name": "int", "primitive": "int32_t"},
 diff --git a/templates/commands.h b/templates/commands.h
-index 4157a00..10935a4 100644
+index f0cf907..5391cd7 100644
 --- a/templates/commands.h
 +++ b/templates/commands.h
 @@ -61,6 +61,9 @@ struct npt_command_${fname} {
@@ -34,7 +34,7 @@ index 4157a00..10935a4 100644
  % if GEN.is_output_com_handle_single(p):
      /* Shadow: the guest-allocated id for ${p.name} arrives in the command
       * body (no reply round-trip).  The post-dispatch register pass reads
-@@ -575,6 +578,9 @@ struct npt_command_${fname} {
+@@ -581,6 +584,9 @@ struct npt_command_${fname} {
      ${GEN.c_type(p)} ${p.name};
  % endfor
  % for p in func.params:
@@ -45,10 +45,10 @@ index 4157a00..10935a4 100644
      /* Shadow: guest-allocated id for ${p.name}. */
      uint64_t _guest_id_${p.name};
 diff --git a/tests/test_roundtrip_manual.c b/tests/test_roundtrip_manual.c
-index 25d6765..50fd7f8 100644
+index fe6b2c0..868fdd0 100644
 --- a/tests/test_roundtrip_manual.c
 +++ b/tests/test_roundtrip_manual.c
-@@ -942,6 +942,8 @@ static int test_manual_dispatch_OMGetBlendState(void)
+@@ -945,6 +945,8 @@ static int test_manual_dispatch_OMGetBlendState(void)
      struct npt_cs_encoder enc = npt_test_encoder_init(cmd_buf, sizeof(cmd_buf));
      uint64_t fake_gid = 0xdeadbeefcafef00dULL;
      npt_encode_uint64_t(&enc, &fake_gid);
@@ -57,7 +57,7 @@ index 25d6765..50fd7f8 100644
      size_t cmd_size = npt_test_encoder_written(&enc, cmd_buf);
 
      struct npt_cs_decoder dec = npt_test_decoder_init(cmd_buf, cmd_size);
-@@ -993,6 +995,7 @@ static int test_manual_dispatch_Map(void)
+@@ -996,6 +998,7 @@ static int test_manual_dispatch_Map(void)
      UINT subresource = 0;
      npt_encode_UINT(&enc, &subresource);
      (void)npt_encode_simple_pointer(&enc, NULL); /* pReadRange = NULL */
@@ -65,7 +65,7 @@ index 25d6765..50fd7f8 100644
      size_t cmd_size = npt_test_encoder_written(&enc, cmd_buf);
 
      struct npt_cs_decoder dec = npt_test_decoder_init(cmd_buf, cmd_size);
-@@ -1144,6 +1147,68 @@ static int test_manual_reply_unsupported_encode_DRED(void)
+@@ -1147,6 +1150,68 @@ static int test_manual_reply_unsupported_encode_DRED(void)
      return 0;
  }
 
@@ -134,7 +134,7 @@ index 25d6765..50fd7f8 100644
  /* ================================================================== */
  /* Dispatch table                                                     */
  /* ================================================================== */
-@@ -1794,6 +1859,8 @@ static const struct manual_test_entry manual_tests[] = {
+@@ -1853,6 +1918,8 @@ static const struct manual_test_entry manual_tests[] = {
        test_manual_dispatch_D3D12CreateVersionedRootSignatureDeserializer },
      { "reply unsupported DRED encode writes nothing",
        test_manual_reply_unsupported_encode_DRED },
@@ -144,7 +144,7 @@ index 25d6765..50fd7f8 100644
 
  #define MANUAL_TEST_COUNT \
 diff --git a/tests/test_roundtrip_manual_guest.c b/tests/test_roundtrip_manual_guest.c
-index da9ed1d..491960f 100644
+index 6bd39f5..a11e7e6 100644
 --- a/tests/test_roundtrip_manual_guest.c
 +++ b/tests/test_roundtrip_manual_guest.c
 @@ -262,6 +262,59 @@ static int test_guest_unsupported_reply_DRED_decode(void)
@@ -205,10 +205,10 @@ index da9ed1d..491960f 100644
 +}
 +
  /* ================================================================== */
- /* Dispatch table                                                     */
+ /* Pointer-sized types                                                */
  /* ================================================================== */
 diff --git a/tools/npt_codegen.py b/tools/npt_codegen.py
-index 93f2a44..be50f4d 100644
+index 0f7d2ea..dea89d0 100644
 --- a/tools/npt_codegen.py
 +++ b/tools/npt_codegen.py
 @@ -201,8 +201,8 @@ class Gen:
@@ -222,7 +222,7 @@ index 93f2a44..be50f4d 100644
 
          Anonymous unions (typically discriminator-tagged variants inside
          a struct, e.g. the inner union of ``D3D11_SHADER_RESOURCE_VIEW_DESC``)
-@@ -421,6 +421,11 @@ class Gen:
+@@ -454,6 +454,11 @@ class Gen:
      def is_output_com_handle_single(self, field: NptField) -> bool:
          return self.is_output_com_handle(field) and field.count is None
 
@@ -234,7 +234,7 @@ index 93f2a44..be50f4d 100644
      def sizeof_input_param(self, field: NptField, prefix: str, dst: str) -> str:
          """Sizeof for a command input parameter."""
          if self.is_output_com_handle(field):
-@@ -430,6 +435,9 @@ class Gen:
+@@ -463,6 +468,9 @@ class Gen:
                          f'(size_t)({count_expr}) : 0) * sizeof(uint64_t);'
                          f'  /* {field.name}: array_count + N guest ids */')
              return f'{dst} += sizeof(uint64_t);  /* {field.name}: guest id */'
@@ -244,7 +244,7 @@ index 93f2a44..be50f4d 100644
          if not field.input:
              return f'/* skip {prefix}{field.name} (output only) */'
          return self.sizeof_field(field, prefix, dst)
-@@ -467,6 +475,9 @@ class Gen:
+@@ -500,6 +508,9 @@ class Gen:
                  f'    npt_encode_uint64_t(enc, &_gid_{field.name});',
                  f'}}',
              ])
@@ -254,7 +254,7 @@ index 93f2a44..be50f4d 100644
          if not field.input:
              return f'/* skip {prefix}{field.name} (output only) */'
          return self.encode_field(field, prefix)
-@@ -474,11 +485,10 @@ class Gen:
+@@ -507,11 +518,10 @@ class Gen:
      def decode_input_param(self, field: NptField, prefix: str,
                             indent: int = 1, canonical: bool = False) -> str:
          """Decode a command input parameter (host-side, temp alloc).
@@ -270,7 +270,7 @@ index 93f2a44..be50f4d 100644
          ind = '    ' * indent
          if self.is_output_com_handle(field):
              count_expr = self._get_count_expr(field, prefix)
-@@ -534,6 +544,9 @@ class Gen:
+@@ -567,6 +577,9 @@ class Gen:
                  f'{ind}    }}',
                  f'{ind}}}',
              ])
@@ -280,7 +280,7 @@ index 93f2a44..be50f4d 100644
          if not field.input:
              return ''
          return self.decode_field(field, prefix, alloc_temp=True, indent=indent,
-@@ -555,9 +568,9 @@ class Gen:
+@@ -588,9 +601,9 @@ class Gen:
                              canonical: bool = False) -> str:
          """Sizeof for a reply output parameter.
 
@@ -293,7 +293,7 @@ index 93f2a44..be50f4d 100644
          are registered on the host under their pre-allocated guest_id and
          ride in the reply only for a canonical method, as one
          npt_wire_object_ref per slot (an array: count + refs, the count
-@@ -1205,9 +1218,9 @@ class Gen:
+@@ -1238,9 +1251,9 @@ class Gen:
 
          if count_expr is None:
              if for_output:
@@ -306,7 +306,7 @@ index 93f2a44..be50f4d 100644
                  # The payload size cannot use `npt_sizeof_T(&(const
                  # T){0})` — passing zero-initialised data silences any
                  # discriminator-conditional union arms inside T's
-@@ -1223,11 +1236,23 @@ class Gen:
+@@ -1256,11 +1269,23 @@ class Gen:
                  # `method_reply_is_unsupported` and the template emits
                  # a fatal-flag stub instead of a working reply path.
                  if field.type_name == 'void':
@@ -330,7 +330,7 @@ index 93f2a44..be50f4d 100644
                  return [
                      f'{dst} += npt_sizeof_simple_pointer((const void *)1);',
                      f'{dst} += {payload};',
-@@ -2005,6 +2030,8 @@ class Gen:
+@@ -2038,6 +2063,8 @@ class Gen:
          """For output-only params on host decode: just allocate temp storage."""
          acc = self._acc(field, prefix)
          ind = '    ' * indent
@@ -339,7 +339,7 @@ index 93f2a44..be50f4d 100644
          if field.indirection == 2 and field.is_com_handle:
              count_expr = self._get_count_expr(field, prefix)
              if count_expr:
-@@ -2022,12 +2049,12 @@ class Gen:
+@@ -2055,12 +2082,12 @@ class Gen:
              size_expr = self._get_count_expr(field, prefix)
              if size_expr and field.type_name in ('void', 'VOID'):
                  return self._alloc_temp_guarded(
@@ -354,7 +354,7 @@ index 93f2a44..be50f4d 100644
                      f'npt_cs_decoder_alloc_temp_array(dec, sizeof({field.type_name}), {size_expr})',
                      f'sizeof({field.type_name}) * {size_expr}', ind)
              # Unsized void* output (e.g. ID3D11Device3::ReadFromSubresource
-@@ -2036,6 +2063,11 @@ class Gen:
+@@ -2069,6 +2096,11 @@ class Gen:
              # call doesn't crash.  `sizeof(void)` is a GNU extension; use a
              # one-byte fallback that's portable across compilers.
              elem_size = '1' if field.type_name in ('void', 'VOID') else f'sizeof({field.type_name})'
@@ -366,7 +366,7 @@ index 93f2a44..be50f4d 100644
              return '\n'.join([
                  f'{ind}{acc} = npt_cs_decoder_alloc_temp(dec, {elem_size});',
                  f'{ind}if (!{acc}) return;',
-@@ -2047,6 +2079,11 @@ class Gen:
+@@ -2080,6 +2112,11 @@ class Gen:
          # storage before the original is called.
          if field.indirection == 0 and field.is_fixed_array and field.output:
              count_expr = self._get_count_expr(field, prefix)
@@ -378,7 +378,7 @@ index 93f2a44..be50f4d 100644
              return '\n'.join([
                  f'{ind}{acc} = npt_cs_decoder_alloc_temp_array(dec, sizeof({field.type_name}), {count_expr});',
                  f'{ind}if (!{acc}) return;',
-@@ -2056,6 +2093,11 @@ class Gen:
+@@ -2089,6 +2126,11 @@ class Gen:
          # <ptr>`, so allocate one pointer slot.  A count (when present)
          # describes the data behind the slot, not the slot itself.
          if field.indirection == 2 and field.output:
