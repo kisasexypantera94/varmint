@@ -86,6 +86,9 @@ checkout_repo() {
   # Files created by previously applied patches are untracked and would
   # make the next patch apply fail.
   git -C "$destination" clean -fdq
+  # Meson keeps an existing wrap checkout even after the wrap's pinned
+  # revision changes.
+  git -C "$destination" clean -ffdqX -- subprojects
   git -C "$destination" fetch origin \
     '+refs/heads/*:refs/remotes/origin/*' \
     '+refs/tags/*:refs/tags/*'
