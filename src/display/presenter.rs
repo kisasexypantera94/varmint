@@ -1,6 +1,6 @@
 use super::{
     iosurface::ScopedIOSurface,
-    stats::{DisplayStats, HEIGHT as STATS_HEIGHT, MARGIN as STATS_MARGIN, WIDTH as STATS_WIDTH},
+    stats::{AngleCopyStats, DisplayStats, HEIGHT as STATS_HEIGHT, MARGIN as STATS_MARGIN, WIDTH as STATS_WIDTH},
 };
 use objc2::{rc::Retained, runtime::ProtocolObject};
 use objc2_foundation::NSSize;
@@ -139,6 +139,10 @@ impl Presenter {
 
     pub fn record_display_updates(&mut self, count: u64) {
         self.stats.record_display_updates(count);
+    }
+
+    pub fn record_angle_copies(&mut self, stats: AngleCopyStats) {
+        self.stats.record_angle_copies(stats);
     }
 
     pub fn refresh_stats(&mut self) {

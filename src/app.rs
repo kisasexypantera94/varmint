@@ -266,6 +266,7 @@ impl<'a> AppState<'a> {
         self.pending_display_updates = self.pending_display_updates.saturating_add(update.update_count);
         if let Some(presenter) = self.presenter.as_mut() {
             presenter.record_display_updates(update.update_count);
+            presenter.record_angle_copies(update.angle_copy);
         }
         self.present_w = update.width;
         self.present_h = update.height;

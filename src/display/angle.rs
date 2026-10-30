@@ -1,8 +1,9 @@
-use super::iosurface::IOSurfaceRef;
+use super::{iosurface::IOSurfaceRef, stats::AngleCopyStats};
 use crate::virtio::virgl_ffi::NativeTexture;
 use std::{
     ffi::{CStr, CString, c_char, c_void},
     ptr,
+    time::Instant,
 };
 
 type EGLBoolean = i32;
@@ -283,6 +284,7 @@ struct AngleCopySession {
 
     source_cache: Option<CachedMetalSource>,
     target_cache: Option<CachedIosurfaceTarget>,
+    stats: AngleCopyStats,
 }
 
 unsafe impl Send for AngleCopySession {}
@@ -515,6 +517,7 @@ impl AngleCopySession {
 
             source_cache: None,
             target_cache: None,
+            stats: AngleCopyStats::default(),
         })
     }
 
@@ -544,6 +547,7 @@ impl AngleCopySession {
             }
         }
 
+        self.stats.source_rebuilds += 1;
         unsafe {
             self.destroy_source_cache();
         }
@@ -613,6 +617,7 @@ impl AngleCopySession {
             }
         }
 
+        self.stats.target_rebuilds += 1;
         unsafe {
             self.destroy_target_cache();
         }
@@ -994,6 +999,7 @@ impl AngleCopy {
             return false;
         };
 
+        let started = Instant::now();
         let old_display = unsafe { (sess.egl_get_current_display)() };
         let old_draw = unsafe { (sess.egl_get_current_surface)(EGL_DRAW) };
         let old_read = unsafe { (sess.egl_get_current_surface)(EGL_READ) };
@@ -1020,6 +1026,16 @@ impl AngleCopy {
             eprintln!("angle_egl_copy: failed to restore previous EGL context");
         }
 
+        if ok {
+            sess.stats.record_copy(started.elapsed());
+        }
         ok
+    }
+
+    pub fn take_stats(&mut self) -> AngleCopyStats {
+        self.session
+            .as_mut()
+            .map(|sess| std::mem::take(&mut sess.stats))
+            .unwrap_or_default()
     }
 }

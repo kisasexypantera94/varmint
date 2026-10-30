@@ -28,6 +28,38 @@ struct Snapshot {
     host_present_fps: f64,
     coalesced_display_updates: u64,
     average_host_present_cpu_time_ms: f64,
+    angle_copies: u64,
+    angle_copy_source_rebuilds: u64,
+    angle_copy_target_rebuilds: u64,
+    average_angle_copy_cpu_time_ms: f64,
+    max_angle_copy_cpu_time_ms: f64,
+}
+
+/// Producer-side native texture → IOSurface copies, accumulated until the
+/// presenter samples them.
+#[derive(Clone, Copy, Default)]
+pub struct AngleCopyStats {
+    pub copies: u64,
+    pub source_rebuilds: u64,
+    pub target_rebuilds: u64,
+    pub cpu_time: Duration,
+    pub max_cpu_time: Duration,
+}
+
+impl AngleCopyStats {
+    pub fn record_copy(&mut self, cpu_time: Duration) {
+        self.copies = self.copies.saturating_add(1);
+        self.cpu_time = self.cpu_time.saturating_add(cpu_time);
+        self.max_cpu_time = self.max_cpu_time.max(cpu_time);
+    }
+
+    pub fn merge(&mut self, other: Self) {
+        self.copies = self.copies.saturating_add(other.copies);
+        self.source_rebuilds = self.source_rebuilds.saturating_add(other.source_rebuilds);
+        self.target_rebuilds = self.target_rebuilds.saturating_add(other.target_rebuilds);
+        self.cpu_time = self.cpu_time.saturating_add(other.cpu_time);
+        self.max_cpu_time = self.max_cpu_time.max(other.max_cpu_time);
+    }
 }
 
 #[derive(Default)]
@@ -36,6 +68,7 @@ struct Measurements {
     host_presents: u64,
     coalesced_display_updates: u64,
     host_present_cpu_time: Duration,
+    angle_copy: AngleCopyStats,
 }
 
 impl Measurements {
@@ -67,6 +100,15 @@ impl Measurements {
             } else {
                 self.host_present_cpu_time.as_secs_f64() * 1_000.0 / self.host_presents as f64
             },
+            angle_copies: self.angle_copy.copies,
+            angle_copy_source_rebuilds: self.angle_copy.source_rebuilds,
+            angle_copy_target_rebuilds: self.angle_copy.target_rebuilds,
+            average_angle_copy_cpu_time_ms: if self.angle_copy.copies == 0 {
+                0.0
+            } else {
+                self.angle_copy.cpu_time.as_secs_f64() * 1_000.0 / self.angle_copy.copies as f64
+            },
+            max_angle_copy_cpu_time_ms: self.angle_copy.max_cpu_time.as_secs_f64() * 1_000.0,
         };
         *self = Self::default();
         snapshot
@@ -118,6 +160,10 @@ impl DisplayStats {
 
     pub fn record_display_updates(&mut self, count: u64) {
         self.measurements.record_display_updates(count);
+    }
+
+    pub fn record_angle_copies(&mut self, stats: AngleCopyStats) {
+        self.measurements.angle_copy.merge(stats);
     }
 
     pub fn record_present(&mut self, presented: bool, display_updates: u64, cpu_time: Duration) {
@@ -215,8 +261,35 @@ fn draw_text_line(pixels: &mut [u32], y: usize, text: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Measurements, write_sample};
+    use super::{AngleCopyStats, Measurements, write_sample};
     use std::time::Duration;
+
+    #[test]
+    fn sample_reports_angle_copies() {
+        let mut first = AngleCopyStats {
+            source_rebuilds: 2,
+            target_rebuilds: 1,
+            ..Default::default()
+        };
+        first.record_copy(Duration::from_millis(1));
+        first.record_copy(Duration::from_millis(3));
+        let mut second = AngleCopyStats {
+            source_rebuilds: 1,
+            ..Default::default()
+        };
+        second.record_copy(Duration::from_millis(2));
+
+        let mut measurements = Measurements::default();
+        measurements.angle_copy.merge(first);
+        measurements.angle_copy.merge(second);
+
+        let sample = measurements.take_sample(Duration::from_secs(1));
+        assert_eq!(sample.angle_copies, 3);
+        assert_eq!(sample.angle_copy_source_rebuilds, 3);
+        assert_eq!(sample.angle_copy_target_rebuilds, 1);
+        assert_eq!(sample.average_angle_copy_cpu_time_ms, 2.0);
+        assert_eq!(sample.max_angle_copy_cpu_time_ms, 3.0);
+    }
 
     #[test]
     fn sample_reports_rates_coalescing_and_cpu_time() {
@@ -275,5 +348,10 @@ mod tests {
         assert!(value.get("host_present_fps").is_some());
         assert!(value.get("coalesced_display_updates").is_some());
         assert!(value.get("average_host_present_cpu_time_ms").is_some());
+        assert!(value.get("angle_copies").is_some());
+        assert!(value.get("angle_copy_source_rebuilds").is_some());
+        assert!(value.get("angle_copy_target_rebuilds").is_some());
+        assert!(value.get("average_angle_copy_cpu_time_ms").is_some());
+        assert!(value.get("max_angle_copy_cpu_time_ms").is_some());
     }
 }

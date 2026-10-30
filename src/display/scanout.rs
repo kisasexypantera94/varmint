@@ -83,10 +83,9 @@ impl<'a> ScanoutPublisher<'a> {
                     return false;
                 }
 
-                self.display
-                    .lock()
-                    .unwrap()
-                    .publish_iosurface(surface.id(), source, damage)
+                let mut display = self.display.lock().unwrap();
+                display.record_angle_copies(self.angle_copy.take_stats());
+                display.publish_iosurface(surface.id(), source, damage)
             }
         };
 

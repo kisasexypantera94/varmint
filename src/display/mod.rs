@@ -6,6 +6,7 @@ mod stats;
 
 pub use presenter::{PresentMode, Presenter};
 pub use scanout::ScanoutPublisher;
+use stats::AngleCopyStats;
 use zerocopy::IntoBytes;
 
 #[derive(Clone, Copy)]
@@ -28,6 +29,7 @@ pub struct DisplayUpdate {
     pub height: usize,
     pub dirty_rect: (usize, usize, usize, usize),
     pub iosurface_id: Option<u32>,
+    pub angle_copy: AngleCopyStats,
 }
 
 pub struct DisplayBuffer {
@@ -37,6 +39,7 @@ pub struct DisplayBuffer {
     dirty_rect: Option<(usize, usize, usize, usize)>,
     iosurface_id: Option<u32>,
     sequence: u64,
+    angle_copy: AngleCopyStats,
 }
 
 impl DisplayBuffer {
@@ -48,6 +51,7 @@ impl DisplayBuffer {
             dirty_rect: None,
             iosurface_id: None,
             sequence: 0,
+            angle_copy: AngleCopyStats::default(),
         }
     }
 
@@ -88,6 +92,10 @@ impl DisplayBuffer {
 
         self.publish_damage(None, (x, y, width, height));
         true
+    }
+
+    fn record_angle_copies(&mut self, stats: AngleCopyStats) {
+        self.angle_copy.merge(stats);
     }
 
     fn publish_iosurface(&mut self, iosurface_id: u32, source: Rect, damage: Rect) -> bool {
@@ -165,6 +173,7 @@ impl DisplayBuffer {
             height: self.height,
             dirty_rect,
             iosurface_id: self.iosurface_id,
+            angle_copy: std::mem::take(&mut self.angle_copy),
         })
     }
 }
