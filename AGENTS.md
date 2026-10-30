@@ -99,13 +99,17 @@ Small performance differences may be measurement noise. Use repeated measurement
 
 ## Correctness and visual debugging
 
-Prefer reducing game bugs to deterministic semantic or rendering reproducers.
+Prefer reducing game bugs to deterministic semantic or rendering reproducers. Once a failure is localized to a specific resource, data path, or API mechanism, move to a synthetic reproducer that preserves the workload's relevant topology (aliasing, offsets, sizes, lifetimes, queues, synchronization). A passing reproducer rules out only the configuration it exercised.
+
+When a backend or mode toggle changes a symptom, confirm from the running process that it took effect, then audit what Varmint and its dependency glue do differently in each mode before reverse-engineering the backend itself.
 
 Games are important integration tests, but should not become the inner development loop when a smaller reproducer is practical.
 
 Use existing platform debugging facilities before building large Varmint-specific debugging infrastructure. Add instrumentation incrementally in response to demonstrated blind spots.
 
 Avoid building a general capture/replay, tracing, or telemetry framework unless repeated real investigations show that simpler tooling is insufficient.
+
+When evidence isolates a bug to a specific platform, backend, OS version, API generation, or third-party dependency, check relevant authoritative documentation and known issues before starting broad instrumentation. Use external research to narrow the hypothesis space, not as a substitute for local evidence.
 
 ## Tests
 
@@ -132,7 +136,9 @@ Use hypotheses rather than random experimentation:
 
 observation → hypothesis → experiment → result.
 
-If a hypothesis is falsified and the available evidence does not motivate a specific next step, stop the investigation. Summarize what was established, what was ruled out, and what remains unknown. Do not invent another experiment merely to continue making progress.
+If a hypothesis is falsified and the available evidence does not motivate a specific next step, stop the investigation. An experiment falsifies a hypothesis only if it was capable of detecting the effect on the failing path. For a negative A/B result, verify that the toggle actually changes that path using a positive control, runtime evidence, or source-grounded proof. Summarize what was established, what tested negative, and what remains unknown. Do not invent another experiment merely to continue making progress.
+
+Record negative results with their scope: what was exercised, under which conditions, and what the method could not detect. Handoffs and investigation notes must not promote "not observed" to "ruled out".
 
 It is acceptable for an investigation to end without a fix.
 
@@ -145,3 +151,48 @@ When reporting completed work, distinguish clearly between:
 - unresolved uncertainty.
 
 Optimize for a codebase that a human maintainer can still understand without reconstructing the agent's investigation history.
+
+## Neptune development workflow
+
+Use the existing Neptune development workflow instead of inventing a separate guest deployment path.
+
+Preferred interfaces include:
+
+- `make neptune-sync` to verify guest dependency trees against the current pinned revisions and patch stack.
+- `make neptune-sync-force` to restore the guest trees to the current Varmint patch stack while preserving build directories.
+- `make neptune-build` to build guest Neptune binaries.
+- `make neptune-capture` to capture tracked guest-side dependency changes back into the development patch area.
+- SSH through `${VARMINT_GUEST_SSH:-varmint-dev}` for deterministic guest commands.
+
+Prefer deterministic command channels such as SSH or a serial/maintenance shell over GUI terminal automation. Do not use GUI typing, clipboard automation, temporary HTTP transfer, or similar mechanisms while the existing command-line workflow is sufficient.
+
+Choose the development side according to the layer:
+
+- For experimental guest Neptune/Mesa changes, prefer the guest when it provides the shortest build/test loop. Once validated, move the minimal resulting change into Varmint's normal patch mechanism.
+- For host virglrenderer, VMM, or other host-only changes, develop and build on the host.
+- For protocol generator or schema changes that affect both guest and host, make one canonical generator change and regenerate both sides together. Do not independently hand-edit generated guest and host protocol code.
+
+External dependency checkouts may contain temporary experimental changes during investigation. The repository patch stack remains the durable source of truth for changes intended to remain.
+
+Do not create an alternative deployment or synchronization mechanism unless the existing workflow is demonstrably insufficient. If it is insufficient, establish the concrete limitation before replacing it.
+
+## Runtime validation
+
+Before runtime validation:
+
+- Run basic source-state checks such as formatting or `git diff --check` where relevant before spending time on builds or VM testing.
+- Use only artifacts built from the current checkout unless the task explicitly says otherwise.
+- Do not launch an installed, stale, or alternate Varmint.app, including `/Applications/Varmint.app` or test installations, without explicit instruction.
+- Verify the executable, bundle, VM disks, and relevant process IDs belong to the intended current build.
+- When a protocol or ABI change affects both host and guest, verify both sides have been rebuilt from compatible versions before running graphics tests.
+- Do not knowingly continue validation with mismatched host and guest protocol versions.
+
+## Interactive game state
+- Do not silently wait for a game state that no longer exists.
+- If validation requires restarting a game, reproducing a menu/state, or other manual interaction, stop and tell the user exactly what state is needed before continuing.
+- Do not assume a frozen or terminated render context will recover on its own.
+
+## Screen/privacy
+- Do not start screen recording, desktop capture, or continuous screen observation without explicit user permission for that specific task.
+- GPU process captures such as gpucapture are allowed when they target the intended renderer process and do not capture the desktop.
+- Prefer logs, GPU traces, synthetic tests, and user-provided screenshots over screen recording.
