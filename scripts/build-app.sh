@@ -24,7 +24,9 @@ DXMT_PATCHES=(
   "$ROOT/patches/dxmt/0005-fix-d3d11-event-repeated-stall.patch"
   "$ROOT/patches/dxmt/0006-bootstrap-neptune-d3d11-external-buffers.patch"
 )
-D3DMETAL_PATCHES=()
+D3DMETAL_PATCHES=(
+  "$ROOT/patches/d3dmetal-native/0001-keep-impostors-resident-on-metal4-queues.patch"
+)
 ENTITLEMENTS="$ROOT/runtime/entitlements.plist"
 VMNET_HELPER_ENTITLEMENTS="$ROOT/runtime/vmnet-helper-entitlements.plist"
 ICON_SOURCE="$ROOT/assets/icon.icon"

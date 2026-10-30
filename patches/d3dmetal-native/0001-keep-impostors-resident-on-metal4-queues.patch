@@ -1,0 +1,185 @@
+diff --git a/src/dmn_share_metal.mm b/src/dmn_share_metal.mm
+index eef73fc..c74c707 100644
+--- a/src/dmn_share_metal.mm
++++ b/src/dmn_share_metal.mm
+@@ -1655,6 +1655,27 @@ void residency_cb_committed(id<MTLCommandBuffer> cb) {
+     }];
+ }
+ 
++/* The same for a Metal 4 commit. Its command buffers have no completion
++ * handler; the commit's feedback handler runs once all of them have finished.
++ * Options keep every handler added to them, so this assumes fresh options per
++ * commit, which is what D3DMetal passes. */
++API_AVAILABLE(macos(26.0))
++void residency_mtl4_committed(MTL4CommitOptions* opts) {
++    if (g_res_mode.load(std::memory_order_relaxed) != 1)
++        return;
++    uint64_t seq;
++    {
++        std::lock_guard<std::mutex> lk(g_cb_mtx);
++        seq = ++g_cb_seq;
++        g_cb_inflight.insert(seq);
++    }
++    [opts addFeedbackHandler:^(id<MTL4CommitFeedback> unused) {
++        (void)unused;
++        std::lock_guard<std::mutex> lk(g_cb_mtx);
++        g_cb_inflight.erase(seq);
++    }];
++}
++
+ /* `watermark` = every command buffer committed with a sequence below it has
+  * completed; `issued` = the last sequence handed out, which is the barrier a
+  * member observed now must outlive. Both come from one critical section: read
+@@ -1743,7 +1764,8 @@ bool residency_set_enabled_locked(void) {
+  * It is still a correct place to attach, because Metal binds a queue's
+  * residency sets to a command buffer at the buffer's *commit*, and that path
+  * runs from an encoder creation, which is always before commit. The mark
+- * lives on the queue itself so the check costs no global lock. */
++ * lives on the queue itself so the check costs no global lock. `q` may also
++ * be an MTL4CommandQueue, which has the same -device and -addResidencySet:. */
+ void residency_attach_queue(id q, bool late) {
+     /* mode 0 is final, so this costs nothing on macOS 14 or with the set
+      * switched off -- where taking g_sub_lock once per command buffer would
+@@ -2211,6 +2233,82 @@ id swz_dev_newqdesc(id self, SEL _cmd, id desc) {
+     note_new_queue(q);
+     return q;
+ }
++
++/* == Metal 4 queues (macOS 26) ==========================================
++ * With Metal 4 on, D3DMetal executes command lists on an MTL4CommandQueue
++ * whose command buffers come from the device, so the classic queue,
++ * command-buffer and encoder hooks above never see that work. The queue
++ * still needs the impostor set: D3DMetal's own set drops a buffer when any
++ * D3D12 resource using it dies, and an alias-cache impostor is shared by
++ * every placement at its offset, so the survivors read zeros once Metal
++ * evicts the pages. Commits join the in-flight barrier and drive the sweep,
++ * as encoder creation does on classic queues. Metal 4 has no useResources:,
++ * so the per-command-buffer path (sparse textures, DMN_RESIDENCY_SET=0) does
++ * not cover these queues. */
++API_AVAILABLE(macos(26.0))
++void swz_q4_commit_opts(id self, SEL _cmd,
++                        const id<MTL4CommandBuffer>* cbs,
++                        NSUInteger count, MTL4CommitOptions* opts) {
++    IMP orig = lookup_orig(object_getClass(self), _cmd);
++    if (!orig)
++        return;
++    residency_mtl4_committed(opts);
++    ((void (*)(id, SEL, const id<MTL4CommandBuffer>*,
++               NSUInteger, MTL4CommitOptions*))orig)(self, _cmd, cbs, count,
++                                                      opts);
++
++    const uint64_t now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
++    if (g_res_mode.load(std::memory_order_relaxed) != 1 ||
++        now < g_next_tick_ns.load(std::memory_order_acquire))
++        return;
++    std::lock_guard<std::mutex> lk(g_sub_lock);
++    g_next_tick_ns.store(now + kTickNs, std::memory_order_release);
++    residency_sweep_locked(now);
++}
++
++/* No options to carry the feedback handler: commit through the variant that
++ * has them. */
++API_AVAILABLE(macos(26.0))
++void swz_q4_commit(id self, SEL _cmd,
++                   const id<MTL4CommandBuffer>* cbs,
++                   NSUInteger count) {
++    (void)_cmd;
++    MTL4CommitOptions* opts = [[MTL4CommitOptions alloc] init];
++    [(id<MTL4CommandQueue>)self commit:cbs count:count options:opts];
++    [opts release];
++}
++
++API_AVAILABLE(macos(26.0))
++void note_new_mtl4_queue(id q) {
++    if (!q)
++        return;
++    static const SwizzleJob jobs[] = {
++        { @selector(commit:count:options:), (IMP)swz_q4_commit_opts },
++        { @selector(commit:count:), (IMP)swz_q4_commit },
++    };
++    static std::atomic<Class> memo{nullptr};
++    install_swizzles(object_getClass(q), jobs, sizeof(jobs) / sizeof(jobs[0]),
++                     "metal4-commit", &memo);
++    residency_attach_queue(q, /*late=*/false);
++}
++
++API_AVAILABLE(macos(26.0))
++id swz_dev_newq4(id self, SEL _cmd) {
++    IMP orig = lookup_orig(object_getClass(self), _cmd);
++    id q = orig ? ((id (*)(id, SEL))orig)(self, _cmd) : nil;
++    note_new_mtl4_queue(q);
++    return q;
++}
++
++API_AVAILABLE(macos(26.0))
++id swz_dev_newq4desc(id self, SEL _cmd, id desc, NSError** err) {
++    IMP orig = lookup_orig(object_getClass(self), _cmd);
++    id q = orig ? ((id (*)(id, SEL, id, NSError**))orig)(self, _cmd, desc, err)
++                : nil;
++    note_new_mtl4_queue(q);
++    return q;
++}
++
+ /* Runs once per distinct device class at install time — no memo needed. */
+ void swizzle_device_class(Class cls) {
+     static const SwizzleJob jobs[] = {
+@@ -2224,6 +2322,15 @@ void swizzle_device_class(Class cls) {
+     };
+     install_swizzles(cls, jobs, sizeof(jobs) / sizeof(jobs[0]), "device",
+                      /*memo=*/nullptr);
++    if (@available(macOS 26.0, *)) {
++        static const SwizzleJob mtl4_jobs[] = {
++            { @selector(newMTL4CommandQueue), (IMP)swz_dev_newq4 },
++            { @selector(newMTL4CommandQueueWithDescriptor:error:),
++              (IMP)swz_dev_newq4desc },
++        };
++        install_swizzles(cls, mtl4_jobs, sizeof(mtl4_jobs) / sizeof(mtl4_jobs[0]),
++                         "device", /*memo=*/nullptr);
++    }
+ }
+ 
+ } // namespace
+diff --git a/tests/heap_import_test.cpp b/tests/heap_import_test.cpp
+index e26d5d1..640fc33 100644
+--- a/tests/heap_import_test.cpp
++++ b/tests/heap_import_test.cpp
+@@ -14,6 +14,8 @@
+  *     in the caller's mmap, and the first heap's window is untouched.
+  *  3b. A buffer with ALLOW_UNORDERED_ACCESS places on the UPLOAD-typed import
+  *     (a flag D3D12 forbids on CPU heaps) and still aliases the window.
++ *  3c. Once that UAV buffer is released, the placement it aliased stays
++ *     resident: GPU copies out of it keep reading the window for seconds.
+  *  4. Releasing the heap does not tear down a live placed buffer's backing
+  *     (the copy still round-trips), matching the guest-side pin semantics.
+  *  5. Validation refuses: unaligned offset, window past EOF, zero/huge size,
+@@ -256,6 +258,30 @@ int main() {
+         printf("HEAPIMP: UAV placement on a CPU-typed import ok\n");
+     }
+ 
++    /* 3c) The UAV buffer is gone; the placement it aliased must stay
++     * readable. Both were the same Metal buffer, which D3DMetal drops from
++     * its residency set when either resource dies, and on a Metal 4 queue
++     * the GPU read zeros once the pages were evicted, about a second later. */
++    {
++        fill_pattern(win + kPlaceOff, kBufSize, 0x3C3C3C3Cu);
++        const uint64_t start = now_ms();
++        unsigned reads = 0;
++        while (now_ms() - start < 3000) {
++            EXPECT(gpu.copy(readback.ptr(), placed.ptr(), kBufSize),
++                   "copy out after the alias died failed");
++            void* rb = nullptr;
++            D3D12_RANGE all{0, (SIZE_T)kBufSize};
++            CK(readback->Map(0, &all, &rb), "Map(readback after alias)");
++            const bool ok = check_pattern(rb, kBufSize, 0x3C3C3C3Cu);
++            D3D12_RANGE none{0, 0};
++            readback->Unmap(0, &none);
++            EXPECT(ok, "placement lost residency when its alias was released");
++            reads++;
++        }
++        printf("HEAPIMP: placement readable after its alias died (%u reads "
++               "over 3 s)\n", reads);
++    }
++
+     /* 4) Heap released first: the placed buffer's backing must survive. */
+     heap = nullptr;
+     fill_pattern(win + kPlaceOff, kBufSize, 0x5EC02Du);
