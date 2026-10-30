@@ -36,8 +36,10 @@ report = json.load(open(path))
 report = {"revision": revision, **report}
 json.dump(report, open(path, "w"), indent=2)
 for case in report["cases"]:
-    print(f'{case["name"]:<40} cpu median {case["copy_cpu_median_ms"]:.3f} ms  p95 {case["copy_cpu_p95_ms"]:.3f} ms  '
-          f'gpu-complete {case["copy_to_gpu_complete_median_ms"]:.3f} ms  '
+    gpu = case.get("gpu_execution_median_ms")
+    print(f'{case["implementation"]:<11} {case["name"]:<36} cpu median {case["copy_cpu_median_ms"]:.3f} ms  '
+          f'p95 {case["copy_cpu_p95_ms"]:.3f} ms  completion {case["completion_latency_median_ms"]:.3f} ms  '
+          f'gpu {"-" if gpu is None else "%.3f ms" % gpu}  '
           f'source rebuilds/copy {case["source_rebuilds_per_copy"]:.2f}')
 PY
 }
@@ -48,15 +50,16 @@ import json, sys
 base, cand = (json.load(open(p)) for p in sys.argv[1:])
 print(f'baseline {base.get("revision")}  candidate {cand.get("revision")}')
 print(f'{"case":<40} {"cpu median ms":>22} {"delta":>8} {"run medians (base | cand)":>34} {"src rebuilds/copy":>18}')
-cand_cases = {c["name"]: c for c in cand["cases"]}
+key = lambda case: (case.get("implementation", "angle-copy"), case["name"])
+cand_cases = {key(c): c for c in cand["cases"]}
 for b in base["cases"]:
-    c = cand_cases.get(b["name"])
+    c = cand_cases.get(key(b))
     if c is None:
         continue
     spread = lambda case: (min(r["copy_cpu_ms"]["median"] for r in case["runs"]),
                            max(r["copy_cpu_ms"]["median"] for r in case["runs"]))
     bm, cm = b["copy_cpu_median_ms"], c["copy_cpu_median_ms"]
-    print(f'{b["name"]:<40} {bm:>10.3f} -> {cm:<9.3f} {100 * (cm - bm) / bm:>+7.1f}% '
+    print(f'{" ".join(key(b)):<40} {bm:>10.3f} -> {cm:<9.3f} {100 * (cm - bm) / bm:>+7.1f}% '
           f'{"%.3f-%.3f | %.3f-%.3f" % (*spread(b), *spread(c)):>34} '
           f'{b["source_rebuilds_per_copy"]:>8.2f} -> {c["source_rebuilds_per_copy"]:.2f}')
 PY

@@ -4,11 +4,12 @@ use super::{
     EglMakeCurrent, open_library, symbol,
 };
 use crate::{display::iosurface::ScopedIOSurface, virtio::virgl_ffi::NativeTexture};
-use objc2::{rc::Retained, runtime::ProtocolObject};
+use objc2::{msg_send, rc::Retained, runtime::ProtocolObject};
 use objc2_io_surface::IOSurfaceLockOptions;
 use objc2_metal::{
-    MTLCreateSystemDefaultDevice, MTLDevice, MTLOrigin, MTLPixelFormat, MTLRegion, MTLSize, MTLStorageMode, MTLTexture,
-    MTLTextureDescriptor, MTLTextureUsage,
+    MTLBlitCommandEncoder, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLCreateSystemDefaultDevice,
+    MTLDevice, MTLOrigin, MTLPixelFormat, MTLRegion, MTLSize, MTLStorageMode, MTLTexture, MTLTextureDescriptor,
+    MTLTextureUsage,
 };
 use serde::Serialize;
 use std::{
@@ -17,6 +18,7 @@ use std::{
 };
 
 type MetalTexture = ProtocolObject<dyn MTLTexture>;
+type MetalCommandBuffer = ProtocolObject<dyn MTLCommandBuffer>;
 
 /// Matches virglrenderer's `vrend_resource_metal_init` for scanout resources.
 fn source_texture(format: MTLPixelFormat, width: u32, height: u32) -> Retained<MetalTexture> {
@@ -199,6 +201,145 @@ fn copy_converts_channels_crops_and_keeps_orientation() {
     }
 }
 
+// Experimental native Metal equivalent of AngleCopy for BGRA8 sources only:
+// a blit cannot convert formats, so it is not a general replacement.
+struct MetalBlit {
+    queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
+    target: Retained<MetalTexture>,
+}
+
+impl MetalBlit {
+    fn new(target: &ScopedIOSurface) -> Self {
+        let device = MTLCreateSystemDefaultDevice().expect("no Metal device");
+        let desc = unsafe {
+            MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+                MTLPixelFormat::BGRA8Unorm,
+                target.width() as usize,
+                target.height() as usize,
+                false,
+            )
+        };
+        desc.setStorageMode(MTLStorageMode::Shared);
+        let target = device
+            .newTextureWithDescriptor_iosurface_plane(&desc, target.as_objc_ref(), 0)
+            .expect("failed to wrap target IOSurface");
+        let queue = device.newCommandQueue().expect("failed to create Metal command queue");
+        Self { queue, target }
+    }
+
+    /// Same rectangle semantics as AngleCopy: the source rect's origin lands at target (0, 0).
+    fn copy(&self, source: &MetalTexture, (x, y, width, height): (u32, u32, u32, u32)) -> Retained<MetalCommandBuffer> {
+        let command_buffer = self.queue.commandBuffer().unwrap();
+        let blit = command_buffer.blitCommandEncoder().unwrap();
+        unsafe {
+            blit.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toTexture_destinationSlice_destinationLevel_destinationOrigin(
+                source,
+                0,
+                0,
+                MTLOrigin { x: x as usize, y: y as usize, z: 0 },
+                MTLSize { width: width as usize, height: height as usize, depth: 1 },
+                &self.target,
+                0,
+                0,
+                MTLOrigin { x: 0, y: 0, z: 0 },
+            );
+        }
+        blit.endEncoding();
+        command_buffer.commit();
+        command_buffer
+    }
+}
+
+fn gpu_execution_time(command_buffer: &MetalCommandBuffer) -> Duration {
+    // GPUStartTime/GPUEndTime are behind objc2-metal's core-foundation feature.
+    let start: f64 = unsafe { msg_send![command_buffer, GPUStartTime] };
+    let end: f64 = unsafe { msg_send![command_buffer, GPUEndTime] };
+    Duration::from_secs_f64(end - start)
+}
+
+#[derive(Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum Implementation {
+    AngleCopy,
+    MetalBlit,
+}
+
+enum Copier {
+    Angle(AngleCopy),
+    Metal {
+        blit: MetalBlit,
+        pending: Option<Retained<MetalCommandBuffer>>,
+    },
+}
+
+impl Copier {
+    fn copy(&mut self, source: &MetalTexture, target: &ScopedIOSurface, source_rect: (u32, u32, u32, u32)) {
+        match self {
+            Self::Angle(copy) => {
+                assert!(copy.copy_native_texture_to_iosurface(native(source), target.as_ptr(), source_rect))
+            }
+            Self::Metal { blit, pending } => *pending = Some(blit.copy(source, source_rect)),
+        }
+    }
+
+    /// Blocks until the last copy has completed; returns its GPU execution
+    /// time where the implementation exposes one.
+    fn finish(&mut self) -> Option<Duration> {
+        match self {
+            Self::Angle(copy) => {
+                finish(copy);
+                None
+            }
+            Self::Metal { pending, .. } => {
+                let command_buffer = pending.take().unwrap();
+                command_buffer.waitUntilCompleted();
+                Some(gpu_execution_time(&command_buffer))
+            }
+        }
+    }
+}
+
+// The experimental blit must reproduce AngleCopy's BGRA8 output exactly,
+// including crops at the benchmark's sizes.
+#[test]
+#[ignore]
+fn metal_blit_matches_angle_copy_for_bgra8() {
+    for (texture_size, source_rect) in [
+        ((64, 48), (8, 4, 40, 32)),
+        ((1920, 1200), (0, 0, 1920, 1200)),
+        ((2560, 1600), (320, 200, 1920, 1200)),
+    ] {
+        let texture = source_texture(MTLPixelFormat::BGRA8Unorm, texture_size.0, texture_size.1);
+        upload_pattern(&texture, true);
+        let (x0, y0, width, height) = source_rect;
+
+        let angle_target = ScopedIOSurface::new_bgra(width, height).unwrap();
+        let mut angle = Copier::Angle(AngleCopy::new());
+        angle.copy(&texture, &angle_target, source_rect);
+        angle.finish();
+
+        let metal_target = ScopedIOSurface::new_bgra(width, height).unwrap();
+        let mut metal = Copier::Metal {
+            blit: MetalBlit::new(&metal_target),
+            pending: None,
+        };
+        metal.copy(&texture, &metal_target, source_rect);
+        metal.finish();
+
+        let expected: Vec<_> = (0..height)
+            .flat_map(|y| (0..width).map(move |x| pattern(x0 + x, y0 + y)))
+            .collect();
+        assert!(
+            read_bgra_surface(&angle_target) == expected,
+            "angle copy {source_rect:?}"
+        );
+        assert!(
+            read_bgra_surface(&metal_target) == expected,
+            "metal blit {source_rect:?}"
+        );
+    }
+}
+
 struct BenchCase {
     name: &'static str,
     texture_size: (u32, u32),
@@ -269,7 +410,10 @@ impl Distribution {
 #[derive(Serialize)]
 struct RunResult {
     copy_cpu_ms: Distribution,
-    copy_to_gpu_complete_ms: Distribution,
+    /// Wall clock from the copy call until the implementation's wait for that
+    /// copy returns; includes submission, scheduling and synchronization.
+    completion_latency_ms: Distribution,
+    gpu_execution_ms: Option<Distribution>,
     copies: u64,
     source_rebuilds: u64,
     target_rebuilds: u64,
@@ -277,6 +421,7 @@ struct RunResult {
 
 #[derive(Serialize)]
 struct CaseResult {
+    implementation: Implementation,
     name: &'static str,
     texture_size: (u32, u32),
     source_rect: (u32, u32, u32, u32),
@@ -285,7 +430,8 @@ struct CaseResult {
     copy_cpu_median_ms: f64,
     copy_cpu_p95_ms: f64,
     copy_cpu_mean_ms: f64,
-    copy_to_gpu_complete_median_ms: f64,
+    completion_latency_median_ms: f64,
+    gpu_execution_median_ms: Option<f64>,
     source_rebuilds_per_copy: f64,
     target_rebuilds_per_copy: f64,
     runs: Vec<RunResult>,
@@ -299,49 +445,65 @@ struct BenchReport {
     cases: Vec<CaseResult>,
 }
 
-fn run_case(case: &BenchCase, copies: usize) -> RunResult {
+fn run_case(case: &BenchCase, implementation: Implementation, copies: usize) -> RunResult {
     let (texture_width, texture_height) = case.texture_size;
     let textures: Vec<_> = (0..case.textures)
         .map(|_| source_texture(MTLPixelFormat::BGRA8Unorm, texture_width, texture_height))
         .collect();
     let target = ScopedIOSurface::new_bgra(case.source_rect.2, case.source_rect.3).unwrap();
-    let mut copy = AngleCopy::new();
-    let _renderer = case.renderer_context.then(|| RendererContext::make_current(&copy));
+    let mut copier = match implementation {
+        Implementation::AngleCopy => Copier::Angle(AngleCopy::new()),
+        Implementation::MetalBlit => Copier::Metal {
+            blit: MetalBlit::new(&target),
+            pending: None,
+        },
+    };
+    let _renderer = match &copier {
+        Copier::Angle(copy) if case.renderer_context => Some(RendererContext::make_current(copy)),
+        _ => None,
+    };
 
-    let copy_frame = |copy: &mut AngleCopy, frame: usize| {
-        let texture = native(&textures[frame % textures.len()]);
+    let copy_frame = |copier: &mut Copier, frame: usize| {
+        let texture = &textures[frame % textures.len()];
         let started = Instant::now();
-        assert!(copy.copy_native_texture_to_iosurface(texture, target.as_ptr(), case.source_rect));
+        copier.copy(texture, &target, case.source_rect);
         started.elapsed()
     };
 
     for frame in 0..WARMUP_COPIES {
-        copy_frame(&mut copy, frame);
-        finish(&mut copy);
+        copy_frame(&mut copier, frame);
+        copier.finish();
     }
-    copy.take_stats();
+    if let Copier::Angle(copy) = &mut copier {
+        copy.take_stats();
+    }
 
     // Guest frames arrive far slower than this copy completes, so drain the GPU
     // between copies to keep queue backpressure out of the CPU measurement.
     let mut cpu = Vec::with_capacity(copies);
+    let mut gpu = Vec::with_capacity(copies);
     for frame in WARMUP_COPIES..WARMUP_COPIES + copies {
-        cpu.push(copy_frame(&mut copy, frame));
-        finish(&mut copy);
+        cpu.push(copy_frame(&mut copier, frame));
+        gpu.extend(copier.finish());
     }
-    let stats = copy.take_stats();
+    let stats = match &mut copier {
+        Copier::Angle(copy) => copy.take_stats(),
+        Copier::Metal { .. } => Default::default(),
+    };
 
-    let mut gpu_complete = Vec::with_capacity(copies);
+    let mut completion = Vec::with_capacity(copies);
     for frame in 0..copies {
         let started = Instant::now();
-        copy_frame(&mut copy, frame);
-        finish(&mut copy);
-        gpu_complete.push(started.elapsed());
+        copy_frame(&mut copier, frame);
+        copier.finish();
+        completion.push(started.elapsed());
     }
 
     RunResult {
         copy_cpu_ms: Distribution::new(&cpu),
-        copy_to_gpu_complete_ms: Distribution::new(&gpu_complete),
-        copies: stats.copies,
+        completion_latency_ms: Distribution::new(&completion),
+        gpu_execution_ms: (!gpu.is_empty()).then(|| Distribution::new(&gpu)),
+        copies: copies as u64,
         source_rebuilds: stats.source_rebuilds,
         target_rebuilds: stats.target_rebuilds,
     }
@@ -365,23 +527,33 @@ fn bench_angle_copy() {
     let runs = env_or("VARMINT_PRESENT_BENCH_RUNS", 5);
     let copies = env_or("VARMINT_PRESENT_BENCH_COPIES", 300);
     let filter = std::env::var("VARMINT_PRESENT_BENCH_CASES").unwrap_or_default();
-    let cases: Vec<_> = BENCH_CASES.iter().filter(|case| case.name.contains(&filter)).collect();
+    let cases: Vec<_> = [Implementation::AngleCopy, Implementation::MetalBlit]
+        .into_iter()
+        .flat_map(|implementation| {
+            BENCH_CASES
+                .iter()
+                .filter(|case| case.name.contains(&filter))
+                .filter(move |case| implementation == Implementation::AngleCopy || case.renderer_context)
+                .map(move |case| (implementation, case))
+        })
+        .collect();
 
     let started = Instant::now();
     let mut results: Vec<Vec<RunResult>> = cases.iter().map(|_| Vec::new()).collect();
     // Interleave cases so slow drift (thermals, background load) spreads across all of them.
     for _ in 0..runs {
-        for (case, results) in cases.iter().zip(&mut results) {
-            results.push(run_case(case, copies));
+        for ((implementation, case), results) in cases.iter().zip(&mut results) {
+            results.push(run_case(case, *implementation, copies));
         }
     }
 
     let cases = cases
         .into_iter()
         .zip(results)
-        .map(|(case, runs)| {
+        .map(|((implementation, case), runs)| {
             let total_copies = runs.iter().map(|r| r.copies).sum::<u64>() as f64;
             CaseResult {
+                implementation,
                 name: case.name,
                 texture_size: case.texture_size,
                 source_rect: case.source_rect,
@@ -390,7 +562,12 @@ fn bench_angle_copy() {
                 copy_cpu_median_ms: median(runs.iter().map(|r| r.copy_cpu_ms.median).collect()),
                 copy_cpu_p95_ms: median(runs.iter().map(|r| r.copy_cpu_ms.p95).collect()),
                 copy_cpu_mean_ms: median(runs.iter().map(|r| r.copy_cpu_ms.mean).collect()),
-                copy_to_gpu_complete_median_ms: median(runs.iter().map(|r| r.copy_to_gpu_complete_ms.median).collect()),
+                completion_latency_median_ms: median(runs.iter().map(|r| r.completion_latency_ms.median).collect()),
+                gpu_execution_median_ms: runs
+                    .iter()
+                    .map(|r| r.gpu_execution_ms.as_ref().map(|d| d.median))
+                    .collect::<Option<Vec<_>>>()
+                    .map(median),
                 source_rebuilds_per_copy: runs.iter().map(|r| r.source_rebuilds).sum::<u64>() as f64 / total_copies,
                 target_rebuilds_per_copy: runs.iter().map(|r| r.target_rebuilds).sum::<u64>() as f64 / total_copies,
                 runs,
