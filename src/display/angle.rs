@@ -1039,3 +1039,7 @@ impl AngleCopy {
             .unwrap_or_default()
     }
 }
+
+#[cfg(test)]
+#[path = "angle_tests.rs"]
+mod tests;

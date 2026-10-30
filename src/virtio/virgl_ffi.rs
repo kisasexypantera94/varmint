@@ -54,6 +54,11 @@ pub struct NativeTexture {
 }
 
 impl NativeTexture {
+    #[cfg(test)]
+    pub fn new(handle: NonNull<c_void>, width: u32, height: u32) -> Self {
+        Self { handle, width, height }
+    }
+
     pub fn as_ptr(self) -> *mut c_void {
         self.handle.as_ptr()
     }
