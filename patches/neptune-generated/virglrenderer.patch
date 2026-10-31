@@ -862,7 +862,7 @@ index 66e3674e..eefbf483 100644
          if (!args->pMetaData) return;
          memset(args->pMetaData, 0, args->Size);
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d12device.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d12device.h
-index 56e3c439..011fc6ed 100644
+index 56e3c439..168816c2 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_id3d12device.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d12device.h
 @@ -4878,6 +4878,10 @@ struct npt_command_ID3D12Device_GetCopyableFootprints {
@@ -1230,6 +1230,15 @@ index 56e3c439..011fc6ed 100644
  }
 
  static inline void
+@@ -11178,7 +11221,7 @@ npt_dispatch_ID3D12Device9_CreateCommandQueue1(struct npt_dispatch_context *ctx,
+      * canonical method's slots are answered into the reply refs. */
+     if (args.ppCommandQueue && *args.ppCommandQueue)
+         npt_cs_handle_register_guest_id(ctx, args._guest_id_ppCommandQueue, *args.ppCommandQueue,
+-            npt_object_type_from_iid(args.CreatorID));
++            npt_object_type_from_iid(args.riid));
+     else if (args.ppCommandQueue)
+         npt_cs_handle_register_failed_guest_id(ctx, args._guest_id_ppCommandQueue);
+
 @@ -11985,6 +12028,7 @@ struct npt_command_ID3D12Device12_GetResourceAllocationInfo3 {
      const UINT32 * pNumCastableFormats;
      const DXGI_FORMAT ** ppCastableFormats;

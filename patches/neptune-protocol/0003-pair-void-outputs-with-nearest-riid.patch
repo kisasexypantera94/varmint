@@ -1,0 +1,200 @@
+diff --git a/templates/client.c b/templates/client.c
+index 07b2b85..376475d 100644
+--- a/templates/client.c
++++ b/templates/client.c
+@@ -30,14 +30,6 @@ def call_args(method):
+     """Args to pass to the generated npt_call_/npt_async_ function."""
+     return ['npt_com_self_ring(self)', 'npt_com_self_id(self)'] + [p.name for p in method.params]
+
+-def riid_params(method):
+-    """The IID input parameters, in order.  The i-th one names the
+-    interface of the i-th void ** output (GetBuffer(riid, ppv),
+-    GetCurrentResourceAndCommandQueue(riidResource, ppvResource,
+-    riidQueue, ppvQueue), ...)."""
+-    return [p.name for p in method.params
+-            if p.input and not p.output and p.type_name == 'IID']
+-
+ def _count_c_expr(method, count_field_name):
+     """Resolve a count field name to a C expression.
+
+@@ -72,15 +64,15 @@ def output_com_handle_params(method):
+     outputs WITHOUT an accompanying REFIID can't be wrapped and are
+     skipped.
+     """
+-    riids = riid_params(method)
++    riids = GEN.riid_exprs_for(method.params, '')
+     out = []
+     for p in method.params:
+         if p.output and p.is_com_handle and p.indirection >= 1:
+             c_type = p.type_name
+             if c_type == 'void':
+-                if not riids:
++                if p.name not in riids:
+                     continue
+-                iid_expr = riids.pop(0)  # already a const GUID *
++                iid_expr = riids[p.name]
+             else:
+                 iid_expr = '&NPT_IID_' + GEN.reg.resolve_alias_chain(c_type)
+             # Determine array count from the registry's count field.
+diff --git a/tests/meson.build b/tests/meson.build
+index 82e120f..6f2eefc 100644
+--- a/tests/meson.build
++++ b/tests/meson.build
+@@ -87,3 +87,12 @@ test_roundtrip = executable(
+ )
+
+ test('roundtrip', test_roundtrip, timeout: 120)
++
++test('riid_pairing', py,
++  args: [
++    files('test_riid_pairing.py'),
++    meson.current_source_dir() / '..' / npt_json,
++    meson.current_source_dir() / '..' / npt_overlay,
++    meson.current_source_dir() / '..' / 'npt_interface_ids.json',
++  ],
++)
+diff --git a/tests/test_riid_pairing.py b/tests/test_riid_pairing.py
+new file mode 100644
+index 0000000..3e21cf0
+--- /dev/null
++++ b/tests/test_riid_pairing.py
+@@ -0,0 +1,52 @@
++#!/usr/bin/env python3
++
++# Copyright 2026 Turing Software LLC
++# SPDX-License-Identifier: Apache-2.0
++
++"""Check which REFIID input names each void ** output's interface."""
++
++import sys
++from pathlib import Path
++
++sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'tools'))
++
++from npt_registry import TypeRegistry, void_output_riids
++
++
++def pairs(registry, iface_name, method_name):
++    for iface in registry.interfaces:
++        if iface.name != iface_name:
++            continue
++        for m in iface.methods:
++            if m.name == method_name:
++                return {out: p.name
++                        for out, p in void_output_riids(m.params).items()}
++    raise KeyError(f'{iface_name}::{method_name}')
++
++
++def main():
++    json_path, overlay_path, ids_path = sys.argv[1:4]
++    registry = TypeRegistry()
++    registry.load(json_path, [overlay_path], interface_ids_path=ids_path)
++    registry.resolve()
++
++    expected = {
++        # CreatorID is a GUID input before riid; it names no interface.
++        ('ID3D12Device9', 'CreateCommandQueue1'):
++            {'ppCommandQueue': 'riid'},
++        ('ID3D12SwapChainAssistant', 'GetCurrentResourceAndCommandQueue'):
++            {'ppvResource': 'riidResource', 'ppvQueue': 'riidQueue'},
++        ('ID3D12Device', 'CreateCommittedResource'):
++            {'ppvResource': 'riidResource'},
++    }
++    failed = 0
++    for (iface_name, method_name), want in expected.items():
++        got = pairs(registry, iface_name, method_name)
++        if got != want:
++            print(f'FAIL: {iface_name}::{method_name}: {got} != {want}')
++            failed += 1
++    return 1 if failed else 0
++
++
++if __name__ == '__main__':
++    sys.exit(main())
+diff --git a/tools/npt_codegen.py b/tools/npt_codegen.py
+index d355b57..18193fa 100644
+--- a/tools/npt_codegen.py
++++ b/tools/npt_codegen.py
+@@ -16,7 +16,7 @@ from npt_registry import (
+     TypeRegistry, NptField, NptMethod,
+     Category, PRIMITIVE_WIRE_SIZES, PRIMITIVE_NAMES,
+     STRING_TYPES, WSTRING_TYPES,
+-    parse_count_expr,
++    parse_count_expr, void_output_riids,
+ )
+
+
+@@ -2442,23 +2442,14 @@ class Gen:
+
+     def riid_exprs_for(self, params, prefix: str) -> dict:
+         """Map each void ** output parameter's name to the C expression
+-        (a const GUID *) of the REFIID input that names its interface:
+-        the i-th IID input belongs to the i-th void ** output, which is
+-        how every such method in the registry pairs them
+-        (GetParent(riid, ppv), GetCurrentResourceAndCommandQueue(
+-        riidResource, ppvResource, riidQueue, ppvQueue), ...)."""
+-        riids = []
+-        for p in params:
+-            if not p.input or p.type_name != 'IID':
+-                continue
++        (a const GUID *) of the REFIID input that names its interface."""
++        exprs = {}
++        for name, p in void_output_riids(params).items():
+             if p.indirection == 1:
+-                riids.append(f'{prefix}{p.name}')
++                exprs[name] = f'{prefix}{p.name}'
+             elif p.indirection == 0:
+-                riids.append(f'&{prefix}{p.name}')
+-        outs = [p for p in params
+-                if self.is_output_com_handle(p)
+-                and p.type_name in ('void', 'VOID')]
+-        return {o.name: r for o, r in zip(outs, riids)}
++                exprs[name] = f'&{prefix}{p.name}'
++        return exprs
+
+     def _type_might_contain_handle(self, ntype, _visited=None):
+         """Check recursively if a struct/union type contains any handle fields."""
+diff --git a/tools/npt_registry.py b/tools/npt_registry.py
+index 4abb5c1..adef8c9 100644
+--- a/tools/npt_registry.py
++++ b/tools/npt_registry.py
+@@ -543,6 +543,22 @@ def canonical_default(method_name):
+     return not method_name.startswith(('Create', 'Open'))
+
+
++def void_output_riids(params):
++    """Map each void ** output parameter's name to the REFIID input that
++    names its interface: the nearest IID input before it.  Position alone
++    is wrong when another GUID input comes first, as in
++    CreateCommandQueue1(pDesc, CreatorID, riid, ppCommandQueue)."""
++    pairs = {}
++    riid = None
++    for p in params:
++        if p.input and not p.output and p.type_name == 'IID':
++            riid = p
++        elif (p.output and p.is_com_handle
++              and p.type_name in ('void', 'VOID') and riid is not None):
++            pairs[p.name] = riid
++    return pairs
++
++
+ # ---------------------------------------------------------------------------
+ # Type registry
+ # ---------------------------------------------------------------------------
+@@ -1009,12 +1025,10 @@ class TypeRegistry:
+                 if canonical is False:
+                     continue
+                 # A canonical reply carries one ref per output slot; a
+-                # void ** output takes its interface from the REFIID input
+-                # paired with it by position.
+-                voids = [p for p in outs if p.type_name in ('void', 'VOID')]
+-                riids = [p for p in params
+-                         if p.input and p.type_name == 'IID']
+-                if len(riids) < len(voids):
++                # void ** output takes its interface from its REFIID input.
++                riids = void_output_riids(params)
++                if any(p.type_name in ('void', 'VOID')
++                       and p.name not in riids for p in outs):
+                     raise ValueError(
+                         f"canonical {context}: a void ** output has no "
+                         f"REFIID input to name its interface")

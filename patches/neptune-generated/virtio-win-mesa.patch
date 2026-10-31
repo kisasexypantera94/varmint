@@ -1,3 +1,16 @@
+diff --git a/src/virtio/neptune/neptune-protocol/npt_protocol_client_id3d12device.c b/src/virtio/neptune/neptune-protocol/npt_protocol_client_id3d12device.c
+index 4f11d135203..e037cade005 100644
+--- a/src/virtio/neptune/neptune-protocol/npt_protocol_client_id3d12device.c
++++ b/src/virtio/neptune/neptune-protocol/npt_protocol_client_id3d12device.c
+@@ -1597,7 +1597,7 @@ npt_id3d12device9_default_CreateCommandQueue1(void *self, const D3D12_COMMAND_QU
+         if (_raw_ppCommandQueue)
+             *_orig_ppCommandQueue = (void *)npt_com_get_or_wrap(
+                 npt_com_self_device(self),
+-                CreatorID,
++                riid,
+                 (uint64_t)(uintptr_t)_raw_ppCommandQueue,
+                 (struct npt_com_base *)self);
+         else
 diff --git a/src/virtio/neptune/neptune-protocol/npt_protocol_defs.h b/src/virtio/neptune/neptune-protocol/npt_protocol_defs.h
 index cffc4e6201f..226fc62fbc2 100644
 --- a/src/virtio/neptune/neptune-protocol/npt_protocol_defs.h
