@@ -316,7 +316,7 @@ index 8b9ca2c0e64..3ea0bae8553 100644
 
  static inline size_t
 diff --git a/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d11devicecontext.h b/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d11devicecontext.h
-index 465383ca413..7e3db8bfc90 100644
+index 465383ca413..853ff1c2bbe 100644
 --- a/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d11devicecontext.h
 +++ b/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d11devicecontext.h
 @@ -883,6 +883,7 @@ struct npt_command_ID3D11DeviceContext_Map {
@@ -345,7 +345,48 @@ index 465383ca413..7e3db8bfc90 100644
  }
 
  static inline size_t
-@@ -2726,6 +2727,7 @@ struct npt_command_ID3D11DeviceContext_GetData {
+@@ -938,8 +939,7 @@ npt_sizeof_ID3D11DeviceContext_Map_reply(const ID3D11Resource * pResource,const
+     (void)max_mode;  /* unused when the reply has no struct/union outputs */
+     size_t cmd_size = sizeof(struct npt_reply_header);
+     /* Reply has runtime-unbounded wire size; reserve only the header.
+-     * Host encode_reply sets the encoder fatal flag and the guest
+-     * decode path returns the documented default. */
++     * npt_call_ never submits this method with a reply. */
+     return cmd_size;
+ }
+
+@@ -1027,17 +1027,20 @@ npt_call_ID3D11DeviceContext_Map(struct npt_ring *ring,
+                                  UINT MapFlags,
+                                  D3D11_MAPPED_SUBRESOURCE * pMappedResource)
+ {
+-    struct npt_ring_submit_command submit;
+-    npt_submit_ID3D11DeviceContext_Map(ring, NPT_CMD_FLAG_REPLY, object_id, pResource, Subresource, MapType, MapFlags, pMappedResource, &submit);
+-    struct npt_cs_decoder *dec = npt_ring_get_command_reply(ring, &submit);
+-    if (dec) {
+-        HRESULT _ret;
+-        npt_decode_ID3D11DeviceContext_Map_reply(dec, pMappedResource, &_ret);
+-        npt_ring_free_command_reply(ring, &submit);
+-        return _ret;
+-    } else {
+-        return (HRESULT)0x8007000E /* E_OUTOFMEMORY */;
++    /* The host cannot encode this reply, and a failed reply encode
++     * takes down the whole context; fail the call here instead. */
++    (void)ring; (void)object_id;
++    (void)pResource;
++    (void)Subresource;
++    (void)MapType;
++    (void)MapFlags;
++    (void)pMappedResource;
++    static int logged;
++    if (!logged) {
++        logged = 1;
++        npt_log("ID3D11DeviceContext::Map is not supported over Neptune");
+     }
++    return (HRESULT)0x80004001 /* E_NOTIMPL */;
+ }
+
+ /*
+@@ -2726,6 +2729,7 @@ struct npt_command_ID3D11DeviceContext_GetData {
      void * pData;
      UINT DataSize;
      UINT GetDataFlags;
@@ -353,7 +394,7 @@ index 465383ca413..7e3db8bfc90 100644
      HRESULT ret;
  };
 
-@@ -2738,7 +2740,7 @@ npt_sizeof_ID3D11DeviceContext_GetData(const ID3D11Asynchronous * pAsync,const v
+@@ -2738,7 +2742,7 @@ npt_sizeof_ID3D11DeviceContext_GetData(const ID3D11Asynchronous * pAsync,const v
      (void)max_mode;  /* unused when the command has no struct/union inputs */
      size_t cmd_size = sizeof(struct npt_command_header);
      cmd_size += sizeof(uint64_t);
@@ -362,7 +403,7 @@ index 465383ca413..7e3db8bfc90 100644
      cmd_size += npt_sizeof_UINT(&DataSize, max_mode);
      cmd_size += npt_sizeof_UINT(&GetDataFlags, max_mode);
      return cmd_size;
-@@ -2763,7 +2765,7 @@ npt_encode_ID3D11DeviceContext_GetData(struct npt_cs_encoder *enc,
+@@ -2763,7 +2767,7 @@ npt_encode_ID3D11DeviceContext_GetData(struct npt_cs_encoder *enc,
      };
      npt_cs_encoder_write(enc, sizeof(_hdr), &_hdr, sizeof(_hdr));
      npt_encode_com_handle(enc, npt_object_get_id(pAsync));
@@ -371,7 +412,7 @@ index 465383ca413..7e3db8bfc90 100644
      npt_encode_UINT(enc, &DataSize);
      npt_encode_UINT(enc, &GetDataFlags);
  }
-@@ -8434,8 +8436,9 @@ npt_sizeof_ID3D11DeviceContext_PSGetShader_reply(ID3D11PixelShader ** ppPixelSha
+@@ -8434,8 +8438,9 @@ npt_sizeof_ID3D11DeviceContext_PSGetShader_reply(ID3D11PixelShader ** ppPixelSha
      size_t cmd_size = sizeof(struct npt_reply_header);
  cmd_size += npt_sizeof_npt_wire_object_ref();  /* ppPixelShader: registered id */
  cmd_size += npt_sizeof_array_count(0) + (ppClassInstances ? (size_t)((pNumClassInstances ? *pNumClassInstances : 0)) : 0) * npt_sizeof_npt_wire_object_ref();  /* ppClassInstances: registered ids */
@@ -383,7 +424,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -8790,8 +8793,9 @@ npt_sizeof_ID3D11DeviceContext_VSGetShader_reply(ID3D11VertexShader ** ppVertexS
+@@ -8790,8 +8795,9 @@ npt_sizeof_ID3D11DeviceContext_VSGetShader_reply(ID3D11VertexShader ** ppVertexS
      size_t cmd_size = sizeof(struct npt_reply_header);
  cmd_size += npt_sizeof_npt_wire_object_ref();  /* ppVertexShader: registered id */
  cmd_size += npt_sizeof_array_count(0) + (ppClassInstances ? (size_t)((pNumClassInstances ? *pNumClassInstances : 0)) : 0) * npt_sizeof_npt_wire_object_ref();  /* ppClassInstances: registered ids */
@@ -395,7 +436,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -9216,6 +9220,8 @@ struct npt_command_ID3D11DeviceContext_IAGetVertexBuffers {
+@@ -9216,6 +9222,8 @@ struct npt_command_ID3D11DeviceContext_IAGetVertexBuffers {
      uint64_t *_guest_ids_ppVertexBuffers;
      uint32_t _guest_id_count_ppVertexBuffers;
      struct npt_wire_object_ref *_refs_ppVertexBuffers;
@@ -404,7 +445,7 @@ index 465383ca413..7e3db8bfc90 100644
  };
 
  static inline size_t
-@@ -9229,8 +9235,8 @@ npt_sizeof_ID3D11DeviceContext_IAGetVertexBuffers(const UINT StartSlot,const UIN
+@@ -9229,8 +9237,8 @@ npt_sizeof_ID3D11DeviceContext_IAGetVertexBuffers(const UINT StartSlot,const UIN
      cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
      cmd_size += npt_sizeof_UINT(&NumBuffers, max_mode);
  cmd_size += sizeof(uint64_t) + (ppVertexBuffers ? (size_t)(NumBuffers) : 0) * sizeof(uint64_t);  /* ppVertexBuffers: array_count + N guest ids */
@@ -415,7 +456,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -9266,8 +9272,8 @@ if (ppVertexBuffers) {
+@@ -9266,8 +9274,8 @@ if (ppVertexBuffers) {
  } else {
      npt_encode_array_count(enc, 0);
  }
@@ -426,7 +467,7 @@ index 465383ca413..7e3db8bfc90 100644
  }
 
  static inline size_t
-@@ -9412,6 +9418,8 @@ struct npt_command_ID3D11DeviceContext_IAGetIndexBuffer {
+@@ -9412,6 +9420,8 @@ struct npt_command_ID3D11DeviceContext_IAGetIndexBuffer {
       * context object table. */
      uint64_t _guest_id_pIndexBuffer;
      struct npt_wire_object_ref _ref_pIndexBuffer;
@@ -435,7 +476,7 @@ index 465383ca413..7e3db8bfc90 100644
  };
 
  static inline size_t
-@@ -9423,8 +9431,8 @@ npt_sizeof_ID3D11DeviceContext_IAGetIndexBuffer(ID3D11Buffer ** pIndexBuffer,con
+@@ -9423,8 +9433,8 @@ npt_sizeof_ID3D11DeviceContext_IAGetIndexBuffer(ID3D11Buffer ** pIndexBuffer,con
      (void)max_mode;  /* unused when the command has no struct/union inputs */
      size_t cmd_size = sizeof(struct npt_command_header);
  cmd_size += sizeof(uint64_t);  /* pIndexBuffer: guest id */
@@ -446,7 +487,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -9453,8 +9461,8 @@ npt_encode_ID3D11DeviceContext_IAGetIndexBuffer(struct npt_cs_encoder *enc,
+@@ -9453,8 +9463,8 @@ npt_encode_ID3D11DeviceContext_IAGetIndexBuffer(struct npt_cs_encoder *enc,
      }
      npt_encode_uint64_t(enc, &_gid_pIndexBuffer);
  }
@@ -457,7 +498,7 @@ index 465383ca413..7e3db8bfc90 100644
  }
 
  static inline size_t
-@@ -9467,10 +9475,12 @@ npt_sizeof_ID3D11DeviceContext_IAGetIndexBuffer_reply(ID3D11Buffer ** pIndexBuff
+@@ -9467,10 +9477,12 @@ npt_sizeof_ID3D11DeviceContext_IAGetIndexBuffer_reply(ID3D11Buffer ** pIndexBuff
      (void)max_mode;  /* unused when the reply has no struct/union outputs */
      size_t cmd_size = sizeof(struct npt_reply_header);
  cmd_size += npt_sizeof_npt_wire_object_ref();  /* pIndexBuffer: registered id */
@@ -474,7 +515,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -9820,8 +9830,9 @@ npt_sizeof_ID3D11DeviceContext_GSGetShader_reply(ID3D11GeometryShader ** ppGeome
+@@ -9820,8 +9832,9 @@ npt_sizeof_ID3D11DeviceContext_GSGetShader_reply(ID3D11GeometryShader ** ppGeome
      size_t cmd_size = sizeof(struct npt_reply_header);
  cmd_size += npt_sizeof_npt_wire_object_ref();  /* ppGeometryShader: registered id */
  cmd_size += npt_sizeof_array_count(0) + (ppClassInstances ? (size_t)((pNumClassInstances ? *pNumClassInstances : 0)) : 0) * npt_sizeof_npt_wire_object_ref();  /* ppClassInstances: registered ids */
@@ -486,7 +527,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -10395,6 +10406,7 @@ struct npt_command_ID3D11DeviceContext_GetPredication {
+@@ -10395,6 +10408,7 @@ struct npt_command_ID3D11DeviceContext_GetPredication {
       * context object table. */
      uint64_t _guest_id_ppPredicate;
      struct npt_wire_object_ref _ref_ppPredicate;
@@ -494,7 +535,7 @@ index 465383ca413..7e3db8bfc90 100644
  };
 
  static inline size_t
-@@ -10406,7 +10418,7 @@ npt_sizeof_ID3D11DeviceContext_GetPredication(ID3D11Predicate ** ppPredicate,con
+@@ -10406,7 +10420,7 @@ npt_sizeof_ID3D11DeviceContext_GetPredication(ID3D11Predicate ** ppPredicate,con
      (void)max_mode;  /* unused when the command has no struct/union inputs */
      size_t cmd_size = sizeof(struct npt_command_header);
  cmd_size += sizeof(uint64_t);  /* ppPredicate: guest id */
@@ -503,7 +544,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -10434,7 +10446,7 @@ npt_encode_ID3D11DeviceContext_GetPredication(struct npt_cs_encoder *enc,
+@@ -10434,7 +10448,7 @@ npt_encode_ID3D11DeviceContext_GetPredication(struct npt_cs_encoder *enc,
      }
      npt_encode_uint64_t(enc, &_gid_ppPredicate);
  }
@@ -512,7 +553,7 @@ index 465383ca413..7e3db8bfc90 100644
  }
 
  static inline size_t
-@@ -10447,8 +10459,9 @@ npt_sizeof_ID3D11DeviceContext_GetPredication_reply(ID3D11Predicate ** ppPredica
+@@ -10447,8 +10461,9 @@ npt_sizeof_ID3D11DeviceContext_GetPredication_reply(ID3D11Predicate ** ppPredica
      (void)max_mode;  /* unused when the reply has no struct/union outputs */
      size_t cmd_size = sizeof(struct npt_reply_header);
  cmd_size += npt_sizeof_npt_wire_object_ref();  /* ppPredicate: registered id */
@@ -524,7 +565,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -11293,6 +11306,8 @@ struct npt_command_ID3D11DeviceContext_OMGetBlendState {
+@@ -11293,6 +11308,8 @@ struct npt_command_ID3D11DeviceContext_OMGetBlendState {
       * context object table. */
      uint64_t _guest_id_ppBlendState;
      struct npt_wire_object_ref _ref_ppBlendState;
@@ -533,7 +574,7 @@ index 465383ca413..7e3db8bfc90 100644
  };
 
  static inline size_t
-@@ -11304,8 +11319,8 @@ npt_sizeof_ID3D11DeviceContext_OMGetBlendState(ID3D11BlendState ** ppBlendState,
+@@ -11304,8 +11321,8 @@ npt_sizeof_ID3D11DeviceContext_OMGetBlendState(ID3D11BlendState ** ppBlendState,
      (void)max_mode;  /* unused when the command has no struct/union inputs */
      size_t cmd_size = sizeof(struct npt_command_header);
  cmd_size += sizeof(uint64_t);  /* ppBlendState: guest id */
@@ -544,7 +585,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -11334,8 +11349,8 @@ npt_encode_ID3D11DeviceContext_OMGetBlendState(struct npt_cs_encoder *enc,
+@@ -11334,8 +11351,8 @@ npt_encode_ID3D11DeviceContext_OMGetBlendState(struct npt_cs_encoder *enc,
      }
      npt_encode_uint64_t(enc, &_gid_ppBlendState);
  }
@@ -555,7 +596,7 @@ index 465383ca413..7e3db8bfc90 100644
  }
 
  static inline size_t
-@@ -11351,8 +11366,9 @@ cmd_size += npt_sizeof_npt_wire_object_ref();  /* ppBlendState: registered id */
+@@ -11351,8 +11368,9 @@ cmd_size += npt_sizeof_npt_wire_object_ref();  /* ppBlendState: registered id */
      cmd_size += npt_sizeof_array_count(BlendFactor ? 4 : 0);
      if (BlendFactor)
          cmd_size += npt_sizeof_FLOAT_array((const FLOAT *)BlendFactor, 4);
@@ -567,7 +608,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -11466,6 +11482,7 @@ struct npt_command_ID3D11DeviceContext_OMGetDepthStencilState {
+@@ -11466,6 +11484,7 @@ struct npt_command_ID3D11DeviceContext_OMGetDepthStencilState {
       * context object table. */
      uint64_t _guest_id_ppDepthStencilState;
      struct npt_wire_object_ref _ref_ppDepthStencilState;
@@ -575,7 +616,7 @@ index 465383ca413..7e3db8bfc90 100644
  };
 
  static inline size_t
-@@ -11477,7 +11494,7 @@ npt_sizeof_ID3D11DeviceContext_OMGetDepthStencilState(ID3D11DepthStencilState **
+@@ -11477,7 +11496,7 @@ npt_sizeof_ID3D11DeviceContext_OMGetDepthStencilState(ID3D11DepthStencilState **
      (void)max_mode;  /* unused when the command has no struct/union inputs */
      size_t cmd_size = sizeof(struct npt_command_header);
  cmd_size += sizeof(uint64_t);  /* ppDepthStencilState: guest id */
@@ -584,7 +625,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -11505,7 +11522,7 @@ npt_encode_ID3D11DeviceContext_OMGetDepthStencilState(struct npt_cs_encoder *enc
+@@ -11505,7 +11524,7 @@ npt_encode_ID3D11DeviceContext_OMGetDepthStencilState(struct npt_cs_encoder *enc
      }
      npt_encode_uint64_t(enc, &_gid_ppDepthStencilState);
  }
@@ -593,7 +634,7 @@ index 465383ca413..7e3db8bfc90 100644
  }
 
  static inline size_t
-@@ -11518,8 +11535,9 @@ npt_sizeof_ID3D11DeviceContext_OMGetDepthStencilState_reply(ID3D11DepthStencilSt
+@@ -11518,8 +11537,9 @@ npt_sizeof_ID3D11DeviceContext_OMGetDepthStencilState_reply(ID3D11DepthStencilSt
      (void)max_mode;  /* unused when the reply has no struct/union outputs */
      size_t cmd_size = sizeof(struct npt_reply_header);
  cmd_size += npt_sizeof_npt_wire_object_ref();  /* ppDepthStencilState: registered id */
@@ -605,7 +646,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -11916,6 +11934,7 @@ struct npt_command_ID3D11DeviceContext_RSGetViewports {
+@@ -11916,6 +11936,7 @@ struct npt_command_ID3D11DeviceContext_RSGetViewports {
      void *_self;
      UINT * pNumViewports;
      D3D11_VIEWPORT * pViewports;
@@ -613,7 +654,7 @@ index 465383ca413..7e3db8bfc90 100644
  };
 
  static inline size_t
-@@ -11929,7 +11948,7 @@ npt_sizeof_ID3D11DeviceContext_RSGetViewports(const UINT * pNumViewports,const D
+@@ -11929,7 +11950,7 @@ npt_sizeof_ID3D11DeviceContext_RSGetViewports(const UINT * pNumViewports,const D
      cmd_size += npt_sizeof_simple_pointer(pNumViewports);
      if (pNumViewports)
          cmd_size += npt_sizeof_UINT(pNumViewports, max_mode);
@@ -622,7 +663,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -11951,7 +11970,7 @@ npt_encode_ID3D11DeviceContext_RSGetViewports(struct npt_cs_encoder *enc,
+@@ -11951,7 +11972,7 @@ npt_encode_ID3D11DeviceContext_RSGetViewports(struct npt_cs_encoder *enc,
      npt_cs_encoder_write(enc, sizeof(_hdr), &_hdr, sizeof(_hdr));
      if (npt_encode_simple_pointer(enc, pNumViewports))
          npt_encode_UINT(enc, pNumViewports);
@@ -631,7 +672,7 @@ index 465383ca413..7e3db8bfc90 100644
  }
 
  static inline size_t
-@@ -12070,6 +12089,7 @@ struct npt_command_ID3D11DeviceContext_RSGetScissorRects {
+@@ -12070,6 +12091,7 @@ struct npt_command_ID3D11DeviceContext_RSGetScissorRects {
      void *_self;
      UINT * pNumRects;
      D3D11_RECT * pRects;
@@ -639,7 +680,7 @@ index 465383ca413..7e3db8bfc90 100644
  };
 
  static inline size_t
-@@ -12083,7 +12103,7 @@ npt_sizeof_ID3D11DeviceContext_RSGetScissorRects(const UINT * pNumRects,const D3
+@@ -12083,7 +12105,7 @@ npt_sizeof_ID3D11DeviceContext_RSGetScissorRects(const UINT * pNumRects,const D3
      cmd_size += npt_sizeof_simple_pointer(pNumRects);
      if (pNumRects)
          cmd_size += npt_sizeof_UINT(pNumRects, max_mode);
@@ -648,7 +689,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -12105,7 +12125,7 @@ npt_encode_ID3D11DeviceContext_RSGetScissorRects(struct npt_cs_encoder *enc,
+@@ -12105,7 +12127,7 @@ npt_encode_ID3D11DeviceContext_RSGetScissorRects(struct npt_cs_encoder *enc,
      npt_cs_encoder_write(enc, sizeof(_hdr), &_hdr, sizeof(_hdr));
      if (npt_encode_simple_pointer(enc, pNumRects))
          npt_encode_UINT(enc, pNumRects);
@@ -657,7 +698,7 @@ index 465383ca413..7e3db8bfc90 100644
  }
 
  static inline size_t
-@@ -12470,8 +12490,9 @@ npt_sizeof_ID3D11DeviceContext_HSGetShader_reply(ID3D11HullShader ** ppHullShade
+@@ -12470,8 +12492,9 @@ npt_sizeof_ID3D11DeviceContext_HSGetShader_reply(ID3D11HullShader ** ppHullShade
      size_t cmd_size = sizeof(struct npt_reply_header);
  cmd_size += npt_sizeof_npt_wire_object_ref();  /* ppHullShader: registered id */
  cmd_size += npt_sizeof_array_count(0) + (ppClassInstances ? (size_t)((pNumClassInstances ? *pNumClassInstances : 0)) : 0) * npt_sizeof_npt_wire_object_ref();  /* ppClassInstances: registered ids */
@@ -669,7 +710,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -13154,8 +13175,9 @@ npt_sizeof_ID3D11DeviceContext_DSGetShader_reply(ID3D11DomainShader ** ppDomainS
+@@ -13154,8 +13177,9 @@ npt_sizeof_ID3D11DeviceContext_DSGetShader_reply(ID3D11DomainShader ** ppDomainS
      size_t cmd_size = sizeof(struct npt_reply_header);
  cmd_size += npt_sizeof_npt_wire_object_ref();  /* ppDomainShader: registered id */
  cmd_size += npt_sizeof_array_count(0) + (ppClassInstances ? (size_t)((pNumClassInstances ? *pNumClassInstances : 0)) : 0) * npt_sizeof_npt_wire_object_ref();  /* ppClassInstances: registered ids */
@@ -681,7 +722,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -14002,8 +14024,9 @@ npt_sizeof_ID3D11DeviceContext_CSGetShader_reply(ID3D11ComputeShader ** ppComput
+@@ -14002,8 +14026,9 @@ npt_sizeof_ID3D11DeviceContext_CSGetShader_reply(ID3D11ComputeShader ** ppComput
      size_t cmd_size = sizeof(struct npt_reply_header);
  cmd_size += npt_sizeof_npt_wire_object_ref();  /* ppComputeShader: registered id */
  cmd_size += npt_sizeof_array_count(0) + (ppClassInstances ? (size_t)((pNumClassInstances ? *pNumClassInstances : 0)) : 0) * npt_sizeof_npt_wire_object_ref();  /* ppClassInstances: registered ids */
@@ -693,7 +734,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -16503,6 +16526,8 @@ struct npt_command_ID3D11DeviceContext1_VSGetConstantBuffers1 {
+@@ -16503,6 +16528,8 @@ struct npt_command_ID3D11DeviceContext1_VSGetConstantBuffers1 {
      uint64_t *_guest_ids_ppConstantBuffers;
      uint32_t _guest_id_count_ppConstantBuffers;
      struct npt_wire_object_ref *_refs_ppConstantBuffers;
@@ -702,7 +743,7 @@ index 465383ca413..7e3db8bfc90 100644
  };
 
  static inline size_t
-@@ -16516,8 +16541,8 @@ npt_sizeof_ID3D11DeviceContext1_VSGetConstantBuffers1(const UINT StartSlot,const
+@@ -16516,8 +16543,8 @@ npt_sizeof_ID3D11DeviceContext1_VSGetConstantBuffers1(const UINT StartSlot,const
      cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
      cmd_size += npt_sizeof_UINT(&NumBuffers, max_mode);
  cmd_size += sizeof(uint64_t) + (ppConstantBuffers ? (size_t)(NumBuffers) : 0) * sizeof(uint64_t);  /* ppConstantBuffers: array_count + N guest ids */
@@ -713,7 +754,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -16553,8 +16578,8 @@ if (ppConstantBuffers) {
+@@ -16553,8 +16580,8 @@ if (ppConstantBuffers) {
  } else {
      npt_encode_array_count(enc, 0);
  }
@@ -724,7 +765,7 @@ index 465383ca413..7e3db8bfc90 100644
  }
 
  static inline size_t
-@@ -16701,6 +16726,8 @@ struct npt_command_ID3D11DeviceContext1_HSGetConstantBuffers1 {
+@@ -16701,6 +16728,8 @@ struct npt_command_ID3D11DeviceContext1_HSGetConstantBuffers1 {
      uint64_t *_guest_ids_ppConstantBuffers;
      uint32_t _guest_id_count_ppConstantBuffers;
      struct npt_wire_object_ref *_refs_ppConstantBuffers;
@@ -733,7 +774,7 @@ index 465383ca413..7e3db8bfc90 100644
  };
 
  static inline size_t
-@@ -16714,8 +16741,8 @@ npt_sizeof_ID3D11DeviceContext1_HSGetConstantBuffers1(const UINT StartSlot,const
+@@ -16714,8 +16743,8 @@ npt_sizeof_ID3D11DeviceContext1_HSGetConstantBuffers1(const UINT StartSlot,const
      cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
      cmd_size += npt_sizeof_UINT(&NumBuffers, max_mode);
  cmd_size += sizeof(uint64_t) + (ppConstantBuffers ? (size_t)(NumBuffers) : 0) * sizeof(uint64_t);  /* ppConstantBuffers: array_count + N guest ids */
@@ -744,7 +785,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -16751,8 +16778,8 @@ if (ppConstantBuffers) {
+@@ -16751,8 +16780,8 @@ if (ppConstantBuffers) {
  } else {
      npt_encode_array_count(enc, 0);
  }
@@ -755,7 +796,7 @@ index 465383ca413..7e3db8bfc90 100644
  }
 
  static inline size_t
-@@ -16899,6 +16926,8 @@ struct npt_command_ID3D11DeviceContext1_DSGetConstantBuffers1 {
+@@ -16899,6 +16928,8 @@ struct npt_command_ID3D11DeviceContext1_DSGetConstantBuffers1 {
      uint64_t *_guest_ids_ppConstantBuffers;
      uint32_t _guest_id_count_ppConstantBuffers;
      struct npt_wire_object_ref *_refs_ppConstantBuffers;
@@ -764,7 +805,7 @@ index 465383ca413..7e3db8bfc90 100644
  };
 
  static inline size_t
-@@ -16912,8 +16941,8 @@ npt_sizeof_ID3D11DeviceContext1_DSGetConstantBuffers1(const UINT StartSlot,const
+@@ -16912,8 +16943,8 @@ npt_sizeof_ID3D11DeviceContext1_DSGetConstantBuffers1(const UINT StartSlot,const
      cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
      cmd_size += npt_sizeof_UINT(&NumBuffers, max_mode);
  cmd_size += sizeof(uint64_t) + (ppConstantBuffers ? (size_t)(NumBuffers) : 0) * sizeof(uint64_t);  /* ppConstantBuffers: array_count + N guest ids */
@@ -775,7 +816,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -16949,8 +16978,8 @@ if (ppConstantBuffers) {
+@@ -16949,8 +16980,8 @@ if (ppConstantBuffers) {
  } else {
      npt_encode_array_count(enc, 0);
  }
@@ -786,7 +827,7 @@ index 465383ca413..7e3db8bfc90 100644
  }
 
  static inline size_t
-@@ -17097,6 +17126,8 @@ struct npt_command_ID3D11DeviceContext1_GSGetConstantBuffers1 {
+@@ -17097,6 +17128,8 @@ struct npt_command_ID3D11DeviceContext1_GSGetConstantBuffers1 {
      uint64_t *_guest_ids_ppConstantBuffers;
      uint32_t _guest_id_count_ppConstantBuffers;
      struct npt_wire_object_ref *_refs_ppConstantBuffers;
@@ -795,7 +836,7 @@ index 465383ca413..7e3db8bfc90 100644
  };
 
  static inline size_t
-@@ -17110,8 +17141,8 @@ npt_sizeof_ID3D11DeviceContext1_GSGetConstantBuffers1(const UINT StartSlot,const
+@@ -17110,8 +17143,8 @@ npt_sizeof_ID3D11DeviceContext1_GSGetConstantBuffers1(const UINT StartSlot,const
      cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
      cmd_size += npt_sizeof_UINT(&NumBuffers, max_mode);
  cmd_size += sizeof(uint64_t) + (ppConstantBuffers ? (size_t)(NumBuffers) : 0) * sizeof(uint64_t);  /* ppConstantBuffers: array_count + N guest ids */
@@ -806,7 +847,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -17147,8 +17178,8 @@ if (ppConstantBuffers) {
+@@ -17147,8 +17180,8 @@ if (ppConstantBuffers) {
  } else {
      npt_encode_array_count(enc, 0);
  }
@@ -817,7 +858,7 @@ index 465383ca413..7e3db8bfc90 100644
  }
 
  static inline size_t
-@@ -17295,6 +17326,8 @@ struct npt_command_ID3D11DeviceContext1_PSGetConstantBuffers1 {
+@@ -17295,6 +17328,8 @@ struct npt_command_ID3D11DeviceContext1_PSGetConstantBuffers1 {
      uint64_t *_guest_ids_ppConstantBuffers;
      uint32_t _guest_id_count_ppConstantBuffers;
      struct npt_wire_object_ref *_refs_ppConstantBuffers;
@@ -826,7 +867,7 @@ index 465383ca413..7e3db8bfc90 100644
  };
 
  static inline size_t
-@@ -17308,8 +17341,8 @@ npt_sizeof_ID3D11DeviceContext1_PSGetConstantBuffers1(const UINT StartSlot,const
+@@ -17308,8 +17343,8 @@ npt_sizeof_ID3D11DeviceContext1_PSGetConstantBuffers1(const UINT StartSlot,const
      cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
      cmd_size += npt_sizeof_UINT(&NumBuffers, max_mode);
  cmd_size += sizeof(uint64_t) + (ppConstantBuffers ? (size_t)(NumBuffers) : 0) * sizeof(uint64_t);  /* ppConstantBuffers: array_count + N guest ids */
@@ -837,7 +878,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -17345,8 +17378,8 @@ if (ppConstantBuffers) {
+@@ -17345,8 +17380,8 @@ if (ppConstantBuffers) {
  } else {
      npt_encode_array_count(enc, 0);
  }
@@ -848,7 +889,7 @@ index 465383ca413..7e3db8bfc90 100644
  }
 
  static inline size_t
-@@ -17493,6 +17526,8 @@ struct npt_command_ID3D11DeviceContext1_CSGetConstantBuffers1 {
+@@ -17493,6 +17528,8 @@ struct npt_command_ID3D11DeviceContext1_CSGetConstantBuffers1 {
      uint64_t *_guest_ids_ppConstantBuffers;
      uint32_t _guest_id_count_ppConstantBuffers;
      struct npt_wire_object_ref *_refs_ppConstantBuffers;
@@ -857,7 +898,7 @@ index 465383ca413..7e3db8bfc90 100644
  };
 
  static inline size_t
-@@ -17506,8 +17541,8 @@ npt_sizeof_ID3D11DeviceContext1_CSGetConstantBuffers1(const UINT StartSlot,const
+@@ -17506,8 +17543,8 @@ npt_sizeof_ID3D11DeviceContext1_CSGetConstantBuffers1(const UINT StartSlot,const
      cmd_size += npt_sizeof_UINT(&StartSlot, max_mode);
      cmd_size += npt_sizeof_UINT(&NumBuffers, max_mode);
  cmd_size += sizeof(uint64_t) + (ppConstantBuffers ? (size_t)(NumBuffers) : 0) * sizeof(uint64_t);  /* ppConstantBuffers: array_count + N guest ids */
@@ -868,7 +909,7 @@ index 465383ca413..7e3db8bfc90 100644
      return cmd_size;
  }
 
-@@ -17543,8 +17578,8 @@ if (ppConstantBuffers) {
+@@ -17543,8 +17580,8 @@ if (ppConstantBuffers) {
  } else {
      npt_encode_array_count(enc, 0);
  }
@@ -936,7 +977,7 @@ index c7600565fd5..4b01982b0ea 100644
 
  static inline size_t
 diff --git a/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d12device.h b/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d12device.h
-index 002f44e47cb..a02ca410780 100644
+index 002f44e47cb..af13a25fc69 100644
 --- a/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d12device.h
 +++ b/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d12device.h
 @@ -4900,6 +4900,10 @@ struct npt_command_ID3D12Device_GetCopyableFootprints {
@@ -1107,7 +1148,45 @@ index 002f44e47cb..a02ca410780 100644
  }
 
  static inline size_t
-@@ -8674,6 +8688,8 @@ struct npt_command_ID3D12Device5_EnumerateMetaCommandParameters {
+@@ -8560,8 +8574,7 @@ npt_sizeof_ID3D12Device5_EnumerateMetaCommands_reply(const UINT * pNumMetaComman
+     (void)max_mode;  /* unused when the reply has no struct/union outputs */
+     size_t cmd_size = sizeof(struct npt_reply_header);
+     /* Reply has runtime-unbounded wire size; reserve only the header.
+-     * Host encode_reply sets the encoder fatal flag and the guest
+-     * decode path returns the documented default. */
++     * npt_call_ never submits this method with a reply. */
+     return cmd_size;
+ }
+
+@@ -8650,17 +8663,17 @@ npt_call_ID3D12Device5_EnumerateMetaCommands(struct npt_ring *ring,
+                                              UINT * pNumMetaCommands,
+                                              D3D12_META_COMMAND_DESC * pDescs)
+ {
+-    struct npt_ring_submit_command submit;
+-    npt_submit_ID3D12Device5_EnumerateMetaCommands(ring, NPT_CMD_FLAG_REPLY, object_id, pNumMetaCommands, pDescs, &submit);
+-    struct npt_cs_decoder *dec = npt_ring_get_command_reply(ring, &submit);
+-    if (dec) {
+-        HRESULT _ret;
+-        npt_decode_ID3D12Device5_EnumerateMetaCommands_reply(dec, pNumMetaCommands, pDescs, &_ret);
+-        npt_ring_free_command_reply(ring, &submit);
+-        return _ret;
+-    } else {
+-        return (HRESULT)0x8007000E /* E_OUTOFMEMORY */;
++    /* The host cannot encode this reply, and a failed reply encode
++     * takes down the whole context; fail the call here instead. */
++    (void)ring; (void)object_id;
++    (void)pNumMetaCommands;
++    (void)pDescs;
++    static int logged;
++    if (!logged) {
++        logged = 1;
++        npt_log("ID3D12Device5::EnumerateMetaCommands is not supported over Neptune");
+     }
++    return (HRESULT)0x80004001 /* E_NOTIMPL */;
+ }
+
+ /*
+@@ -8674,6 +8687,8 @@ struct npt_command_ID3D12Device5_EnumerateMetaCommandParameters {
      UINT * pTotalStructureSizeInBytes;
      UINT * pParameterCount;
      D3D12_META_COMMAND_PARAMETER_DESC * pParameterDescs;
@@ -1116,7 +1195,7 @@ index 002f44e47cb..a02ca410780 100644
      HRESULT ret;
  };
 
-@@ -8689,11 +8705,11 @@ npt_sizeof_ID3D12Device5_EnumerateMetaCommandParameters(const GUID * CommandId,c
+@@ -8689,11 +8704,11 @@ npt_sizeof_ID3D12Device5_EnumerateMetaCommandParameters(const GUID * CommandId,c
      if (CommandId)
          cmd_size += npt_sizeof_GUID(CommandId, max_mode);
      cmd_size += npt_sizeof_D3D12_META_COMMAND_PARAMETER_STAGE(&Stage, max_mode);
@@ -1130,7 +1209,7 @@ index 002f44e47cb..a02ca410780 100644
      return cmd_size;
  }
 
-@@ -8719,10 +8735,10 @@ npt_encode_ID3D12Device5_EnumerateMetaCommandParameters(struct npt_cs_encoder *e
+@@ -8719,10 +8734,10 @@ npt_encode_ID3D12Device5_EnumerateMetaCommandParameters(struct npt_cs_encoder *e
      if (npt_encode_simple_pointer(enc, CommandId))
          npt_encode_GUID(enc, CommandId);
      npt_encode_D3D12_META_COMMAND_PARAMETER_STAGE(enc, &Stage);
@@ -1143,7 +1222,48 @@ index 002f44e47cb..a02ca410780 100644
  }
 
  static inline size_t
-@@ -9520,6 +9536,7 @@ struct npt_command_ID3D12Device6_SetBackgroundProcessingMode {
+@@ -8735,8 +8750,7 @@ npt_sizeof_ID3D12Device5_EnumerateMetaCommandParameters_reply(const GUID * Comma
+     (void)max_mode;  /* unused when the reply has no struct/union outputs */
+     size_t cmd_size = sizeof(struct npt_reply_header);
+     /* Reply has runtime-unbounded wire size; reserve only the header.
+-     * Host encode_reply sets the encoder fatal flag and the guest
+-     * decode path returns the documented default. */
++     * npt_call_ never submits this method with a reply. */
+     return cmd_size;
+ }
+
+@@ -8839,17 +8853,20 @@ npt_call_ID3D12Device5_EnumerateMetaCommandParameters(struct npt_ring *ring,
+                                                       UINT * pParameterCount,
+                                                       D3D12_META_COMMAND_PARAMETER_DESC * pParameterDescs)
+ {
+-    struct npt_ring_submit_command submit;
+-    npt_submit_ID3D12Device5_EnumerateMetaCommandParameters(ring, NPT_CMD_FLAG_REPLY, object_id, CommandId, Stage, pTotalStructureSizeInBytes, pParameterCount, pParameterDescs, &submit);
+-    struct npt_cs_decoder *dec = npt_ring_get_command_reply(ring, &submit);
+-    if (dec) {
+-        HRESULT _ret;
+-        npt_decode_ID3D12Device5_EnumerateMetaCommandParameters_reply(dec, pTotalStructureSizeInBytes, pParameterCount, pParameterDescs, &_ret);
+-        npt_ring_free_command_reply(ring, &submit);
+-        return _ret;
+-    } else {
+-        return (HRESULT)0x8007000E /* E_OUTOFMEMORY */;
++    /* The host cannot encode this reply, and a failed reply encode
++     * takes down the whole context; fail the call here instead. */
++    (void)ring; (void)object_id;
++    (void)CommandId;
++    (void)Stage;
++    (void)pTotalStructureSizeInBytes;
++    (void)pParameterCount;
++    (void)pParameterDescs;
++    static int logged;
++    if (!logged) {
++        logged = 1;
++        npt_log("ID3D12Device5::EnumerateMetaCommandParameters is not supported over Neptune");
+     }
++    return (HRESULT)0x80004001 /* E_NOTIMPL */;
+ }
+
+ /*
+@@ -9520,6 +9537,7 @@ struct npt_command_ID3D12Device6_SetBackgroundProcessingMode {
      D3D12_MEASUREMENTS_ACTION MeasurementsAction;
      HANDLE hEventToSignalUponCompletion;
      BOOL * pbFurtherMeasurementsDesired;
@@ -1151,7 +1271,7 @@ index 002f44e47cb..a02ca410780 100644
      HRESULT ret;
  };
 
-@@ -9534,7 +9551,7 @@ npt_sizeof_ID3D12Device6_SetBackgroundProcessingMode(const D3D12_BACKGROUND_PROC
+@@ -9534,7 +9552,7 @@ npt_sizeof_ID3D12Device6_SetBackgroundProcessingMode(const D3D12_BACKGROUND_PROC
      cmd_size += npt_sizeof_D3D12_BACKGROUND_PROCESSING_MODE(&Mode, max_mode);
      cmd_size += npt_sizeof_D3D12_MEASUREMENTS_ACTION(&MeasurementsAction, max_mode);
      cmd_size += sizeof(uint64_t);
@@ -1160,7 +1280,7 @@ index 002f44e47cb..a02ca410780 100644
      return cmd_size;
  }
 
-@@ -9559,7 +9576,7 @@ npt_encode_ID3D12Device6_SetBackgroundProcessingMode(struct npt_cs_encoder *enc,
+@@ -9559,7 +9577,7 @@ npt_encode_ID3D12Device6_SetBackgroundProcessingMode(struct npt_cs_encoder *enc,
      npt_encode_D3D12_BACKGROUND_PROCESSING_MODE(enc, &Mode);
      npt_encode_D3D12_MEASUREMENTS_ACTION(enc, &MeasurementsAction);
      npt_encode_win32_handle(enc, npt_win32_handle_get_id((const void *)(uintptr_t)hEventToSignalUponCompletion));
@@ -1169,7 +1289,7 @@ index 002f44e47cb..a02ca410780 100644
  }
 
  static inline size_t
-@@ -9574,8 +9591,9 @@ npt_sizeof_ID3D12Device6_SetBackgroundProcessingMode_reply(const D3D12_BACKGROUN
+@@ -9574,8 +9592,9 @@ npt_sizeof_ID3D12Device6_SetBackgroundProcessingMode_reply(const D3D12_BACKGROUN
  /* skip Mode (input only) */
  /* skip MeasurementsAction (input only) */
  /* skip hEventToSignalUponCompletion (input only) */
@@ -1181,7 +1301,7 @@ index 002f44e47cb..a02ca410780 100644
      return cmd_size;
  }
 
-@@ -10030,6 +10048,7 @@ struct npt_command_ID3D12Device8_GetResourceAllocationInfo2 {
+@@ -10030,6 +10049,7 @@ struct npt_command_ID3D12Device8_GetResourceAllocationInfo2 {
      UINT numResourceDescs;
      const D3D12_RESOURCE_DESC1 * pResourceDescs;
      D3D12_RESOURCE_ALLOCATION_INFO1 * pResourceAllocationInfo1;
@@ -1189,7 +1309,7 @@ index 002f44e47cb..a02ca410780 100644
      D3D12_RESOURCE_ALLOCATION_INFO ret;
  };
 
-@@ -10046,7 +10065,7 @@ npt_sizeof_ID3D12Device8_GetResourceAllocationInfo2(const UINT visibleMask,const
+@@ -10046,7 +10066,7 @@ npt_sizeof_ID3D12Device8_GetResourceAllocationInfo2(const UINT visibleMask,const
      cmd_size += npt_sizeof_array_count(pResourceDescs ? numResourceDescs : 0);
      for (uint32_t _i = 0; _i < (pResourceDescs ? numResourceDescs : 0); _i++)
          cmd_size += npt_sizeof_D3D12_RESOURCE_DESC1(&pResourceDescs[_i], max_mode);
@@ -1198,7 +1318,7 @@ index 002f44e47cb..a02ca410780 100644
      return cmd_size;
  }
 
-@@ -10077,7 +10096,7 @@ npt_encode_ID3D12Device8_GetResourceAllocationInfo2(struct npt_cs_encoder *enc,
+@@ -10077,7 +10097,7 @@ npt_encode_ID3D12Device8_GetResourceAllocationInfo2(struct npt_cs_encoder *enc,
      } else {
          npt_encode_array_count(enc, 0);
      }
@@ -1207,7 +1327,7 @@ index 002f44e47cb..a02ca410780 100644
  }
 
  static inline size_t
-@@ -10750,6 +10769,10 @@ struct npt_command_ID3D12Device8_GetCopyableFootprints1 {
+@@ -10750,6 +10770,10 @@ struct npt_command_ID3D12Device8_GetCopyableFootprints1 {
      UINT * pNumRows;
      UINT64 * pRowSizeInBytes;
      UINT64 * pTotalBytes;
@@ -1218,7 +1338,7 @@ index 002f44e47cb..a02ca410780 100644
  };
 
  static inline size_t
-@@ -10766,10 +10789,10 @@ npt_sizeof_ID3D12Device8_GetCopyableFootprints1(const D3D12_RESOURCE_DESC1 * pRe
+@@ -10766,10 +10790,10 @@ npt_sizeof_ID3D12Device8_GetCopyableFootprints1(const D3D12_RESOURCE_DESC1 * pRe
      cmd_size += npt_sizeof_UINT(&FirstSubresource, max_mode);
      cmd_size += npt_sizeof_UINT(&NumSubresources, max_mode);
      cmd_size += npt_sizeof_UINT64(&BaseOffset, max_mode);
@@ -1233,7 +1353,7 @@ index 002f44e47cb..a02ca410780 100644
      return cmd_size;
  }
 
-@@ -10800,10 +10823,10 @@ npt_encode_ID3D12Device8_GetCopyableFootprints1(struct npt_cs_encoder *enc,
+@@ -10800,10 +10824,10 @@ npt_encode_ID3D12Device8_GetCopyableFootprints1(struct npt_cs_encoder *enc,
      npt_encode_UINT(enc, &FirstSubresource);
      npt_encode_UINT(enc, &NumSubresources);
      npt_encode_UINT64(enc, &BaseOffset);
@@ -1248,7 +1368,7 @@ index 002f44e47cb..a02ca410780 100644
  }
 
  static inline size_t
-@@ -10828,8 +10851,9 @@ npt_sizeof_ID3D12Device8_GetCopyableFootprints1_reply(const D3D12_RESOURCE_DESC1
+@@ -10828,8 +10852,9 @@ npt_sizeof_ID3D12Device8_GetCopyableFootprints1_reply(const D3D12_RESOURCE_DESC1
      cmd_size += npt_sizeof_array_count(pRowSizeInBytes ? NumSubresources : 0);
      if (pRowSizeInBytes)
          cmd_size += npt_sizeof_UINT64_array(pRowSizeInBytes, NumSubresources);
@@ -1260,7 +1380,7 @@ index 002f44e47cb..a02ca410780 100644
      return cmd_size;
  }
 
-@@ -12258,6 +12282,7 @@ struct npt_command_ID3D12Device12_GetResourceAllocationInfo3 {
+@@ -12258,6 +12283,7 @@ struct npt_command_ID3D12Device12_GetResourceAllocationInfo3 {
      const UINT32 * pNumCastableFormats;
      const DXGI_FORMAT ** ppCastableFormats;
      D3D12_RESOURCE_ALLOCATION_INFO1 * pResourceAllocationInfo1;
@@ -1268,7 +1388,7 @@ index 002f44e47cb..a02ca410780 100644
      D3D12_RESOURCE_ALLOCATION_INFO ret;
  };
 
-@@ -12279,7 +12304,7 @@ npt_sizeof_ID3D12Device12_GetResourceAllocationInfo3(const UINT visibleMask,cons
+@@ -12279,7 +12305,7 @@ npt_sizeof_ID3D12Device12_GetResourceAllocationInfo3(const UINT visibleMask,cons
          cmd_size += npt_sizeof_UINT32_array(pNumCastableFormats, numResourceDescs);
      /* ppCastableFormats: unsized optional, always NULL */
      cmd_size += npt_sizeof_array_count(0);
@@ -1277,7 +1397,7 @@ index 002f44e47cb..a02ca410780 100644
      return cmd_size;
  }
 
-@@ -12320,7 +12345,7 @@ npt_encode_ID3D12Device12_GetResourceAllocationInfo3(struct npt_cs_encoder *enc,
+@@ -12320,7 +12346,7 @@ npt_encode_ID3D12Device12_GetResourceAllocationInfo3(struct npt_cs_encoder *enc,
      }
      /* ppCastableFormats: unsized optional, encode NULL */
      npt_encode_array_count(enc, 0);
@@ -1286,6 +1406,195 @@ index 002f44e47cb..a02ca410780 100644
  }
 
  static inline size_t
+diff --git a/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d12deviceremovedextendeddata.h b/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d12deviceremovedextendeddata.h
+index 7ece19cc871..63f4c005bc6 100644
+--- a/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d12deviceremovedextendeddata.h
++++ b/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d12deviceremovedextendeddata.h
+@@ -69,8 +69,7 @@ npt_sizeof_ID3D12DeviceRemovedExtendedData_GetAutoBreadcrumbsOutput_reply(const
+     (void)max_mode;  /* unused when the reply has no struct/union outputs */
+     size_t cmd_size = sizeof(struct npt_reply_header);
+     /* Reply has runtime-unbounded wire size; reserve only the header.
+-     * Host encode_reply sets the encoder fatal flag and the guest
+-     * decode path returns the documented default. */
++     * npt_call_ never submits this method with a reply. */
+     return cmd_size;
+ }
+
+@@ -146,17 +145,16 @@ npt_call_ID3D12DeviceRemovedExtendedData_GetAutoBreadcrumbsOutput(struct npt_rin
+                                                                   npt_object_id object_id,
+                                                                   D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT * pOutput)
+ {
+-    struct npt_ring_submit_command submit;
+-    npt_submit_ID3D12DeviceRemovedExtendedData_GetAutoBreadcrumbsOutput(ring, NPT_CMD_FLAG_REPLY, object_id, pOutput, &submit);
+-    struct npt_cs_decoder *dec = npt_ring_get_command_reply(ring, &submit);
+-    if (dec) {
+-        HRESULT _ret;
+-        npt_decode_ID3D12DeviceRemovedExtendedData_GetAutoBreadcrumbsOutput_reply(dec, pOutput, &_ret);
+-        npt_ring_free_command_reply(ring, &submit);
+-        return _ret;
+-    } else {
+-        return (HRESULT)0x8007000E /* E_OUTOFMEMORY */;
++    /* The host cannot encode this reply, and a failed reply encode
++     * takes down the whole context; fail the call here instead. */
++    (void)ring; (void)object_id;
++    (void)pOutput;
++    static int logged;
++    if (!logged) {
++        logged = 1;
++        npt_log("ID3D12DeviceRemovedExtendedData::GetAutoBreadcrumbsOutput is not supported over Neptune");
+     }
++    return (HRESULT)0x80004001 /* E_NOTIMPL */;
+ }
+
+ /*
+@@ -209,8 +207,7 @@ npt_sizeof_ID3D12DeviceRemovedExtendedData_GetPageFaultAllocationOutput_reply(co
+     (void)max_mode;  /* unused when the reply has no struct/union outputs */
+     size_t cmd_size = sizeof(struct npt_reply_header);
+     /* Reply has runtime-unbounded wire size; reserve only the header.
+-     * Host encode_reply sets the encoder fatal flag and the guest
+-     * decode path returns the documented default. */
++     * npt_call_ never submits this method with a reply. */
+     return cmd_size;
+ }
+
+@@ -286,17 +283,16 @@ npt_call_ID3D12DeviceRemovedExtendedData_GetPageFaultAllocationOutput(struct npt
+                                                                       npt_object_id object_id,
+                                                                       D3D12_DRED_PAGE_FAULT_OUTPUT * pOutput)
+ {
+-    struct npt_ring_submit_command submit;
+-    npt_submit_ID3D12DeviceRemovedExtendedData_GetPageFaultAllocationOutput(ring, NPT_CMD_FLAG_REPLY, object_id, pOutput, &submit);
+-    struct npt_cs_decoder *dec = npt_ring_get_command_reply(ring, &submit);
+-    if (dec) {
+-        HRESULT _ret;
+-        npt_decode_ID3D12DeviceRemovedExtendedData_GetPageFaultAllocationOutput_reply(dec, pOutput, &_ret);
+-        npt_ring_free_command_reply(ring, &submit);
+-        return _ret;
+-    } else {
+-        return (HRESULT)0x8007000E /* E_OUTOFMEMORY */;
++    /* The host cannot encode this reply, and a failed reply encode
++     * takes down the whole context; fail the call here instead. */
++    (void)ring; (void)object_id;
++    (void)pOutput;
++    static int logged;
++    if (!logged) {
++        logged = 1;
++        npt_log("ID3D12DeviceRemovedExtendedData::GetPageFaultAllocationOutput is not supported over Neptune");
+     }
++    return (HRESULT)0x80004001 /* E_NOTIMPL */;
+ }
+
+ /*
+@@ -349,8 +345,7 @@ npt_sizeof_ID3D12DeviceRemovedExtendedData1_GetAutoBreadcrumbsOutput1_reply(cons
+     (void)max_mode;  /* unused when the reply has no struct/union outputs */
+     size_t cmd_size = sizeof(struct npt_reply_header);
+     /* Reply has runtime-unbounded wire size; reserve only the header.
+-     * Host encode_reply sets the encoder fatal flag and the guest
+-     * decode path returns the documented default. */
++     * npt_call_ never submits this method with a reply. */
+     return cmd_size;
+ }
+
+@@ -426,17 +421,16 @@ npt_call_ID3D12DeviceRemovedExtendedData1_GetAutoBreadcrumbsOutput1(struct npt_r
+                                                                     npt_object_id object_id,
+                                                                     D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT1 * pOutput)
+ {
+-    struct npt_ring_submit_command submit;
+-    npt_submit_ID3D12DeviceRemovedExtendedData1_GetAutoBreadcrumbsOutput1(ring, NPT_CMD_FLAG_REPLY, object_id, pOutput, &submit);
+-    struct npt_cs_decoder *dec = npt_ring_get_command_reply(ring, &submit);
+-    if (dec) {
+-        HRESULT _ret;
+-        npt_decode_ID3D12DeviceRemovedExtendedData1_GetAutoBreadcrumbsOutput1_reply(dec, pOutput, &_ret);
+-        npt_ring_free_command_reply(ring, &submit);
+-        return _ret;
+-    } else {
+-        return (HRESULT)0x8007000E /* E_OUTOFMEMORY */;
++    /* The host cannot encode this reply, and a failed reply encode
++     * takes down the whole context; fail the call here instead. */
++    (void)ring; (void)object_id;
++    (void)pOutput;
++    static int logged;
++    if (!logged) {
++        logged = 1;
++        npt_log("ID3D12DeviceRemovedExtendedData1::GetAutoBreadcrumbsOutput1 is not supported over Neptune");
+     }
++    return (HRESULT)0x80004001 /* E_NOTIMPL */;
+ }
+
+ /*
+@@ -489,8 +483,7 @@ npt_sizeof_ID3D12DeviceRemovedExtendedData1_GetPageFaultAllocationOutput1_reply(
+     (void)max_mode;  /* unused when the reply has no struct/union outputs */
+     size_t cmd_size = sizeof(struct npt_reply_header);
+     /* Reply has runtime-unbounded wire size; reserve only the header.
+-     * Host encode_reply sets the encoder fatal flag and the guest
+-     * decode path returns the documented default. */
++     * npt_call_ never submits this method with a reply. */
+     return cmd_size;
+ }
+
+@@ -566,17 +559,16 @@ npt_call_ID3D12DeviceRemovedExtendedData1_GetPageFaultAllocationOutput1(struct n
+                                                                         npt_object_id object_id,
+                                                                         D3D12_DRED_PAGE_FAULT_OUTPUT1 * pOutput)
+ {
+-    struct npt_ring_submit_command submit;
+-    npt_submit_ID3D12DeviceRemovedExtendedData1_GetPageFaultAllocationOutput1(ring, NPT_CMD_FLAG_REPLY, object_id, pOutput, &submit);
+-    struct npt_cs_decoder *dec = npt_ring_get_command_reply(ring, &submit);
+-    if (dec) {
+-        HRESULT _ret;
+-        npt_decode_ID3D12DeviceRemovedExtendedData1_GetPageFaultAllocationOutput1_reply(dec, pOutput, &_ret);
+-        npt_ring_free_command_reply(ring, &submit);
+-        return _ret;
+-    } else {
+-        return (HRESULT)0x8007000E /* E_OUTOFMEMORY */;
++    /* The host cannot encode this reply, and a failed reply encode
++     * takes down the whole context; fail the call here instead. */
++    (void)ring; (void)object_id;
++    (void)pOutput;
++    static int logged;
++    if (!logged) {
++        logged = 1;
++        npt_log("ID3D12DeviceRemovedExtendedData1::GetPageFaultAllocationOutput1 is not supported over Neptune");
+     }
++    return (HRESULT)0x80004001 /* E_NOTIMPL */;
+ }
+
+ /*
+@@ -629,8 +621,7 @@ npt_sizeof_ID3D12DeviceRemovedExtendedData2_GetPageFaultAllocationOutput2_reply(
+     (void)max_mode;  /* unused when the reply has no struct/union outputs */
+     size_t cmd_size = sizeof(struct npt_reply_header);
+     /* Reply has runtime-unbounded wire size; reserve only the header.
+-     * Host encode_reply sets the encoder fatal flag and the guest
+-     * decode path returns the documented default. */
++     * npt_call_ never submits this method with a reply. */
+     return cmd_size;
+ }
+
+@@ -706,17 +697,16 @@ npt_call_ID3D12DeviceRemovedExtendedData2_GetPageFaultAllocationOutput2(struct n
+                                                                         npt_object_id object_id,
+                                                                         D3D12_DRED_PAGE_FAULT_OUTPUT2 * pOutput)
+ {
+-    struct npt_ring_submit_command submit;
+-    npt_submit_ID3D12DeviceRemovedExtendedData2_GetPageFaultAllocationOutput2(ring, NPT_CMD_FLAG_REPLY, object_id, pOutput, &submit);
+-    struct npt_cs_decoder *dec = npt_ring_get_command_reply(ring, &submit);
+-    if (dec) {
+-        HRESULT _ret;
+-        npt_decode_ID3D12DeviceRemovedExtendedData2_GetPageFaultAllocationOutput2_reply(dec, pOutput, &_ret);
+-        npt_ring_free_command_reply(ring, &submit);
+-        return _ret;
+-    } else {
+-        return (HRESULT)0x8007000E /* E_OUTOFMEMORY */;
++    /* The host cannot encode this reply, and a failed reply encode
++     * takes down the whole context; fail the call here instead. */
++    (void)ring; (void)object_id;
++    (void)pOutput;
++    static int logged;
++    if (!logged) {
++        logged = 1;
++        npt_log("ID3D12DeviceRemovedExtendedData2::GetPageFaultAllocationOutput2 is not supported over Neptune");
+     }
++    return (HRESULT)0x80004001 /* E_NOTIMPL */;
+ }
+
+ /*
 diff --git a/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d12object.h b/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d12object.h
 index 8f0278a21d5..c36db9a5a6e 100644
 --- a/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d12object.h
@@ -1406,6 +1715,128 @@ index ed9f1f25ac7..962bbb28a39 100644
      return cmd_size;
  }
 
+diff --git a/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d12versionedrootsignaturedeserializer.h b/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d12versionedrootsignaturedeserializer.h
+index ccb8a72d15f..b18b9999abb 100644
+--- a/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d12versionedrootsignaturedeserializer.h
++++ b/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d12versionedrootsignaturedeserializer.h
+@@ -73,8 +73,7 @@ npt_sizeof_ID3D12VersionedRootSignatureDeserializer_GetRootSignatureDescAtVersio
+     (void)max_mode;  /* unused when the reply has no struct/union outputs */
+     size_t cmd_size = sizeof(struct npt_reply_header);
+     /* Reply has runtime-unbounded wire size; reserve only the header.
+-     * Host encode_reply sets the encoder fatal flag and the guest
+-     * decode path returns the documented default. */
++     * npt_call_ never submits this method with a reply. */
+     return cmd_size;
+ }
+
+@@ -152,17 +151,17 @@ npt_call_ID3D12VersionedRootSignatureDeserializer_GetRootSignatureDescAtVersion(
+                                                                                 D3D_ROOT_SIGNATURE_VERSION convertToVersion,
+                                                                                 const D3D12_VERSIONED_ROOT_SIGNATURE_DESC ** ppDesc)
+ {
+-    struct npt_ring_submit_command submit;
+-    npt_submit_ID3D12VersionedRootSignatureDeserializer_GetRootSignatureDescAtVersion(ring, NPT_CMD_FLAG_REPLY, object_id, convertToVersion, ppDesc, &submit);
+-    struct npt_cs_decoder *dec = npt_ring_get_command_reply(ring, &submit);
+-    if (dec) {
+-        HRESULT _ret;
+-        npt_decode_ID3D12VersionedRootSignatureDeserializer_GetRootSignatureDescAtVersion_reply(dec, ppDesc, &_ret);
+-        npt_ring_free_command_reply(ring, &submit);
+-        return _ret;
+-    } else {
+-        return (HRESULT)0x8007000E /* E_OUTOFMEMORY */;
++    /* The host cannot encode this reply, and a failed reply encode
++     * takes down the whole context; fail the call here instead. */
++    (void)ring; (void)object_id;
++    (void)convertToVersion;
++    (void)ppDesc;
++    static int logged;
++    if (!logged) {
++        logged = 1;
++        npt_log("ID3D12VersionedRootSignatureDeserializer::GetRootSignatureDescAtVersion is not supported over Neptune");
+     }
++    return (HRESULT)0x80004001 /* E_NOTIMPL */;
+ }
+
+
+diff --git a/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d12workgraphproperties.h b/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d12workgraphproperties.h
+index 7f969694e5e..f64ec0625aa 100644
+--- a/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d12workgraphproperties.h
++++ b/src/virtio/neptune/neptune-protocol/npt_protocol_guest_id3d12workgraphproperties.h
+@@ -476,8 +476,7 @@ npt_sizeof_ID3D12WorkGraphProperties_GetNodeID_reply(const UINT WorkGraphIndex,c
+     (void)max_mode;  /* unused when the reply has no struct/union outputs */
+     size_t cmd_size = sizeof(struct npt_reply_header);
+     /* Reply has runtime-unbounded wire size; reserve only the header.
+-     * Host encode_reply sets the encoder fatal flag and the guest
+-     * decode path returns the documented default. */
++     * npt_call_ never submits this method with a reply. */
+     return cmd_size;
+ }
+
+@@ -551,17 +550,17 @@ npt_call_ID3D12WorkGraphProperties_GetNodeID(struct npt_ring *ring,
+                                              UINT WorkGraphIndex,
+                                              UINT NodeIndex)
+ {
+-    struct npt_ring_submit_command submit;
+-    npt_submit_ID3D12WorkGraphProperties_GetNodeID(ring, NPT_CMD_FLAG_REPLY, object_id, WorkGraphIndex, NodeIndex, &submit);
+-    struct npt_cs_decoder *dec = npt_ring_get_command_reply(ring, &submit);
+-    if (dec) {
+-        D3D12_NODE_ID _ret;
+-        npt_decode_ID3D12WorkGraphProperties_GetNodeID_reply(dec, &_ret);
+-        npt_ring_free_command_reply(ring, &submit);
+-        return _ret;
+-    } else {
+-        return (D3D12_NODE_ID){0};
++    /* The host cannot encode this reply, and a failed reply encode
++     * takes down the whole context; fail the call here instead. */
++    (void)ring; (void)object_id;
++    (void)WorkGraphIndex;
++    (void)NodeIndex;
++    static int logged;
++    if (!logged) {
++        logged = 1;
++        npt_log("ID3D12WorkGraphProperties::GetNodeID is not supported over Neptune");
+     }
++    return (D3D12_NODE_ID){0};
+ }
+
+ /*
+@@ -1033,8 +1032,7 @@ npt_sizeof_ID3D12WorkGraphProperties_GetEntrypointID_reply(const UINT WorkGraphI
+     (void)max_mode;  /* unused when the reply has no struct/union outputs */
+     size_t cmd_size = sizeof(struct npt_reply_header);
+     /* Reply has runtime-unbounded wire size; reserve only the header.
+-     * Host encode_reply sets the encoder fatal flag and the guest
+-     * decode path returns the documented default. */
++     * npt_call_ never submits this method with a reply. */
+     return cmd_size;
+ }
+
+@@ -1108,17 +1106,17 @@ npt_call_ID3D12WorkGraphProperties_GetEntrypointID(struct npt_ring *ring,
+                                                    UINT WorkGraphIndex,
+                                                    UINT EntrypointIndex)
+ {
+-    struct npt_ring_submit_command submit;
+-    npt_submit_ID3D12WorkGraphProperties_GetEntrypointID(ring, NPT_CMD_FLAG_REPLY, object_id, WorkGraphIndex, EntrypointIndex, &submit);
+-    struct npt_cs_decoder *dec = npt_ring_get_command_reply(ring, &submit);
+-    if (dec) {
+-        D3D12_NODE_ID _ret;
+-        npt_decode_ID3D12WorkGraphProperties_GetEntrypointID_reply(dec, &_ret);
+-        npt_ring_free_command_reply(ring, &submit);
+-        return _ret;
+-    } else {
+-        return (D3D12_NODE_ID){0};
++    /* The host cannot encode this reply, and a failed reply encode
++     * takes down the whole context; fail the call here instead. */
++    (void)ring; (void)object_id;
++    (void)WorkGraphIndex;
++    (void)EntrypointIndex;
++    static int logged;
++    if (!logged) {
++        logged = 1;
++        npt_log("ID3D12WorkGraphProperties::GetEntrypointID is not supported over Neptune");
+     }
++    return (D3D12_NODE_ID){0};
+ }
+
+ /*
 diff --git a/src/virtio/neptune/neptune-protocol/npt_protocol_guest_idxgidevice.h b/src/virtio/neptune/neptune-protocol/npt_protocol_guest_idxgidevice.h
 index a29b7319f24..a4c5db96362 100644
 --- a/src/virtio/neptune/neptune-protocol/npt_protocol_guest_idxgidevice.h

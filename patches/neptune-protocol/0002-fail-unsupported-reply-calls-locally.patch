@@ -1,0 +1,293 @@
+diff --git a/templates/commands.h b/templates/commands.h
+index 5391cd7..6778706 100644
+--- a/templates/commands.h
++++ b/templates/commands.h
+@@ -42,9 +42,7 @@ def method_full_name(iface_name, method_name):
+     # True when the reply contains a type whose wire size is runtime-
+     # unbounded (DRED chain pointers, root-signature parameter arrays,
+     # ...).  Such methods cannot use a pre-reserved fixed-size reply
+-    # slot, so the host encode_reply sets the encoder fatal flag and
+-    # the guest decode path takes the reply-mismatch branch and
+-    # returns the documented default for the call's return type.
++    # slot, so npt_call_ fails the call without submitting it.
+     _reply_unsupported = GEN.method_reply_is_unsupported(method)
+     # canonical (registry): the reply names the id each returned object
+     # is registered under; the command struct carries one
+@@ -162,8 +160,7 @@ void\
+     size_t cmd_size = sizeof(struct npt_reply_header);
+ % if _reply_unsupported:
+     /* Reply has runtime-unbounded wire size; reserve only the header.
+-     * Host encode_reply sets the encoder fatal flag and the guest
+-     * decode path returns the documented default. */
++     * npt_call_ never submits this method with a reply. */
+ % else:
+ % if _has_ret and not _is_scalar:
+     cmd_size += ${GEN.reply_payload_size_expr(method.return_type)};
+@@ -220,10 +217,9 @@ ${' ' * (len('npt_encode_') + len(fname) + len('_reply') + 1)}const struct npt_c
+ % if _reply_unsupported:
+     /* ${iface.name}::${method.name}: reply contains a type with
+      * runtime-unbounded wire size (e.g. DRED chain pointers, root-
+-     * signature parameter arrays).  A pre-reserved fixed-size reply
+-     * slot cannot represent this without truncating the host data, so
+-     * the guest gets a clean reply-mismatch via the encoder fatal
+-     * flag rather than a corrupted stream. */
++     * signature parameter arrays) that a fixed-size reply slot cannot
++     * hold.  The guest never asks for this reply; the fatal flag
++     * guards against a hand-built submission. */
+     npt_cs_encoder_set_fatal(enc);
+     return;
+ % else:
+@@ -525,6 +521,27 @@ ${' ' * (len('npt_call_') + len(fname) + 1)}size_t _ref_cap\
+ % endif
+ )
+ {
++% if _reply_unsupported:
++    /* The host cannot encode this reply, and a failed reply encode
++     * takes down the whole context; fail the call here instead. */
++    (void)ring; (void)object_id;
++% for p in all_params:
++    (void)${p.name};
++% endfor
++% if _canonical:
++    (void)_refs; (void)_ref_cap;
++% endif
++    static int logged;
++    if (!logged) {
++        logged = 1;
++        npt_log("${iface.name}::${method.name} is not supported over Neptune");
++    }
++% if _has_ret and method.return_type == 'HRESULT':
++    return (HRESULT)0x80004001 /* E_NOTIMPL */;
++% elif _has_ret:
++    return ${fallback_ret};
++% endif
++% else:
+     struct npt_ring_submit_command submit;
+     npt_submit_${fname}(ring, NPT_CMD_FLAG_REPLY, object_id\
+ % for p in all_params:
+@@ -557,6 +574,7 @@ ${' ' * (len('npt_call_') + len(fname) + 1)}size_t _ref_cap\
+         npt_ring_free_command_reply(ring, &submit);
+     }
+ % endif
++% endif
+ }
+
+ % endif
+@@ -720,9 +738,8 @@ ${' ' * (len('npt_encode_') + len(fname) + len('_reply') + 1)}const struct npt_c
+ {
+ % if _reply_unsupported:
+     /* ${func.name}: reply has runtime-unbounded wire size; cannot use
+-     * a fixed-size reply slot.  Set the encoder fatal flag so the
+-     * guest's reply decoder takes the mismatch branch and returns the
+-     * documented default. */
++     * a fixed-size reply slot.  The guest never asks for this reply;
++     * the fatal flag guards against a hand-built submission. */
+     npt_cs_encoder_set_fatal(enc);
+     return;
+ % else:
+@@ -946,6 +963,23 @@ ${' ' * (len('npt_call_') + len(fname) + 1)}${GEN.c_type(p)} ${p.name}\
+ % endfor
+ )
+ {
++% if _reply_unsupported:
++    /* See npt_call_ for methods: the host cannot encode this reply. */
++    (void)ring;
++% for p in all_params:
++    (void)${p.name};
++% endfor
++    static int logged;
++    if (!logged) {
++        logged = 1;
++        npt_log("${func.name} is not supported over Neptune");
++    }
++% if _has_ret and func.return_type == 'HRESULT':
++    return (HRESULT)0x80004001 /* E_NOTIMPL */;
++% elif _has_ret:
++    return ${fallback_ret};
++% endif
++% else:
+     struct npt_ring_submit_command submit;
+     npt_submit_${fname}(ring, NPT_CMD_FLAG_REPLY\
+ % for p in all_params:
+@@ -974,6 +1008,7 @@ ${' ' * (len('npt_call_') + len(fname) + 1)}${GEN.c_type(p)} ${p.name}\
+         npt_ring_free_command_reply(ring, &submit);
+     }
+ % endif
++% endif
+ }
+
+ % endif
+diff --git a/tests/npt_cs.h b/tests/npt_cs.h
+index d99bc05..6de1f66 100644
+--- a/tests/npt_cs.h
++++ b/tests/npt_cs.h
+@@ -262,6 +262,9 @@ npt_cs_decoder_reset_temp_pool(struct npt_cs_decoder *dec)
+ /* Ring submission (guest-side)                                        */
+ /* ------------------------------------------------------------------ */
+
++/* Commands built for submission, so a test can assert none was. */
++extern int npt_test_submit_count;
++
+ struct npt_ring;
+ struct npt_ring_submit_command {
+    void *cmd_data;
+@@ -279,6 +282,7 @@ npt_ring_submit_command_init(struct npt_ring *ring,
+                              size_t reply_size)
+ {
+    (void)ring;
++   npt_test_submit_count++;
+    submit->cmd_data = cmd_data;
+    submit->cmd_size = cmd_size;
+    submit->reply_size = reply_size;
+diff --git a/tests/test_roundtrip_manual.c b/tests/test_roundtrip_manual.c
+index 868fdd0..9d5d857 100644
+--- a/tests/test_roundtrip_manual.c
++++ b/tests/test_roundtrip_manual.c
+@@ -16,6 +16,7 @@
+ #include "npt_test_harness.h"
+
+ int npt_test_log_count;
++int npt_test_submit_count;
+ uint64_t npt_test_host_address_offset;
+
+ #pragma GCC diagnostic push
+@@ -1108,12 +1109,13 @@ static int test_manual_dispatch_D3D12CreateVersionedRootSignatureDeserializer(vo
+  * runtime-unbounded wire size (DRED chain pointers, root-signature
+  * parameter arrays, ...) cannot fit in a pre-reserved fixed-size reply
+  * slot.  The host's `npt_encode_..._reply` is generated as a fatal-flag
+- * stub that writes nothing; the guest sees a zero reply header and
+- * takes the documented-default branch in `npt_decode_..._reply`.
++ * stub that writes nothing, and the guest's `npt_call_...` fails the
++ * call without submitting it.
+  *
+  * Verify the host stub writes zero bytes (no header) for a DRED
+- * method.  The complementary guest-side mismatch behaviour is covered
+- * by `test_guest_unsupported_reply_DRED_decode` in
++ * method.  The stub sets the context-wide fatal flag, so the guest must
++ * never submit such a call; that is covered by
++ * `test_guest_unsupported_reply_not_submitted` in
+  * test_roundtrip_manual_guest.c.
+  *
+  * The reply-size *upper-bound* invariant (across every reply type with
+diff --git a/tests/test_roundtrip_manual_guest.c b/tests/test_roundtrip_manual_guest.c
+index a11e7e6..47f95dc 100644
+--- a/tests/test_roundtrip_manual_guest.c
++++ b/tests/test_roundtrip_manual_guest.c
+@@ -214,51 +214,40 @@ static int test_guest_reply_size_upper_bound_meta(void)
+ }
+
+ /* ================================================================== */
+-/* Unsupported-reply guest-side decode                                */
++/* Unsupported-reply guest-side call                                  */
+ /* ================================================================== */
+
+ /*
+  * When a reply contains a type with runtime-unbounded wire size (DRED
+- * chains, root-signature parameter arrays, ...) the host's encode_reply
+- * is a fatal-flag stub that writes nothing.  The guest reserves only
+- * the header bytes, then `npt_decode_..._reply` reads a zeroed slot,
+- * detects the cmd_type mismatch, and returns the documented default
+- * for the call's return type (HRESULT → DXGI_ERROR_DEVICE_REMOVED).
+- *
+- * This test pins:
+- *   - The guest's reply-size estimate is exactly `sizeof(reply_header)`.
+- *   - Decoding a zero-init reply slot returns DXGI_ERROR_DEVICE_REMOVED
+- *     instead of garbage or asserting.
+- *   - The output buffer is left untouched (the existing mismatch path
+- *     only zeros the return value, not output params).
++ * chains, meta-command descriptors, ...) the host cannot encode it, and
++ * a failed reply encode sets the fatal flag of the whole context.  The
++ * guest must fail such a call itself, without building a command, and
++ * leave the caller's in/out count untouched.
+  */
+-static int test_guest_unsupported_reply_DRED_decode(void)
++static int test_guest_unsupported_reply_not_submitted(void)
+ {
+-    const size_t reserved =
+-        npt_sizeof_ID3D12DeviceRemovedExtendedData_GetAutoBreadcrumbsOutput_reply(NULL);
+-    if (reserved != sizeof(struct npt_reply_header)) {
+-        fprintf(stderr, "FAIL: DRED unsupported reply reserves %zu bytes; "
+-                "expected exactly sizeof(reply_header)=%zu\n",
+-                reserved, sizeof(struct npt_reply_header));
+-        return -1;
+-    }
+-
+-    /* Simulate "host wrote nothing" — reply slot is zero-init. */
+-    uint8_t reply_buf[64] = {0};
+-    struct npt_cs_decoder dec = npt_test_decoder_init(reply_buf, reserved);
+-    D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT output;
+-    memset(&output, 0xAB, sizeof(output));  /* sentinel */
+-    HRESULT ret = (HRESULT)0;
+-    npt_decode_ID3D12DeviceRemovedExtendedData_GetAutoBreadcrumbsOutput_reply(
+-        &dec, &output, &ret);
++    const int submits_before = npt_test_submit_count;
++    UINT num = 7;
++    HRESULT ret = npt_call_ID3D12Device5_EnumerateMetaCommands(
++        NULL, 0xDEAD, &num, NULL);
+
+-    const HRESULT expected = (HRESULT)0x887A0005; /* DXGI_ERROR_DEVICE_REMOVED */
++    const HRESULT expected = (HRESULT)0x80004001; /* E_NOTIMPL */
+     if (ret != expected) {
+-        fprintf(stderr, "FAIL: DRED unsupported reply decode returned "
+-                "0x%08x; expected 0x%08x (DXGI_ERROR_DEVICE_REMOVED)\n",
++        fprintf(stderr, "FAIL: unsupported-reply call returned 0x%08x; "
++                "expected 0x%08x (E_NOTIMPL)\n",
+                 (unsigned)ret, (unsigned)expected);
+         return -1;
+     }
++    if (npt_test_submit_count != submits_before) {
++        fprintf(stderr, "FAIL: unsupported-reply call built %d command(s); "
++                "expected none\n", npt_test_submit_count - submits_before);
++        return -1;
++    }
++    if (num != 7) {
++        fprintf(stderr, "FAIL: unsupported-reply call changed the count "
++                "to %u\n", (unsigned)num);
++        return -1;
++    }
+     return 0;
+ }
+
+@@ -601,8 +590,8 @@ static const struct guest_manual_test_entry guest_manual_tests[] = {
+       test_guest_PSGetShaderResources_null_views_nonzero_count },
+     { "guest reply size upper-bound invariant (meta)",
+       test_guest_reply_size_upper_bound_meta },
+-    { "guest decode DRED GetAutoBreadcrumbsOutput unsupported reply default",
+-      test_guest_unsupported_reply_DRED_decode },
++    { "guest unsupported-reply call is not submitted",
++      test_guest_unsupported_reply_not_submitted },
+     { "guest pointer-sized types encode by value",
+       test_guest_pointer_sized_encode },
+     { "guest pointer-sized types decode by value",
+diff --git a/tools/npt_codegen.py b/tools/npt_codegen.py
+index dea89d0..d355b57 100644
+--- a/tools/npt_codegen.py
++++ b/tools/npt_codegen.py
+@@ -867,11 +867,13 @@ class Gen:
+         """True iff this method/function's reply contains a type whose
+         wire size is unbounded at codegen time.
+
+-        When True, the templates emit stubs for `npt_sizeof_..._reply`
+-        (just `sizeof(reply_header)`) and `npt_encode_..._reply`
+-        (`npt_cs_encoder_set_fatal(enc); return;`).  The guest's existing
+-        reply-header mismatch path then surfaces the failure to the
+-        caller without overflowing the fixed-size reply slot.
++        When True, the guest's `npt_call_...` fails the call without
++        submitting it (E_NOTIMPL for an HRESULT, the no-reply fallback
++        otherwise).  A failed reply encode sets the context-wide fatal
++        flag, so the host must never be asked for such a reply.  The
++        templates still emit stubs for `npt_sizeof_..._reply` (just
++        `sizeof(reply_header)`) and `npt_encode_..._reply`
++        (`npt_cs_encoder_set_fatal(enc); return;`).
+
+         Used by `templates/commands.h` to gate both the method and
+         function reply paths.
+@@ -912,7 +914,7 @@ class Gen:
+         self.reg.warn(
+             f"{name}: reply not supported — {where} is "
+             f"'{type_name}' which has unbounded wire size; the guest "
+-            f"call will return a fatal-mismatch default")
++            f"fails the call without sending it")
+
+     # ------------------------------------------------------------------
+     # Internal: field classification
