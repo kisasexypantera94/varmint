@@ -1,0 +1,44 @@
+diff --git a/src/virtio/neptune/npt_overrides_d3d12_device.c b/src/virtio/neptune/npt_overrides_d3d12_device.c
+index 86c587dd508..220f3877d20 100644
+--- a/src/virtio/neptune/npt_overrides_d3d12_device.c
++++ b/src/virtio/neptune/npt_overrides_d3d12_device.c
+@@ -10,6 +10,8 @@
+  *    requested-levels array after the struct (host override rebuilds
+  *    the pointer); the remaining pointer-bearing features are rejected
+  *    until an app needs them.
++ *  - EnumerateMetaCommands: meta-command descriptors carry name strings
++ *    the protocol cannot return, so no meta commands are exposed.
+  *  - CreateCommittedResource{,1,2} / CreateHeap{,1} /
+  *    CreatePlacedResource{,1}: CPU-visible buffer heaps are re-routed
+  *    onto guest-shmem-backed heaps (npt_d3d12_heap.c) so Map() becomes
+@@ -747,6 +749,21 @@ dev12_CheckFeatureSupport_override(void *self,
+    }
+ }
+
++/* Neptune cannot return meta-command descriptors, so it exposes none and
++ * answers as the D3D12 runtime does for a driver without them.  Failing
++ * instead breaks callers that treat the error as fatal (DirectStorage). */
++static HRESULT NPT_STDMETHODCALLTYPE
++dev12_EnumerateMetaCommands_override(void *self, UINT *pNumMetaCommands,
++                                     D3D12_META_COMMAND_DESC *pDescs)
++{
++   (void)self;
++   (void)pDescs;
++   if (!pNumMetaCommands)
++      return NPT_E_INVALIDARG;
++   *pNumMetaCommands = 0;
++   return NPT_S_OK;
++}
++
+ /* ==========================================================================
+  * Shmem-backed CPU-visible heaps (persistent-map path)
+  * ========================================================================== */
+@@ -1190,6 +1207,8 @@ npt_overrides_d3d12_device_init(void)
+       CreateCommittedResource2, dev12_CreateCommittedResource2_override);
+    NPT_REGISTER_OVERRIDE(id3d12device8, 
+       CreatePlacedResource1, dev12_CreatePlacedResource1_override);
++   NPT_REGISTER_OVERRIDE(id3d12device5, EnumerateMetaCommands,
++                                       dev12_EnumerateMetaCommands_override);
+    NPT_REGISTER_OVERRIDE(id3d12device9, CreateCommandQueue1,
+                                        dev12_CreateCommandQueue1_override);
+    NPT_REGISTER_OVERRIDE(id3d12device10, CreateCommittedResource3,
