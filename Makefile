@@ -36,6 +36,7 @@ test:
 		RUSTFLAGS="-L native=$(PREFIX)/lib $${RUSTFLAGS:-}" \
 		DYLD_LIBRARY_PATH="$(PREFIX)/lib:$${DYLD_LIBRARY_PATH:-}" \
 		cargo test
+	python3 -m unittest discover -s tests/guest
 
 .PHONY: neptune-sync neptune-sync-force neptune-build
 

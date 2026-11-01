@@ -1,0 +1,21 @@
+[Unit]
+Description=Varmint host game controllers
+# Started by udev (70-varmint-gamepad.rules) when the host's gamepad port appears.
+BindsTo=dev-virtio\x2dports-gamepad.device
+After=dev-virtio\x2dports-gamepad.device
+# Never give up restarting: udev starts the unit only once, when the port appears.
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/local/libexec/varmint-gamepad
+Restart=always
+RestartSec=1
+# Root only for /dev/uinput; no capabilities beyond file access.
+CapabilityBoundingSet=
+NoNewPrivileges=yes
+PrivateNetwork=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX

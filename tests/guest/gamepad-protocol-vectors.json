@@ -1,0 +1,260 @@
+{
+ "comment": "Gamepad port messages (src/virtio/console/gamepad.rs) checked by the host and guest test suites. bytes is hex.",
+ "host_to_guest": [
+  {
+   "message": "hello",
+   "version": 1,
+   "bytes": "0300010100"
+  },
+  {
+   "message": "attach",
+   "id": 7,
+   "name": "DualSense Wireless Controller (DualSense)",
+   "bytes": "2f000207000000294475616c53656e736520576972656c65737320436f6e74726f6c6c657220284475616c53656e736529"
+  },
+  {
+   "message": "detach",
+   "id": 7,
+   "bytes": "05000307000000"
+  },
+  {
+   "message": "state",
+   "id": 7,
+   "buttons": [
+    "south",
+    "dpad_left"
+   ],
+   "left_x": -32767,
+   "left_y": 32767,
+   "right_x": 1,
+   "right_y": -1,
+   "left_trigger": 0,
+   "right_trigger": 65535,
+   "bytes": "15000407000000012000000180ff7f0100ffff0000ffff"
+  },
+  {
+   "message": "state",
+   "id": 1,
+   "buttons": [
+    "south"
+   ],
+   "left_x": 0,
+   "left_y": 0,
+   "right_x": 0,
+   "right_y": 0,
+   "left_trigger": 0,
+   "right_trigger": 0,
+   "bytes": "1500040100000001000000000000000000000000000000"
+  },
+  {
+   "message": "state",
+   "id": 1,
+   "buttons": [
+    "east"
+   ],
+   "left_x": 0,
+   "left_y": 0,
+   "right_x": 0,
+   "right_y": 0,
+   "left_trigger": 0,
+   "right_trigger": 0,
+   "bytes": "1500040100000002000000000000000000000000000000"
+  },
+  {
+   "message": "state",
+   "id": 1,
+   "buttons": [
+    "west"
+   ],
+   "left_x": 0,
+   "left_y": 0,
+   "right_x": 0,
+   "right_y": 0,
+   "left_trigger": 0,
+   "right_trigger": 0,
+   "bytes": "1500040100000004000000000000000000000000000000"
+  },
+  {
+   "message": "state",
+   "id": 1,
+   "buttons": [
+    "north"
+   ],
+   "left_x": 0,
+   "left_y": 0,
+   "right_x": 0,
+   "right_y": 0,
+   "left_trigger": 0,
+   "right_trigger": 0,
+   "bytes": "1500040100000008000000000000000000000000000000"
+  },
+  {
+   "message": "state",
+   "id": 1,
+   "buttons": [
+    "left_shoulder"
+   ],
+   "left_x": 0,
+   "left_y": 0,
+   "right_x": 0,
+   "right_y": 0,
+   "left_trigger": 0,
+   "right_trigger": 0,
+   "bytes": "1500040100000010000000000000000000000000000000"
+  },
+  {
+   "message": "state",
+   "id": 1,
+   "buttons": [
+    "right_shoulder"
+   ],
+   "left_x": 0,
+   "left_y": 0,
+   "right_x": 0,
+   "right_y": 0,
+   "left_trigger": 0,
+   "right_trigger": 0,
+   "bytes": "1500040100000020000000000000000000000000000000"
+  },
+  {
+   "message": "state",
+   "id": 1,
+   "buttons": [
+    "left_stick"
+   ],
+   "left_x": 0,
+   "left_y": 0,
+   "right_x": 0,
+   "right_y": 0,
+   "left_trigger": 0,
+   "right_trigger": 0,
+   "bytes": "1500040100000040000000000000000000000000000000"
+  },
+  {
+   "message": "state",
+   "id": 1,
+   "buttons": [
+    "right_stick"
+   ],
+   "left_x": 0,
+   "left_y": 0,
+   "right_x": 0,
+   "right_y": 0,
+   "left_trigger": 0,
+   "right_trigger": 0,
+   "bytes": "1500040100000080000000000000000000000000000000"
+  },
+  {
+   "message": "state",
+   "id": 1,
+   "buttons": [
+    "menu"
+   ],
+   "left_x": 0,
+   "left_y": 0,
+   "right_x": 0,
+   "right_y": 0,
+   "left_trigger": 0,
+   "right_trigger": 0,
+   "bytes": "1500040100000000010000000000000000000000000000"
+  },
+  {
+   "message": "state",
+   "id": 1,
+   "buttons": [
+    "options"
+   ],
+   "left_x": 0,
+   "left_y": 0,
+   "right_x": 0,
+   "right_y": 0,
+   "left_trigger": 0,
+   "right_trigger": 0,
+   "bytes": "1500040100000000020000000000000000000000000000"
+  },
+  {
+   "message": "state",
+   "id": 1,
+   "buttons": [
+    "home"
+   ],
+   "left_x": 0,
+   "left_y": 0,
+   "right_x": 0,
+   "right_y": 0,
+   "left_trigger": 0,
+   "right_trigger": 0,
+   "bytes": "1500040100000000040000000000000000000000000000"
+  },
+  {
+   "message": "state",
+   "id": 1,
+   "buttons": [
+    "dpad_up"
+   ],
+   "left_x": 0,
+   "left_y": 0,
+   "right_x": 0,
+   "right_y": 0,
+   "left_trigger": 0,
+   "right_trigger": 0,
+   "bytes": "1500040100000000080000000000000000000000000000"
+  },
+  {
+   "message": "state",
+   "id": 1,
+   "buttons": [
+    "dpad_down"
+   ],
+   "left_x": 0,
+   "left_y": 0,
+   "right_x": 0,
+   "right_y": 0,
+   "left_trigger": 0,
+   "right_trigger": 0,
+   "bytes": "1500040100000000100000000000000000000000000000"
+  },
+  {
+   "message": "state",
+   "id": 1,
+   "buttons": [
+    "dpad_left"
+   ],
+   "left_x": 0,
+   "left_y": 0,
+   "right_x": 0,
+   "right_y": 0,
+   "left_trigger": 0,
+   "right_trigger": 0,
+   "bytes": "1500040100000000200000000000000000000000000000"
+  },
+  {
+   "message": "state",
+   "id": 1,
+   "buttons": [
+    "dpad_right"
+   ],
+   "left_x": 0,
+   "left_y": 0,
+   "right_x": 0,
+   "right_y": 0,
+   "left_trigger": 0,
+   "right_trigger": 0,
+   "bytes": "1500040100000000400000000000000000000000000000"
+  }
+ ],
+ "guest_to_host": [
+  {
+   "message": "hello",
+   "version": 1,
+   "bytes": "0300010100"
+  },
+  {
+   "message": "rumble",
+   "id": 2,
+   "strong": 65535,
+   "weak": 1,
+   "bytes": "09000502000000ffff0100"
+  }
+ ]
+}

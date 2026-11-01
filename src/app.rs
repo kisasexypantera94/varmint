@@ -135,6 +135,7 @@ fn winit_to_linux_key(key: winit::keyboard::KeyCode) -> Option<u16> {
 struct AppState<'a> {
     display: &'a Mutex<DisplayBuffer>,
     host_tx: Sender<RuntimeEvent>,
+    on_exit: Option<Box<dyn FnOnce() + 'a>>,
 
     presenter: Option<Presenter>,
 
@@ -162,10 +163,11 @@ struct AppState<'a> {
 }
 
 impl<'a> AppState<'a> {
-    fn new(display: &'a Mutex<DisplayBuffer>, host_tx: Sender<RuntimeEvent>) -> Self {
+    fn new(display: &'a Mutex<DisplayBuffer>, host_tx: Sender<RuntimeEvent>, on_exit: Box<dyn FnOnce() + 'a>) -> Self {
         Self {
             display,
             host_tx,
+            on_exit: Some(on_exit),
             presenter: None,
             surface_w: 0,
             surface_h: 0,
@@ -519,6 +521,13 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
         }
     }
 
+    /// Also runs for Quit (NSApp terminate:), which exits the process without returning from `run`.
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(on_exit) = self.on_exit.take() {
+            on_exit();
+        }
+    }
+
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if macos_ui::take_toggle_statistics() {
             self.stats_visible = !self.stats_visible;
@@ -555,7 +564,12 @@ pub fn event_loop() -> EventLoop<DisplayEvent> {
     EventLoop::<DisplayEvent>::with_user_event().build().unwrap()
 }
 
-pub fn run(event_loop: EventLoop<DisplayEvent>, display: &Mutex<DisplayBuffer>, host_tx: Sender<RuntimeEvent>) {
-    let mut app = AppState::new(display, host_tx);
+pub fn run<'a>(
+    event_loop: EventLoop<DisplayEvent>,
+    display: &'a Mutex<DisplayBuffer>,
+    host_tx: Sender<RuntimeEvent>,
+    on_exit: impl FnOnce() + 'a,
+) {
+    let mut app = AppState::new(display, host_tx, Box::new(on_exit));
     event_loop.run_app(&mut app).unwrap();
 }

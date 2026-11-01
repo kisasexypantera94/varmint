@@ -7,6 +7,7 @@ mod config;
 mod cpu;
 mod devices;
 mod display;
+mod gamepad;
 mod irq;
 mod launcher;
 mod machine;

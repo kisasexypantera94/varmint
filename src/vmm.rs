@@ -3,6 +3,7 @@ use crate::{
     config::{NeptuneBackend, VmConfig},
     devices::{HostBackends, Runtime, RuntimeEvent},
     display::{DisplayBuffer, DisplayEvent},
+    gamepad,
     machine::*,
     macos_ui, memory, net, stdio, storage, virtio,
 };
@@ -248,6 +249,11 @@ pub fn run(config_path: &Path) -> Result<()> {
         let _ = clipboard_change_tx.send(RuntimeEvent::Clipboard(payload));
     });
 
+    let gamepad_tx = runtime_event_tx.clone();
+    let gamepads = gamepad::start(move |event| {
+        let _ = gamepad_tx.send(RuntimeEvent::Gamepad(event));
+    });
+
     let serial_rx_tx = runtime_event_tx.clone();
     let serial = stdio::start(move |byte| {
         let _ = serial_rx_tx.send(RuntimeEvent::UartRx(byte));
@@ -260,6 +266,7 @@ pub fn run(config_path: &Path) -> Result<()> {
         audio: period_sink,
         capture: capture_source,
         clipboard,
+        gamepad: gamepads.sink(),
         serial,
     };
 
@@ -285,7 +292,7 @@ pub fn run(config_path: &Path) -> Result<()> {
             )
         });
 
-        app::run(event_loop, display, runtime_event_tx);
+        app::run(event_loop, display, runtime_event_tx, || gamepads.shutdown());
         std::process::exit(0);
     })
 }

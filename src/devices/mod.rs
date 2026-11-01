@@ -5,7 +5,7 @@ use crate::{
     audio, clipboard,
     cpu::CpuRuntime,
     display::{DisplayBuffer, DisplayEvent},
-    irq,
+    gamepad, irq,
     machine::*,
     memory::GuestMemory,
     net, stdio, uart, virtio,
@@ -25,6 +25,7 @@ pub struct HostBackends {
     pub audio: audio::PeriodSink,
     pub capture: audio::CaptureSource,
     pub clipboard: clipboard::Sink,
+    pub gamepad: gamepad::Sink,
     pub serial: stdio::Sink,
 }
 
@@ -174,7 +175,7 @@ impl<'a> Runtime<'a> {
         ));
 
         let console = Mutex::new(virtio::MmioTransport::new(
-            virtio::Console::new(backends.clipboard),
+            virtio::Console::new(backends.clipboard, backends.gamepad),
             irq::IrqLine::new(vm, spi_int_start + VIRTCONSOLE_SPI_OFFSET),
         ));
 

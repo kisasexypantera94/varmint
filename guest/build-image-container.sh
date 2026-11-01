@@ -138,6 +138,8 @@ chroot "$MOUNT_DIR" /bin/sh -eu -c '
   test -x /usr/local/bin/varmint-display-scale
   test -f /etc/xdg/autostart/varmint-display-scale.desktop
   test -x /usr/local/libexec/varmint-host-time
+  test -x /usr/local/libexec/varmint-gamepad
+  test -f /etc/udev/rules.d/70-varmint-gamepad.rules
   test -f /etc/systemd/system/sddm.service.d/10-varmint-home.conf
   systemctl enable varmint-grow-root.service varmint-host-time.service varmint-home.service varmint-firstboot.service varmint-user-state.path
   passwd -l root

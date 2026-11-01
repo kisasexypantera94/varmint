@@ -166,6 +166,7 @@ RUN install -Dm0755 /opt/varmint/source/build-image-container.sh /usr/local/bin/
     install -Dm0755 /opt/varmint/source/neptune/graphics.py /opt/varmint/rootfs/usr/local/bin/varmint-graphics && \
     install -Dm0755 /opt/varmint/source/neptune/dev-setup.sh /opt/varmint/rootfs/usr/local/bin/varmint-neptune-dev-setup && \
     install -Dm0755 /opt/varmint/source/varmint-clipboard-agent /opt/varmint/rootfs/usr/local/libexec/varmint-clipboard-agent && \
+    install -Dm0755 /opt/varmint/source/varmint-gamepad /opt/varmint/rootfs/usr/local/libexec/varmint-gamepad && \
     install -Dm0755 /opt/varmint/source/varmint-audio-watchdog /opt/varmint/rootfs/usr/local/libexec/varmint-audio-watchdog && \
     install -Dm0755 /opt/varmint/source/varmint-host-time /opt/varmint/rootfs/usr/local/libexec/varmint-host-time && \
     install -Dm0755 /opt/varmint/source/varmint-firstboot /opt/varmint/rootfs/usr/local/libexec/varmint-firstboot && \
@@ -182,6 +183,7 @@ RUN install -Dm0755 /opt/varmint/source/build-image-container.sh /usr/local/bin/
     install -Dm0644 /opt/varmint/source/varmint-user-state.service /opt/varmint/rootfs/etc/systemd/system/varmint-user-state.service && \
     install -Dm0644 /opt/varmint/source/varmint-user-state.path /opt/varmint/rootfs/etc/systemd/system/varmint-user-state.path && \
     install -Dm0644 /opt/varmint/source/varmint-grow-root.service /opt/varmint/rootfs/etc/systemd/system/varmint-grow-root.service && \
+    install -Dm0644 /opt/varmint/source/varmint-gamepad.service /opt/varmint/rootfs/etc/systemd/system/varmint-gamepad.service && \
     install -Dm0644 /opt/varmint/source/varmint-clipboard.desktop /opt/varmint/rootfs/etc/xdg/autostart/varmint-clipboard.desktop && \
     install -Dm0644 /opt/varmint/source/steam-edge-resize.desktop /opt/varmint/rootfs/etc/xdg/autostart/steam-edge-resize.desktop && \
     install -Dm0644 /opt/varmint/source/varmint-display-scale.desktop /opt/varmint/rootfs/usr/local/share/varmint/varmint-display-scale.desktop && \

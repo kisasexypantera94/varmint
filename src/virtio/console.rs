@@ -7,8 +7,11 @@ use crate::{
         device::{Device, DeviceContext, ExternalEventHandler},
     },
 };
+use gamepad::GamepadPort;
 use std::collections::VecDeque;
 use zerocopy::{FromBytes, FromZeros, Immutable, IntoBytes};
+
+mod gamepad;
 
 const DEVICE_ID: u32 = 3;
 
@@ -22,11 +25,15 @@ const Q_CONTROL_RX: usize = 2;
 const Q_CONTROL_TX: usize = 3;
 const Q_CLIP_RX: usize = 4;
 const Q_CLIP_TX: usize = 5;
+const Q_GAMEPAD_RX: usize = 6;
+const Q_GAMEPAD_TX: usize = 7;
 
-const NUM_QUEUES: u16 = 6;
+const NUM_QUEUES: u16 = 8;
 
 const CLIP_PORT: u32 = 1;
 const PORT_NAME: &[u8] = b"clipboard";
+const GAMEPAD_PORT: u32 = 2;
+const GAMEPAD_PORT_NAME: &[u8] = b"gamepad";
 
 #[derive(IntoBytes, FromBytes, Immutable)]
 #[repr(C, packed)]
@@ -40,7 +47,7 @@ struct ConsoleConfig {
 impl ConsoleConfig {
     fn new() -> ConsoleConfig {
         let mut c = ConsoleConfig::new_zeroed();
-        c.max_nr_ports = 2;
+        c.max_nr_ports = 3;
         c
     }
 }
@@ -71,16 +78,18 @@ pub struct Console {
     rx_to_guest: VecDeque<Vec<u8>>,
     ctrl_to_guest: VecDeque<Vec<u8>>,
     port_open: bool,
+    gamepad: GamepadPort,
 }
 
 impl Console {
-    pub fn new(clipboard: clipboard::Sink) -> Console {
+    pub fn new(clipboard: clipboard::Sink, gamepad: crate::gamepad::Sink) -> Console {
         Console {
             config: ConsoleConfig::new(),
             clipboard,
             rx_to_guest: VecDeque::new(),
             ctrl_to_guest: VecDeque::new(),
             port_open: false,
+            gamepad: GamepadPort::new(gamepad),
         }
     }
 
@@ -107,19 +116,25 @@ impl Console {
         match event {
             ctrl_event::DEVICE_READY => {
                 self.queue_control(CLIP_PORT, ctrl_event::DEVICE_ADD, 0);
+                self.queue_control(GAMEPAD_PORT, ctrl_event::DEVICE_ADD, 0);
             }
-            ctrl_event::PORT_READY => {
-                if id == CLIP_PORT {
+            ctrl_event::PORT_READY => match id {
+                CLIP_PORT => {
                     self.queue_control(CLIP_PORT, ctrl_event::CONSOLE_PORT, 0);
                     self.queue_control_with_name(CLIP_PORT, ctrl_event::PORT_NAME, 1, PORT_NAME);
                     self.queue_control(CLIP_PORT, ctrl_event::PORT_OPEN, 1);
                 }
-            }
-            ctrl_event::PORT_OPEN => {
-                if id == CLIP_PORT {
-                    self.port_open = value != 0;
+                GAMEPAD_PORT => {
+                    self.queue_control_with_name(GAMEPAD_PORT, ctrl_event::PORT_NAME, 1, GAMEPAD_PORT_NAME);
+                    self.queue_control(GAMEPAD_PORT, ctrl_event::PORT_OPEN, 1);
                 }
-            }
+                _ => {}
+            },
+            ctrl_event::PORT_OPEN => match id {
+                CLIP_PORT => self.port_open = value != 0,
+                GAMEPAD_PORT => self.gamepad.set_guest_connected(value != 0),
+                _ => {}
+            },
             _ => {}
         }
     }
@@ -136,6 +151,33 @@ impl Console {
         }
         self.clipboard.push(buf);
         0
+    }
+
+    fn handle_gamepad_tx(&mut self, chain: &ChainData, mem: &GuestMemory) {
+        let mut buf = vec![0u8; chain.readable_len()];
+        if chain.read_at(0, &mut buf, mem).is_none() {
+            eprintln!(
+                "console gamepad TX: failed to read {} bytes from guest memory",
+                buf.len()
+            );
+            return;
+        }
+        self.gamepad.receive(&buf);
+    }
+
+    fn pump_gamepad_rx(&mut self, ctx: &mut DeviceContext<'_>) {
+        while self.gamepad.has_pending() {
+            let Some(chain) = ctx.pop_chain(Q_GAMEPAD_RX) else {
+                break;
+            };
+            let bytes = self.gamepad.take_for_guest(chain.data.writable_len());
+            let written = chain.data.write_parts(&[&bytes], ctx.mem());
+            ctx.complete(chain.token, written);
+            // Nothing fit: stop rather than hand every posted buffer back empty.
+            if bytes.is_empty() {
+                break;
+            }
+        }
     }
 
     fn enqueue_rx(&mut self, payload: &[u8]) {
@@ -214,6 +256,14 @@ impl Device for Console {
                     ctx.complete(chain.token, written);
                 }
             }
+            Q_GAMEPAD_RX => self.pump_gamepad_rx(ctx),
+            Q_GAMEPAD_TX => {
+                while let Some(chain) = ctx.pop_chain(queue_idx) {
+                    self.handle_gamepad_tx(&chain.data, ctx.mem());
+                    ctx.complete(chain.token, 0);
+                }
+                self.pump_gamepad_rx(ctx);
+            }
             _ => {}
         }
     }
@@ -222,11 +272,13 @@ impl Device for Console {
         self.rx_to_guest.clear();
         self.ctrl_to_guest.clear();
         self.port_open = false;
+        self.gamepad.reset();
     }
 }
 
 pub enum ExternalEvent<'a> {
     HostClipboard(&'a [u8]),
+    Gamepad(crate::gamepad::Event),
 }
 
 impl ExternalEventHandler for Console {
@@ -238,9 +290,12 @@ impl ExternalEventHandler for Console {
                 if self.port_open {
                     self.enqueue_rx(payload);
                 }
+                self.pump_clip_rx(ctx);
+            }
+            ExternalEvent::Gamepad(event) => {
+                self.gamepad.on_host_event(event);
+                self.pump_gamepad_rx(ctx);
             }
         }
-
-        self.pump_clip_rx(ctx);
     }
 }

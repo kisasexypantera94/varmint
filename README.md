@@ -23,6 +23,9 @@ It supports two graphics backends: Venus for Vulkan and Neptune for DirectX.
 
 5. Open Steam, wait for it to finish setting up, then sign in and install a game.
 
+## Controllers
+Game controllers that macOS supports as gamepads (GameController.framework) appear in the VM automatically, including ones connected while it runs. Each shows up as an Xbox 360 controller with analog triggers, which Steam, SDL and Proton games handle without configuration; games' rumble plays on controllers that expose haptics to macOS. Gyro, touchpad, adaptive triggers and the light bar are not passed through.
+
 ## Games
 
 Compatibility varies between games and graphics paths:

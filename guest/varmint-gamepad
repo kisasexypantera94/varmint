@@ -1,0 +1,594 @@
+#!/usr/bin/env python3
+"""Host game controllers as Linux gamepads.
+
+Reads controllers from the Varmint `gamepad` virtio-console port (protocol: the host's
+src/virtio/console/gamepad.rs) and creates one /dev/uinput device per controller. Every device
+looks like an Xbox 360 pad driven by the kernel's xpad driver (identity, buttons, axis ranges), the
+layout SDL, Steam and Proton map without configuration. Force feedback (FF_RUMBLE) is played here
+with the kernel's ff-memless semantics and its combined level goes back to the host.
+"""
+
+import errno
+import fcntl
+import os
+import select
+import struct
+import sys
+import time
+from pathlib import Path
+
+PORT_NAME = "gamepad"
+UINPUT = "/dev/uinput"
+
+PROTOCOL_VERSION = 1
+MAX_MESSAGE_LEN = 512
+
+MSG_HELLO = 1
+MSG_ATTACH = 2
+MSG_DETACH = 3
+MSG_STATE = 4
+MSG_RUMBLE = 5
+
+# Button bits of a STATE message.
+SOUTH = 1 << 0
+EAST = 1 << 1
+WEST = 1 << 2
+NORTH = 1 << 3
+LEFT_SHOULDER = 1 << 4
+RIGHT_SHOULDER = 1 << 5
+LEFT_STICK = 1 << 6
+RIGHT_STICK = 1 << 7
+MENU = 1 << 8
+OPTIONS = 1 << 9
+HOME = 1 << 10
+DPAD_UP = 1 << 11
+DPAD_DOWN = 1 << 12
+DPAD_LEFT = 1 << 13
+DPAD_RIGHT = 1 << 14
+
+# <linux/input-event-codes.h>
+EV_SYN = 0x00
+EV_KEY = 0x01
+EV_ABS = 0x03
+EV_FF = 0x15
+EV_UINPUT = 0x0101
+SYN_REPORT = 0
+BTN_A = 0x130
+BTN_B = 0x131
+BTN_X = 0x133
+BTN_Y = 0x134
+BTN_TL = 0x136
+BTN_TR = 0x137
+BTN_SELECT = 0x13A
+BTN_START = 0x13B
+BTN_MODE = 0x13C
+BTN_THUMBL = 0x13D
+BTN_THUMBR = 0x13E
+ABS_X = 0x00
+ABS_Y = 0x01
+ABS_Z = 0x02
+ABS_RX = 0x03
+ABS_RY = 0x04
+ABS_RZ = 0x05
+ABS_HAT0X = 0x10
+ABS_HAT0Y = 0x11
+FF_RUMBLE = 0x50
+BUS_USB = 0x03
+
+# drivers/input/joystick/xpad.c, "Microsoft X-Box 360 pad" (XTYPE_XBOX360).
+IDENTITY = (BUS_USB, 0x045E, 0x028E, 0x0114)
+DEVICE_NAME = b"Microsoft X-Box 360 pad"
+FF_EFFECTS_MAX = 16
+
+# xpad reports the left face button (Xbox X) as BTN_X and the top one (Xbox Y) as BTN_Y, which are
+# the codes of BTN_NORTH and BTN_WEST; SDL's mapping for this device expects exactly that.
+BUTTONS = [
+    (SOUTH, BTN_A),
+    (EAST, BTN_B),
+    (WEST, BTN_X),
+    (NORTH, BTN_Y),
+    (LEFT_SHOULDER, BTN_TL),
+    (RIGHT_SHOULDER, BTN_TR),
+    (OPTIONS, BTN_SELECT),
+    (MENU, BTN_START),
+    (HOME, BTN_MODE),
+    (LEFT_STICK, BTN_THUMBL),
+    (RIGHT_STICK, BTN_THUMBR),
+]
+
+# (code, minimum, maximum, fuzz, flat), as xpad sets them up.
+AXES = [
+    (ABS_X, -32768, 32767, 16, 128),
+    (ABS_Y, -32768, 32767, 16, 128),
+    (ABS_Z, 0, 255, 0, 0),
+    (ABS_RX, -32768, 32767, 16, 128),
+    (ABS_RY, -32768, 32767, 16, 128),
+    (ABS_RZ, 0, 255, 0, 0),
+    (ABS_HAT0X, -1, 1, 0, 0),
+    (ABS_HAT0Y, -1, 1, 0, 0),
+]
+
+
+def log(message):
+    print(f"varmint-gamepad: {message}", file=sys.stderr, flush=True)
+
+
+# --- protocol ---------------------------------------------------------------------------------
+
+
+class ProtocolError(Exception):
+    pass
+
+
+class Hello:
+    def __init__(self, version):
+        self.version = version
+
+
+class Attach:
+    def __init__(self, id, name):
+        self.id = id
+        self.name = name
+
+
+class Detach:
+    def __init__(self, id):
+        self.id = id
+
+
+class State:
+    def __init__(self, id, buttons=0, left_x=0, left_y=0, right_x=0, right_y=0, left_trigger=0, right_trigger=0):
+        self.id = id
+        self.buttons = buttons
+        self.left_x = left_x
+        self.left_y = left_y
+        self.right_x = right_x
+        self.right_y = right_y
+        self.left_trigger = left_trigger
+        self.right_trigger = right_trigger
+
+
+def encode(kind, payload):
+    return struct.pack("<HB", 1 + len(payload), kind) + payload
+
+
+def encode_hello():
+    return encode(MSG_HELLO, struct.pack("<H", PROTOCOL_VERSION))
+
+
+def encode_rumble(id, strong, weak):
+    return encode(MSG_RUMBLE, struct.pack("<IHH", id, strong, weak))
+
+
+def decode_message(kind, payload):
+    """A host message, or None for an unknown type or one too short for its fields."""
+    try:
+        if kind == MSG_HELLO:
+            return Hello(*struct.unpack_from("<H", payload))
+        if kind == MSG_ATTACH:
+            id, name_len = struct.unpack_from("<IB", payload)
+            name = payload[5 : 5 + name_len]
+            if len(name) != name_len:
+                return None
+            return Attach(id, name.decode("utf-8", "replace"))
+        if kind == MSG_DETACH:
+            return Detach(*struct.unpack_from("<I", payload))
+        if kind == MSG_STATE:
+            return State(*struct.unpack_from("<IIhhhhHH", payload))
+    except struct.error:
+        return None
+    return None
+
+
+def take_messages(buf):
+    """Removes the complete messages from `buf` (a bytearray) and returns them."""
+    messages = []
+    while len(buf) >= 2:
+        (length,) = struct.unpack_from("<H", buf)
+        if length == 0 or length > MAX_MESSAGE_LEN:
+            raise ProtocolError(f"invalid message length {length}")
+        if len(buf) < 2 + length:
+            break
+        kind, payload = buf[2], bytes(buf[3 : 2 + length])
+        del buf[: 2 + length]
+        message = decode_message(kind, payload)
+        if message is not None:
+            messages.append(message)
+    return messages
+
+
+def coalesce(messages):
+    """Drops each STATE that a later STATE of the same controller with the same buttons replaces.
+
+    Stale stick and trigger positions are skipped while every button transition is kept.
+    """
+    kept = []
+    newer_buttons = {}
+    for message in reversed(messages):
+        if isinstance(message, State):
+            if newer_buttons.get(message.id) == message.buttons:
+                continue
+            newer_buttons[message.id] = message.buttons
+        elif isinstance(message, (Attach, Detach)):
+            newer_buttons.pop(message.id, None)
+        else:
+            newer_buttons.clear()
+        kept.append(message)
+    kept.reverse()
+    return kept
+
+
+# --- mapping ----------------------------------------------------------------------------------
+
+
+def clamp(value, low, high):
+    return max(low, min(high, value))
+
+
+def linux_values(state):
+    """The device's {(type, code): value} for a controller state."""
+    values = {(EV_KEY, code): int(bool(state.buttons & bit)) for bit, code in BUTTONS}
+    buttons = state.buttons
+    values[(EV_ABS, ABS_X)] = state.left_x
+    values[(EV_ABS, ABS_RX)] = state.right_x
+    # The host reports up as positive; evdev gamepads report up as negative.
+    values[(EV_ABS, ABS_Y)] = clamp(-state.left_y, -32768, 32767)
+    values[(EV_ABS, ABS_RY)] = clamp(-state.right_y, -32768, 32767)
+    values[(EV_ABS, ABS_Z)] = (state.left_trigger * 255 + 32767) // 65535
+    values[(EV_ABS, ABS_RZ)] = (state.right_trigger * 255 + 32767) // 65535
+    values[(EV_ABS, ABS_HAT0X)] = bool(buttons & DPAD_RIGHT) - bool(buttons & DPAD_LEFT)
+    values[(EV_ABS, ABS_HAT0Y)] = bool(buttons & DPAD_DOWN) - bool(buttons & DPAD_UP)
+    return values
+
+
+REST = linux_values(State(0))
+
+
+# --- force feedback ---------------------------------------------------------------------------
+
+
+class Effect:
+    def __init__(self, strong, weak, length, delay):
+        self.strong = strong
+        self.weak = weak
+        # Milliseconds; a length of 0 plays until stopped.
+        self.length = length
+        self.delay = delay
+
+
+class Rumble:
+    """FF_RUMBLE playback with drivers/input/ff-memless.c semantics, on a millisecond clock.
+
+    A play starts after the effect's delay and stops after its length (0: until stopped),
+    `count` plays repeat with the delay before each, re-uploading a playing effect restarts it
+    with the new parameters, and concurrent effects add up, saturating at 0xffff.
+    """
+
+    def __init__(self):
+        self.effects = {}
+        # id -> [start ms, plays left including the current one]
+        self.plays = {}
+
+    def upload(self, id, effect, now):
+        self.effects[id] = effect
+        if id in self.plays:
+            self.plays[id] = [now + effect.delay, self.plays[id][1]]
+
+    def play(self, id, count, now):
+        if id not in self.effects:
+            return
+        if count > 0:
+            self.plays[id] = [now + self.effects[id].delay, count]
+        else:
+            self.plays.pop(id, None)
+
+    def erase(self, id):
+        self.effects.pop(id, None)
+        self.plays.pop(id, None)
+
+    def _advance(self, now):
+        for id, play in list(self.plays.items()):
+            effect = self.effects[id]
+            while effect.length:
+                end = play[0] + effect.length
+                if now < end:
+                    break
+                if play[1] <= 1:
+                    del self.plays[id]
+                    break
+                play[0] = end + effect.delay
+                play[1] -= 1
+
+    def level(self, now):
+        self._advance(now)
+        strong = weak = 0
+        for id, (start, _) in self.plays.items():
+            if start <= now:
+                strong += self.effects[id].strong
+                weak += self.effects[id].weak
+        return min(strong, 0xFFFF), min(weak, 0xFFFF)
+
+    def next_change(self, now):
+        """When the level can change next without new requests, or None."""
+        self._advance(now)
+        times = []
+        for id, (start, _) in self.plays.items():
+            if now < start:
+                times.append(start)
+            elif self.effects[id].length:
+                times.append(start + self.effects[id].length)
+        return min(times, default=None)
+
+
+# --- uinput -----------------------------------------------------------------------------------
+
+# struct input_event on 64-bit: struct timeval, __u16 type, __u16 code, __s32 value.
+INPUT_EVENT = struct.Struct("llHHi")
+# struct uinput_ff_upload: request_id, retval, struct ff_effect effect, old (48 bytes each).
+FF_UPLOAD_SIZE = 104
+FF_EFFECT_OFFSET = 8
+FF_ERASE_SIZE = 12
+
+
+def _ioc(direction, number, size):
+    return (direction << 30) | (size << 16) | (ord("U") << 8) | number
+
+
+_W, _R = 1, 2
+UI_DEV_CREATE = _ioc(0, 1, 0)
+UI_DEV_DESTROY = _ioc(0, 2, 0)
+UI_DEV_SETUP = _ioc(_W, 3, 92)
+UI_ABS_SETUP = _ioc(_W, 4, 28)
+UI_SET_EVBIT = _ioc(_W, 100, 4)
+UI_SET_KEYBIT = _ioc(_W, 101, 4)
+UI_SET_ABSBIT = _ioc(_W, 103, 4)
+UI_SET_FFBIT = _ioc(_W, 107, 4)
+UI_SET_PHYS = _ioc(_W, 108, 8)
+UI_BEGIN_FF_UPLOAD = _ioc(_R | _W, 200, FF_UPLOAD_SIZE)
+UI_END_FF_UPLOAD = _ioc(_W, 201, FF_UPLOAD_SIZE)
+UI_BEGIN_FF_ERASE = _ioc(_R | _W, 202, FF_ERASE_SIZE)
+UI_END_FF_ERASE = _ioc(_W, 203, FF_ERASE_SIZE)
+UI_FF_UPLOAD = 1
+UI_FF_ERASE = 2
+
+
+def parse_ff_effect(buf, offset):
+    """(type, id, Effect) from a struct ff_effect; Effect is None unless it is FF_RUMBLE."""
+    kind, id, _direction, _button, _interval, length, delay = struct.unpack_from("<HhHHHHH", buf, offset)
+    if kind != FF_RUMBLE:
+        return kind, id, None
+    # struct ff_effect's union starts 16 bytes in (it holds a pointer); ff_rumble_effect leads it.
+    strong, weak = struct.unpack_from("<HH", buf, offset + 16)
+    return kind, id, Effect(strong, weak, length, delay)
+
+
+class UinputPad:
+    def __init__(self, id, path=UINPUT):
+        self.fd = os.open(path, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC)
+        try:
+            self._create(id)
+        except OSError:
+            os.close(self.fd)
+            raise
+
+    def _create(self, id):
+        fd = self.fd
+        fcntl.ioctl(fd, UI_SET_EVBIT, EV_KEY)
+        for _, code in BUTTONS:
+            fcntl.ioctl(fd, UI_SET_KEYBIT, code)
+        fcntl.ioctl(fd, UI_SET_EVBIT, EV_ABS)
+        for code, minimum, maximum, fuzz, flat in AXES:
+            fcntl.ioctl(fd, UI_SET_ABSBIT, code)
+            fcntl.ioctl(fd, UI_ABS_SETUP, struct.pack("<Hxxiiiiii", code, 0, minimum, maximum, fuzz, flat, 0))
+        fcntl.ioctl(fd, UI_SET_EVBIT, EV_FF)
+        fcntl.ioctl(fd, UI_SET_FFBIT, FF_RUMBLE)
+        fcntl.ioctl(fd, UI_SET_PHYS, f"varmint-gamepad/{id}".encode() + b"\0")
+        fcntl.ioctl(fd, UI_DEV_SETUP, struct.pack("<HHHH80sI", *IDENTITY, DEVICE_NAME, FF_EFFECTS_MAX))
+        fcntl.ioctl(fd, UI_DEV_CREATE)
+
+    def write(self, events):
+        frame = b"".join(INPUT_EVENT.pack(0, 0, kind, code, value) for (kind, code), value in events)
+        os.write(self.fd, frame + INPUT_EVENT.pack(0, 0, EV_SYN, SYN_REPORT, 0))
+
+    def read_requests(self):
+        """Pending (type, code, value) events from the kernel: FF requests and plays."""
+        events = []
+        while True:
+            try:
+                data = os.read(self.fd, INPUT_EVENT.size * 64)
+            except BlockingIOError:
+                return events
+            if not data:
+                return events
+            for offset in range(0, len(data) - INPUT_EVENT.size + 1, INPUT_EVENT.size):
+                _, _, kind, code, value = INPUT_EVENT.unpack_from(data, offset)
+                events.append((kind, code, value))
+
+    def serve_upload(self, request_id, rumble, now):
+        upload = bytearray(FF_UPLOAD_SIZE)
+        struct.pack_into("<I", upload, 0, request_id)
+        fcntl.ioctl(self.fd, UI_BEGIN_FF_UPLOAD, upload, True)
+        _, id, effect = parse_ff_effect(upload, FF_EFFECT_OFFSET)
+        if effect is None:
+            retval = -errno.EINVAL
+        else:
+            rumble.upload(id, effect, now)
+            retval = 0
+        struct.pack_into("<i", upload, 4, retval)
+        fcntl.ioctl(self.fd, UI_END_FF_UPLOAD, upload)
+
+    def serve_erase(self, request_id, rumble):
+        erase = bytearray(FF_ERASE_SIZE)
+        struct.pack_into("<I", erase, 0, request_id)
+        fcntl.ioctl(self.fd, UI_BEGIN_FF_ERASE, erase, True)
+        _, _, effect_id = struct.unpack_from("<IiI", erase)
+        rumble.erase(effect_id)
+        struct.pack_into("<i", erase, 4, 0)
+        fcntl.ioctl(self.fd, UI_END_FF_ERASE, erase)
+
+    def close(self):
+        try:
+            fcntl.ioctl(self.fd, UI_DEV_DESTROY)
+        finally:
+            os.close(self.fd)
+
+
+# --- service ----------------------------------------------------------------------------------
+
+
+class Pad:
+    def __init__(self, id, name, device):
+        self.id = id
+        self.name = name
+        self.device = device
+        self.values = dict(REST)
+        self.rumble = Rumble()
+        self.sent_level = (0, 0)
+
+    def apply(self, values):
+        changed = [(key, value) for key, value in values.items() if self.values[key] != value]
+        if changed:
+            self.device.write(changed)
+            self.values.update(changed)
+
+
+class Agent:
+    def __init__(self, send, make_device=UinputPad, clock=time.monotonic):
+        self.send = send
+        self.make_device = make_device
+        self.clock = clock
+        self.pads = {}
+        self.received = bytearray()
+
+    def now_ms(self):
+        return int(self.clock() * 1000)
+
+    def start(self):
+        self.send(encode_hello())
+
+    def receive(self, data):
+        self.received.extend(data)
+        for message in coalesce(take_messages(self.received)):
+            self.handle(message)
+
+    def handle(self, message):
+        if isinstance(message, Hello):
+            if message.version != PROTOCOL_VERSION:
+                log(f"host speaks protocol {message.version}, this service {PROTOCOL_VERSION}")
+        elif isinstance(message, Attach):
+            self.remove(message.id)
+            try:
+                device = self.make_device(message.id)
+            except OSError as error:
+                log(f"cannot create a gamepad for {message.name}: {error}")
+                return
+            self.pads[message.id] = Pad(message.id, message.name, device)
+            log(f"controller {message.id} ({message.name}) is now an Xbox 360 pad")
+        elif isinstance(message, Detach):
+            self.remove(message.id)
+        elif isinstance(message, State):
+            pad = self.pads.get(message.id)
+            if pad is not None:
+                try:
+                    pad.apply(linux_values(message))
+                except OSError as error:
+                    log(f"cannot update controller {message.id}: {error}")
+
+    def remove(self, id):
+        pad = self.pads.pop(id, None)
+        if pad is None:
+            return
+        try:
+            pad.apply(REST)
+        except OSError as error:
+            log(f"cannot release controller {id}: {error}")
+        pad.device.close()
+        log(f"controller {id} ({pad.name}) removed")
+
+    def remove_all(self):
+        for id in list(self.pads):
+            self.remove(id)
+
+    def serve_device(self, pad):
+        now = self.now_ms()
+        for kind, code, value in pad.device.read_requests():
+            try:
+                if kind == EV_UINPUT and code == UI_FF_UPLOAD:
+                    pad.device.serve_upload(value, pad.rumble, now)
+                elif kind == EV_UINPUT and code == UI_FF_ERASE:
+                    pad.device.serve_erase(value, pad.rumble)
+                elif kind == EV_FF and code < FF_EFFECTS_MAX:
+                    pad.rumble.play(code, value, now)
+            except OSError as error:
+                log(f"controller {pad.id}: force-feedback request {code}: {error}")
+
+    def update_rumble(self):
+        """Sends changed rumble levels; returns milliseconds until the next change, or None."""
+        now = self.now_ms()
+        wait = None
+        for pad in self.pads.values():
+            level = pad.rumble.level(now)
+            if level != pad.sent_level:
+                self.send(encode_rumble(pad.id, *level))
+                pad.sent_level = level
+            change = pad.rumble.next_change(now)
+            if change is not None:
+                wait = change - now if wait is None else min(wait, change - now)
+        return wait
+
+
+def find_port():
+    for entry in Path("/sys/class/virtio-ports").glob("vport*p*"):
+        try:
+            if (entry / "name").read_text(encoding="utf-8").strip() == PORT_NAME:
+                return Path("/dev") / entry.name
+        except OSError:
+            pass
+    raise FileNotFoundError(f"the {PORT_NAME} virtio-console port is not available")
+
+
+def write_all(fd, data):
+    view = memoryview(data)
+    while view:
+        try:
+            view = view[os.write(fd, view) :]
+        except BlockingIOError:
+            select.select([], [fd], [])
+
+
+def run():
+    port = find_port()
+    fd = os.open(port, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC)
+    agent = Agent(lambda data: write_all(fd, data))
+    log(f"using {port}")
+    try:
+        agent.start()
+        while True:
+            wait = agent.update_rumble()
+            devices = {pad.device.fd: pad for pad in agent.pads.values()}
+            timeout = None if wait is None else max(wait, 0) / 1000
+            readable, _, _ = select.select([fd, *devices], [], [], timeout)
+            for ready in readable:
+                if ready == fd:
+                    data = os.read(fd, 65536)
+                    if not data:
+                        raise ConnectionError("the host closed the port")
+                    agent.receive(data)
+                elif ready in devices and agent.pads.get(devices[ready].id) is devices[ready]:
+                    agent.serve_device(devices[ready])
+    finally:
+        agent.remove_all()
+        os.close(fd)
+
+
+def main():
+    try:
+        run()
+    except (OSError, ProtocolError, ConnectionError) as error:
+        log(str(error))
+        # systemd restarts the service; the host then replays its controllers.
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

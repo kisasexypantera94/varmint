@@ -19,6 +19,10 @@ impl ChainData {
         self.readable_len
     }
 
+    pub fn writable_len(&self) -> usize {
+        self.writable.iter().map(|seg| seg.len as usize).sum()
+    }
+
     pub fn read_at(&self, mut offset: usize, buf: &mut [u8], mem: &GuestMemory) -> Option<()> {
         let end = offset.checked_add(buf.len())?;
         if end > self.readable_len {

@@ -1,5 +1,5 @@
 use super::Devices;
-use crate::{audio, memory::GuestMemory, virtio};
+use crate::{audio, gamepad, memory::GuestMemory, virtio};
 use std::sync::mpsc::Receiver;
 
 pub enum RuntimeInputEvent {
@@ -43,6 +43,7 @@ pub enum RuntimeEvent {
         refresh_millihertz: u32,
     },
     Clipboard(Vec<u8>),
+    Gamepad(gamepad::Event),
 }
 
 pub struct RuntimeEventPump<'a> {
@@ -112,6 +113,13 @@ impl<'a> RuntimeEventPump<'a> {
                     .lock()
                     .unwrap()
                     .handle_external_event(virtio::console::ExternalEvent::HostClipboard(&payload), self.mem);
+            }
+            RuntimeEvent::Gamepad(event) => {
+                self.devices
+                    .console
+                    .lock()
+                    .unwrap()
+                    .handle_external_event(virtio::console::ExternalEvent::Gamepad(event), self.mem);
             }
         }
     }

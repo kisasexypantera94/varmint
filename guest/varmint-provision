@@ -179,6 +179,9 @@ install -d -m 0755 /etc/udev/rules.d
 cat > /etc/udev/rules.d/70-varmint-clipboard.rules <<'EOF_UDEV'
 SUBSYSTEM=="virtio-ports", ATTR{name}=="clipboard", MODE="0660", TAG+="uaccess"
 EOF_UDEV
+cat > /etc/udev/rules.d/70-varmint-gamepad.rules <<'EOF_UDEV'
+SUBSYSTEM=="virtio-ports", ATTR{name}=="gamepad", TAG+="systemd", ENV{SYSTEMD_WANTS}+="varmint-gamepad.service"
+EOF_UDEV
 
 # Host keys are deliberately removed from the published image so cloned VMs do
 # not share an SSH identity. Generate them immediately before sshd validates its
