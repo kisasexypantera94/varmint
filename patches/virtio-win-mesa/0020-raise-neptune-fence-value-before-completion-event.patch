@@ -1,0 +1,254 @@
+diff --git a/src/virtio/neptune/npt_event.c b/src/virtio/neptune/npt_event.c
+index 5b766eb22c9..4a8cfc1a503 100644
+--- a/src/virtio/neptune/npt_event.c
++++ b/src/virtio/neptune/npt_event.c
+@@ -35,6 +35,8 @@ struct event_pending {
+    uint32_t ring_idx;  /* event ring the arm occupies until completion */
+    bool   direct;      /* KMD signals `handle` itself from its completion
+                         * DPC; the waiter only releases the token */
++   struct npt_event_reached *reached; /* raised to reached_value on fire */
++   uint64_t reached_value;
+    struct event_pending *next;
+    /* NPT_EVENT_WAITER_TRACE: push_us == 0 means tracing was off at
+     * enqueue.  pop_us keeps the FIRST pop so round-robin re-queues
+@@ -44,6 +46,47 @@ struct event_pending {
+    uint32_t pop_depth; /* entries still queued at first pop */
+ };
+
++struct npt_event_reached {
++   _Atomic uint64_t value;
++   _Atomic uint32_t refs;
++};
++
++struct npt_event_reached *
++npt_event_reached_create(void)
++{
++   struct npt_event_reached *reached = calloc(1, sizeof(*reached));
++   if (reached)
++      atomic_init(&reached->refs, 1);
++   return reached;
++}
++
++void
++npt_event_reached_unref(struct npt_event_reached *reached)
++{
++   if (reached &&
++       atomic_fetch_sub_explicit(&reached->refs, 1, memory_order_acq_rel) == 1)
++      free(reached);
++}
++
++uint64_t
++npt_event_reached_value(struct npt_event_reached *reached)
++{
++   return reached ? atomic_load_explicit(&reached->value, memory_order_acquire)
++                  : 0;
++}
++
++/* Release: the app thread the event wakes reads `value` with acquire. */
++static void
++event_reached_raise(struct npt_event_reached *reached, uint64_t value)
++{
++   uint64_t cur = atomic_load_explicit(&reached->value, memory_order_relaxed);
++   while (cur < value &&
++          !atomic_compare_exchange_weak_explicit(&reached->value, &cur, value,
++                                                 memory_order_release,
++                                                 memory_order_relaxed))
++      ;
++}
++
+ static int64_t
+ event_now_us(void)
+ {
+@@ -329,6 +372,8 @@ static void *event_waiter_thread(void *arg)
+          continue; /* re-queued for a round-robin turn */
+
+       if (rc > 0) {
++         if (p->reached)
++            event_reached_raise(p->reached, p->reached_value);
+          /* When the KMD signalled the app event directly from its DPC
+           * this thread's only job left is the token release. */
+          if (!p->direct)
+@@ -363,6 +408,7 @@ static void *event_waiter_thread(void *arg)
+       /* Single-use proxy: release after completion (the host firing
+        * necessarily preceded the KMD signal we just consumed). */
+       npt_dispatch_event_release_ring(npt_device_method_ring(dev), p->token);
++      npt_event_reached_unref(p->reached);
+       free(p);
+    }
+ #if defined(_WIN32)
+@@ -476,8 +522,9 @@ event_arm_abort(struct npt_device *dev, struct npt_event_state *st,
+    return 0;
+ }
+
+-uint64_t
+-npt_event_arm(struct npt_device *dev, void *hEvent)
++static uint64_t
++event_arm(struct npt_device *dev, void *hEvent,
++          struct npt_event_reached *reached, uint64_t reached_value)
+ {
+    if (!dev || !hEvent || !dev->event)
+       return 0;
+@@ -513,11 +560,11 @@ npt_event_arm(struct npt_device *dev, void *hEvent)
+    }
+    /* Hand the app's own event to the transport so the KMD can
+     * KeSetEvent it straight from the completion DPC; the waiter then
+-    * only does token bookkeeping for that arm. */
++    * only does token bookkeeping for that arm.  Not for an arm that
++    * raises `reached`: that has to happen before the event is set. */
+    bool direct_ok = false;
+-   int sync_fd = npt_renderer_submit_present_fence_direct(dev->renderer,
+-                                                          ring_idx, hEvent,
+-                                                          &direct_ok);
++   int sync_fd = npt_renderer_submit_present_fence_direct(
++      dev->renderer, ring_idx, reached ? NULL : hEvent, &direct_ok);
+    mtx_unlock(&st->arm_mutex);
+
+    if (sync_fd < 0)
+@@ -533,6 +580,11 @@ npt_event_arm(struct npt_device *dev, void *hEvent)
+    p->token   = token;
+    p->ring_idx = ring_idx;
+    p->direct  = direct_ok;
++   if (reached) {
++      atomic_fetch_add_explicit(&reached->refs, 1, memory_order_relaxed);
++      p->reached = reached;
++      p->reached_value = reached_value;
++   }
+    if (npt_env.event_waiter_trace_ms)
+       p->push_us = event_now_us();
+
+@@ -555,6 +607,19 @@ npt_event_arm(struct npt_device *dev, void *hEvent)
+    return token;
+ }
+
++uint64_t
++npt_event_arm(struct npt_device *dev, void *hEvent)
++{
++   return event_arm(dev, hEvent, NULL, 0);
++}
++
++uint64_t
++npt_event_arm_reached(struct npt_device *dev, void *hEvent,
++                      struct npt_event_reached *reached, uint64_t value)
++{
++   return event_arm(dev, hEvent, reached, value);
++}
++
+ /*
+  * Single-use token arm for callers that consume the sync_file
+  * themselves (the guest swapchain's per-Present GPU-done fence)
+diff --git a/src/virtio/neptune/npt_event.h b/src/virtio/neptune/npt_event.h
+index a23ff8c39fe..ac6d354cfb9 100644
+--- a/src/virtio/neptune/npt_event.h
++++ b/src/virtio/neptune/npt_event.h
+@@ -43,6 +43,21 @@ void npt_event_fini(struct npt_device *dev);
+  * minted token (nonzero) to embed in the wire call's HANDLE slot, or 0
+  * on failure.  The waiter releases the token after completion. */
+ uint64_t npt_event_arm(struct npt_device *dev, void *hEvent);
++/* The highest value a fence is known to have reached through a fired
++ * SetEventOnCompletion arm.  Shared by the fence and its pending arms,
++ * which may outlive it. */
++struct npt_event_reached;
++struct npt_event_reached *npt_event_reached_create(void);
++void npt_event_reached_unref(struct npt_event_reached *reached);
++uint64_t npt_event_reached_value(struct npt_event_reached *reached);
++/* npt_event_arm for a wait on `value`: the waiter raises `reached` to
++ * `value` before it signals hEvent.  The wake and the fence's feedback
++ * slot travel separate paths, but D3D12 promises GetCompletedValue() >=
++ * value once the event is set, and engines re-read the fence after the
++ * wake without arming again. */
++uint64_t npt_event_arm_reached(struct npt_device *dev, void *hEvent,
++                               struct npt_event_reached *reached,
++                               uint64_t value);
+
+ /* Single-use token arm returning the caller-owned sync_file fd (-1 on
+  * failure).  Pair a successful arm with npt_event_release_token after
+diff --git a/src/virtio/neptune/npt_overrides_d3d12_fence.c b/src/virtio/neptune/npt_overrides_d3d12_fence.c
+index 8b9fa587ee8..ab8e82cd5ec 100644
+--- a/src/virtio/neptune/npt_overrides_d3d12_fence.c
++++ b/src/virtio/neptune/npt_overrides_d3d12_fence.c
+@@ -50,6 +50,9 @@ struct npt_d3d12_fence_aux {
+     * that snapshot would fire early.  Rewound fences bypass the
+     * snapshot fast paths and use the host-authoritative arm / sync. */
+    _Atomic bool rewound;
++   /* Values proven by fired SetEventOnCompletion arms, which can land
++    * before the feedback slot catches up.  NULL on OOM. */
++   struct npt_event_reached *reached;
+ };
+
+ static void npt_d3d12_fence_aux_destroy(void *aux_raw);
+@@ -65,6 +68,7 @@ npt_d3d12_fence_aux_init(struct npt_com_base *com,
+    aux->base.registered = false;
+    atomic_store_explicit(&aux->signal_high, 0, memory_order_relaxed);
+    atomic_store_explicit(&aux->rewound, false, memory_order_relaxed);
++   aux->reached = npt_event_reached_create();
+    com->aux_destroy = npt_d3d12_fence_aux_destroy;
+    /* Slot alloc + REGISTER happen post-Create (aux_init has no
+     * InitialValue).  A fence opened from a shared handle stays
+@@ -103,6 +107,7 @@ npt_d3d12_fence_aux_destroy(void *aux_raw)
+       npt_renderer_shmem_unref(aux->base.com->base.device->renderer,
+                                aux->base.fb_shmem);
+    }
++   npt_event_reached_unref(aux->reached);
+    free(aux);
+ }
+
+@@ -164,6 +169,19 @@ fence12_slot(struct npt_d3d12_fence_aux *aux)
+       ((uint8_t *)aux->base.fb_shmem->mmap_ptr + aux->base.fb_offset);
+ }
+
++/* The feedback snapshot, raised to any value a fired arm has proven:
++ * the host fires the arm's proxy once the fence reaches the value, which
++ * can be before its feedback poll publishes it.  Monotonic fence only. */
++static uint64_t
++fence12_snapshot(const struct npt_d3d12_fence_aux *aux,
++                 struct npt_d3d11_fence_feedback_slot *slot)
++{
++   const uint64_t published =
++      atomic_load_explicit(&slot->completed_value, memory_order_acquire);
++   const uint64_t reached = npt_event_reached_value(aux->reached);
++   return published > reached ? published : reached;
++}
++
+ static UINT64 NPT_STDMETHODCALLTYPE
+ fence12_GetCompletedValue_override(void *self)
+ {
+@@ -179,8 +197,7 @@ fence12_GetCompletedValue_override(void *self)
+    }
+    /* Acquire pairs with the host's release store.  Monotonic fence:
+     * the snapshot is a valid lower bound, matching the API contract. */
+-   return atomic_load_explicit(&slot->completed_value,
+-                               memory_order_acquire);
++   return fence12_snapshot(aux, slot);
+ }
+
+ static bool
+@@ -190,8 +207,7 @@ fence12_reached(void *self, uint64_t value)
+    struct npt_d3d11_fence_feedback_slot *slot = fence12_slot(aux);
+    if (slot && aux->base.registered &&
+        !atomic_load_explicit(&aux->rewound, memory_order_acquire)) {
+-      return atomic_load_explicit(&slot->completed_value,
+-                                  memory_order_acquire) >= value;
++      return fence12_snapshot(aux, slot) >= value;
+    }
+    /* Rewound fence (snapshot can read stale-high) or no slot: take the
+     * authoritative sync read. */
+@@ -244,8 +260,7 @@ fence12_SetEventOnCompletion_override(void *self, UINT64 Value, HANDLE hEvent)
+    struct npt_d3d11_fence_feedback_slot *slot = fence12_slot(aux);
+    if (slot && aux->base.registered &&
+        !atomic_load_explicit(&aux->rewound, memory_order_acquire) &&
+-       atomic_load_explicit(&slot->completed_value,
+-                            memory_order_acquire) >= Value) {
++       fence12_snapshot(aux, slot) >= Value) {
+       SetEvent(hEvent);
+       return NPT_S_OK;
+    }
+@@ -255,7 +270,8 @@ fence12_SetEventOnCompletion_override(void *self, UINT64 Value, HANDLE hEvent)
+     * rides async on the same ring -- ordered after the arm, and the
+     * host fence worker fires the proxy whenever the value is reached,
+     * so nothing needs a reply. */
+-   uint64_t token = npt_event_arm(dev, (void *)hEvent);
++   uint64_t token = npt_event_arm_reached(dev, (void *)hEvent,
++                                          aux ? aux->reached : NULL, Value);
+    if (!token)
+       return NPT_E_OUTOFMEMORY;
+    /* The wire HANDLE slot carries the single-use token; the host

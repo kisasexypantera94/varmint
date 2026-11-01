@@ -10,7 +10,7 @@ FEX_COMPAT_TOOL="$STEAM_ROOT/steamapps/common/FEX-Emu/fex-compat-tool"
 TIMEOUT="${VARMINT_NEPTUNE_TEST_TIMEOUT:-45s}"
 
 if [ "$#" -ne 2 ]; then
-    echo "usage: $0 <d3d11|d3d12> <smoke|fullscreen|empty_cs>" >&2
+    echo "usage: $0 <d3d11|d3d12> <smoke|fullscreen|empty_cs|fence_event>" >&2
     exit 2
 fi
 
@@ -31,6 +31,10 @@ case "$API:$TEST" in
         LIBRARIES=(-ld3d12 -ldxgi)
         ;;
     d3d12:empty_cs)
+        MODE=neptune-dx12
+        LIBRARIES=(-ld3d12)
+        ;;
+    d3d12:fence_event)
         MODE=neptune-dx12
         LIBRARIES=(-ld3d12)
         ;;

@@ -8,3 +8,4 @@
 0017-implement-neptune-d3d12-fullscreen.patch
 0018-judge-neptune-ring-watchdog-by-wall-time.patch
 0019-refuse-empty-neptune-compute-shader.patch
+0020-raise-neptune-fence-value-before-completion-event.patch
