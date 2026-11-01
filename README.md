@@ -44,7 +44,8 @@ Compatibility varies between games and graphics paths:
 - Use Venus for DX9 and 32-bit DX11 games.
 - For 64-bit DX11 games, try Neptune first and use Venus as a fallback.
 - Proton 10 is the recommended baseline for Venus, while Neptune also works well with Proton Experimental.
-- DX12 has not been tested extensively yet.
+- Neptune also runs with Proton's ARM64 builds, which can help games that crash at startup on regular Proton.
+- For 64-bit DX12 games, use Neptune's DX12 mode with the D3DMetal backend. DX12 has been tested on fewer games than DX11.
 
 See [Running games in Varmint](docs/games/common.md) for general setup and troubleshooting.
 

@@ -39,6 +39,29 @@ varmint-graphics neptune %command% -dx11
 
 To switch back to Venus, remove `varmint-graphics neptune` from the launch options and launch the game normally.
 
+### DirectX 12 with Neptune
+
+For 64-bit DirectX 12 games, use the DX12 mode instead:
+
+```text
+varmint-graphics neptune-dx12 %command%
+```
+
+In this mode Neptune also handles the game's DirectX 11 devices, such as launchers, video playback and overlays.
+
+DirectX 12 needs the D3DMetal backend on the Mac. D3DMetal is part of Apple's Game Porting Toolkit ("Evaluation environment for Windows games") and is not bundled with Varmint. Download it from Apple, mount the disk image, and add the following to the VM configuration file, adjusting the volume name to the version you mounted:
+
+```toml
+neptune_backend = "d3dmetal"
+
+[host_environment]
+D3DMETAL_FRAMEWORK_PATH = "/Volumes/Evaluation environment for Windows games 4.0 beta 3/redist/lib/external/D3DMetal.framework"
+```
+
+Keep the disk image mounted, or copy `D3DMetal.framework` to another location and point the path there. Restart Varmint after changing the configuration.
+
+The backend applies to the whole VM: with D3DMetal selected, DirectX 11 games also run on D3DMetal instead of DXMT.
+
 ### 32-bit games
 
 Neptune currently supports 64-bit Windows games only.
@@ -56,6 +79,16 @@ Many Neptune games that launch directly into a 64-bit DirectX 11 executable also
 Some games may work better with a newer Proton version, while others may require an older one. Check the game's documentation page first, and use [ProtonDB](https://www.protondb.com/) for known Proton versions, launch options and game-specific fixes or patches.
 
 Follow the individual game page when one is specified.
+
+### ARM64 Proton
+
+Steam also offers ARM64 builds of Proton, such as **Proton Experimental (ARM64)**. With these, Wine itself runs natively and only the game's x86-64 code is emulated, instead of running all of Proton under emulation.
+
+Neptune works with ARM64 Proton using the same launch options. Select the ARM64 build in the game's **Properties → Compatibility** settings.
+
+Try it when a game crashes at startup on regular Proton. Performance can differ from regular Proton, and CPU-heavy games can run slower, so compare both if a game runs but feels slow.
+
+Use regular Proton for Venus: the DXVK and vkd3d-proton versions in ARM64 Proton require Vulkan 1.3, which Venus does not provide yet.
 
 ## Fullscreen and borderless modes
 

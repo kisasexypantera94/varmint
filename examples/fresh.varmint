@@ -5,3 +5,4 @@ format_version = 2
 # system_disk_capacity_gib = 32   # Replaceable system disk capacity. Defaults to bundled image size.
 # data_disk_capacity_gib = 128    # Persistent /home capacity. Defaults to 128 GiB.
 # storage_dir = "fresh"           # VM files. Defaults to a directory named after this config.
+# neptune_backend = "dxmt"        # Neptune host backend: "dxmt", or "d3dmetal" for DirectX 12.
