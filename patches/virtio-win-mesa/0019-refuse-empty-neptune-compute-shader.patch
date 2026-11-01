@@ -1,0 +1,45 @@
+diff --git a/src/virtio/neptune/npt_overrides_d3d12_device.c b/src/virtio/neptune/npt_overrides_d3d12_device.c
+--- a/src/virtio/neptune/npt_overrides_d3d12_device.c
++++ b/src/virtio/neptune/npt_overrides_d3d12_device.c
+@@ -12,6 +12,8 @@
+  *    until an app needs them.
+  *  - EnumerateMetaCommands: meta-command descriptors carry name strings
+  *    the protocol cannot return, so no meta commands are exposed.
++ *  - CreateComputePipelineState: an empty CS is refused here; the
++ *    create is asynchronous, so a host failure never reaches the app.
+  *  - CreateCommittedResource{,1,2} / CreateHeap{,1} /
+  *    CreatePlacedResource{,1}: CPU-visible buffer heaps are re-routed
+  *    onto guest-shmem-backed heaps (npt_d3d12_heap.c) so Map() becomes
+@@ -764,6 +766,23 @@
+    return NPT_S_OK;
+ }
+
++/* The create is sent without waiting and reported as successful; a host
++ * failure would leave the app using a pipeline that does not exist.  An
++ * empty CS is invalid input, so refuse it here, synchronously. */
++static HRESULT NPT_STDMETHODCALLTYPE
++dev12_CreateComputePipelineState_override(
++   void *self, const D3D12_COMPUTE_PIPELINE_STATE_DESC *pDesc,
++   const IID *riid, void **ppPipelineState)
++{
++   if (pDesc && (!pDesc->CS.pShaderBytecode || !pDesc->CS.BytecodeLength)) {
++      if (ppPipelineState)
++         *ppPipelineState = NULL;
++      return NPT_E_INVALIDARG;
++   }
++   return npt_id3d12device_default_CreateComputePipelineState(
++      self, pDesc, riid, ppPipelineState);
++}
++
+ /* ==========================================================================
+  * Shmem-backed CPU-visible heaps (persistent-map path)
+  * ========================================================================== */
+@@ -1192,6 +1211,8 @@
+                                       dev12_CheckFeatureSupport_override);
+    NPT_REGISTER_OVERRIDE(id3d12device, CreateCommandQueue,
+                                       dev12_CreateCommandQueue_override);
++   NPT_REGISTER_OVERRIDE(id3d12device, CreateComputePipelineState,
++                                      dev12_CreateComputePipelineState_override);
+
+    NPT_REGISTER_OVERRIDE(id3d12device, CreateCommittedResource,
+                                       dev12_CreateCommittedResource_override);

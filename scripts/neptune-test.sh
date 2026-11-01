@@ -6,7 +6,7 @@ TARGET="${VARMINT_GUEST_SSH:-varmint-dev}"
 REMOTE_STAGE="/tmp/varmint-neptune-test"
 
 if [ "$#" -ne 2 ]; then
-    echo "usage: $0 <d3d11|d3d12> <smoke|fullscreen>" >&2
+    echo "usage: $0 <d3d11|d3d12> <smoke|fullscreen|empty_cs>" >&2
     exit 2
 fi
 
@@ -22,7 +22,7 @@ case "$API" in
 esac
 
 case "$TEST" in
-    smoke | fullscreen) ;;
+    smoke | fullscreen | empty_cs) ;;
     *)
         echo "unsupported test: $TEST" >&2
         exit 2
