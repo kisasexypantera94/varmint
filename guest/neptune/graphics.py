@@ -14,7 +14,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-SCHEMA = "shadow-v8"
+SCHEMA = "shadow-v9"
 DEFAULT_NEPTUNE = Path("/usr/local/lib/varmint/neptune")
 DEFAULT_CACHE = Path.home() / ".cache/varmint/proton-graphics"
 PE_AMD64 = 0x8664
@@ -26,8 +26,16 @@ def graphics_policy(mode):
     if mode == "neptune":
         return "d3d11,dxgi=n,b;nptunix=b;d3d12,d3d12core=;nvapi,nvapi64,nvofapi64="
     if mode == "neptune-dx12":
-        return "dxgi=n,b;nptunix=b;d3d12=n,b;d3d12core=;nvapi,nvapi64,nvofapi64="
+        return "d3d11,dxgi=n,b;nptunix=b;d3d12=n,b;d3d12core=;nvapi,nvapi64,nvofapi64="
     fail(f"unsupported graphics mode: {mode}")
+
+
+def neptune_dlls(mode):
+    # D3D11 stays on Neptune in DX12 mode too: DXVK's d3d11 cannot run on
+    # Neptune's dxgi, and both Neptune DLLs share one device per process.
+    if mode == "neptune":
+        return ("dxgi", "d3d11")
+    return ("dxgi", "d3d11", "d3d12")
 
 
 def fail(message):
@@ -157,31 +165,26 @@ def require_unix_elf(path, kind, unix_arch):
 
 
 def validate_artifacts(paths, unix_arch):
-    require_amd64_pe(paths["dxgi"], "Neptune dxgi.dll")
-    require_amd64_pe(paths["primary"], f"Neptune {paths['primary'].name}")
-    require_amd64_pe(paths["nptdll"], "Neptune nptunix.dll")
+    for name, path in paths.items():
+        if name != "nptso":
+            require_amd64_pe(path, f"Neptune {path.name}")
     require_unix_elf(paths["nptso"], "Neptune nptunix.so", unix_arch)
     return paths
 
 
 def prebuilt_artifact_paths(mode, base, unix_arch):
     windows = base / "x86_64-windows"
-    unix = base / unix_arch
-    return validate_artifacts({
-        "dxgi": windows / "dxgi.dll",
-        "nptdll": windows / "nptunix.dll",
-        "nptso": unix / "nptunix.so",
-        "primary": windows / ("d3d11.dll" if mode == "neptune" else "d3d12.dll"),
-    }, unix_arch)
+    paths = {name: windows / f"{name}.dll" for name in neptune_dlls(mode)}
+    paths["nptdll"] = windows / "nptunix.dll"
+    paths["nptso"] = base / unix_arch / "nptunix.so"
+    return validate_artifacts(paths, unix_arch)
 
 
 def build_artifact_paths(mode, base, unix_arch):
-    return validate_artifacts({
-        "dxgi": base / "dxgi.dll",
-        "nptdll": base / "nptunix" / "nptunix.dll",
-        "nptso": base / "nptunix" / "nptunix.so",
-        "primary": base / ("d3d11.dll" if mode == "neptune" else "d3d12.dll"),
-    }, unix_arch)
+    paths = {name: base / f"{name}.dll" for name in neptune_dlls(mode)}
+    paths["nptdll"] = base / "nptunix" / "nptunix.dll"
+    paths["nptso"] = base / "nptunix" / "nptunix.so"
+    return validate_artifacts(paths, unix_arch)
 
 
 def proton_uses_arm64(root):
@@ -245,26 +248,23 @@ def discover_proton_layout(mode, root, arm64):
         found = ", ".join(str(w.relative_to(root).parent) for w, _ in arch_pairs)
         fail(f"unsupported Proton layout: ambiguous {unix_arch} Wine roots: {found}")
 
-    dxvk_names = ["dxgi.dll"]
-    if mode == "neptune":
-        dxvk_names.append("d3d11.dll")
-    dxvk_dir = find_component_dir(root, wine_roots, "dxvk", dxvk_names, component_machine)
-
-    if mode == "neptune":
-        primary = dxvk_dir / "d3d11.dll"
-    else:
-        vkd3d_dir = find_component_dir(
-            root, wine_roots, "vkd3d-proton", ["d3d12.dll"], component_machine
-        )
-        primary = vkd3d_dir / "d3d12.dll"
+    dxvk_dir = find_component_dir(
+        root, wine_roots, "dxvk", ["dxgi.dll", "d3d11.dll"], component_machine
+    )
 
     windows, unix = arch_pairs[0]
-    return {
+    layout = {
         "dxgi": dxvk_dir / "dxgi.dll",
-        "primary": primary,
+        "d3d11": dxvk_dir / "d3d11.dll",
         "npt_windows": windows,
         "npt_unix": unix,
     }
+    if mode == "neptune-dx12":
+        vkd3d_dir = find_component_dir(
+            root, wine_roots, "vkd3d-proton", ["d3d12.dll"], component_machine
+        )
+        layout["d3d12"] = vkd3d_dir / "d3d12.dll"
+    return layout
 
 
 def proton_slot_id(proton_root):
@@ -292,7 +292,7 @@ def fingerprint(mode, proton_root, artifacts, layout):
         add(rel)
         add(sha256(path) if path.is_file() else "<missing>")
 
-    for name in ("dxgi", "primary"):
+    for name in neptune_dlls(mode):
         path = layout[name]
         add(f"layout:{name}")
         add(str(path.relative_to(proton_root)))
@@ -511,23 +511,23 @@ def build_shadow(mode, proton_root, shadow, artifacts, layout):
 
     prepare_steampipe_state(proton_root, shadow)
 
-    dxgi_dst = shadow_path(shadow, proton_root, layout["dxgi"])
-    primary_dst = shadow_path(shadow, proton_root, layout["primary"])
     shadow_nptdll = shadow_path(shadow, proton_root, layout["npt_windows"]) / "nptunix.dll"
     shadow_nptso = shadow_path(shadow, proton_root, layout["npt_unix"]) / "nptunix.so"
 
-    for kind, dst in (
-        ("DXGI destination", dxgi_dst),
-        ("primary D3D destination", primary_dst),
-        ("nptunix.dll destination", shadow_nptdll),
-        ("nptunix.so destination", shadow_nptso),
-    ):
+    replacements = [
+        (artifacts[name], shadow_path(shadow, proton_root, layout[name]), f"{name}.dll destination")
+        for name in neptune_dlls(mode)
+    ]
+    replacements += [
+        (artifacts["nptdll"], shadow_nptdll, "nptunix.dll destination"),
+        (artifacts["nptso"], shadow_nptso, "nptunix.so destination"),
+    ]
+
+    for _, dst, kind in replacements:
         require_shadow_local(shadow, dst, kind)
 
-    replace_with_copy(artifacts["dxgi"], dxgi_dst)
-    replace_with_copy(artifacts["primary"], primary_dst)
-    replace_with_copy(artifacts["nptdll"], shadow_nptdll)
-    replace_with_copy(artifacts["nptso"], shadow_nptso)
+    for src, dst, _ in replacements:
+        replace_with_copy(src, dst)
     patch_shadow_proton_for_nptunix(
         shadow,
         shadow_nptdll.relative_to(shadow),
@@ -538,8 +538,7 @@ def build_shadow(mode, proton_root, shadow, artifacts, layout):
         f"schema={SCHEMA}",
         f"mode={mode}",
         f"proton={proton_root}",
-        f"dxgi={layout['dxgi'].relative_to(proton_root)}",
-        f"primary={layout['primary'].relative_to(proton_root)}",
+        *(f"{name}={layout[name].relative_to(proton_root)}" for name in neptune_dlls(mode)),
         f"wine64={layout['npt_windows'].parent.relative_to(proton_root)}",
     ]
     (shadow / ".varmint-info").write_text("\n".join(info) + "\n", encoding="utf-8")
@@ -737,9 +736,9 @@ def main():
     env["PROTON_DISABLE_NVAPI"] = "1"
     env["PROTON_FORCE_NVAPI"] = "0"
 
-    if mode == "neptune":
-        # An app-specific Proton workaround may otherwise disable D3D11.
-        env["PROTON_NO_D3D11"] = "0"
+    # Both modes provide D3D11; an app-specific Proton workaround may
+    # otherwise disable it.
+    env["PROTON_NO_D3D11"] = "0"
     raise SystemExit(run_child(command, env, mode_dir, use_lock))
 
 
