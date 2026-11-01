@@ -10,7 +10,7 @@ FEX_COMPAT_TOOL="$STEAM_ROOT/steamapps/common/FEX-Emu/fex-compat-tool"
 TIMEOUT="${VARMINT_NEPTUNE_TEST_TIMEOUT:-45s}"
 
 if [ "$#" -ne 2 ]; then
-    echo "usage: $0 <d3d11|d3d12> <smoke>" >&2
+    echo "usage: $0 <d3d11|d3d12> <smoke|fullscreen>" >&2
     exit 2
 fi
 
@@ -25,6 +25,10 @@ case "$API:$TEST" in
     d3d12:smoke)
         MODE=neptune-dx12
         LIBRARIES=(-ld3d12)
+        ;;
+    d3d12:fullscreen)
+        MODE=neptune-dx12
+        LIBRARIES=(-ld3d12 -ldxgi)
         ;;
     *)
         echo "unsupported Neptune test: $API $TEST" >&2
@@ -82,6 +86,16 @@ test -x "$WINESERVER" || {
     echo "missing Proton wineserver: $WINESERVER" >&2
     exit 1
 }
+
+# Swap chain tests need the desktop session's display; SSH has none, but
+# the session exports it to the systemd user manager.
+if [ -z "${DISPLAY:-}" ]; then
+    while IFS= read -r var; do
+        case "$var" in
+            DISPLAY=* | WAYLAND_DISPLAY=* | XAUTHORITY=*) export "$var" ;;
+        esac
+    done < <(systemctl --user show-environment 2>/dev/null)
+fi
 
 mkdir -p "$BUILD_ROOT/bin" "$COMPATDATA"
 EXE="$BUILD_ROOT/bin/$API-$TEST.exe"

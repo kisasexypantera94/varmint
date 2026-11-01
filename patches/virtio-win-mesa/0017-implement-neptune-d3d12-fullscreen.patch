@@ -1,0 +1,763 @@
+diff --git a/src/virtio/neptune/npt_swapchain.c b/src/virtio/neptune/npt_swapchain.c
+index 5663d3a1979..4889d25f782 100644
+--- a/src/virtio/neptune/npt_swapchain.c
++++ b/src/virtio/neptune/npt_swapchain.c
+@@ -113,20 +113,6 @@ struct npt_guest_swapchain {
+    void *fence;                  /* ID3D11Fence* */
+    uint64_t fence_id;
+    uint64_t fence_value;
+-
+-   /* Fullscreen window management, done entirely guest-side.
+-    * The guest-fab swapchain owns a real HWND, so all styling/placement/
+-    * mode-switching is done here with plain Win32 calls; base.fullscreen
+-    * is the authoritative windowed/fullscreen state.
+-    * mode_change_in_progress rejects a transition that overlaps another
+-    * (DXGI_STATUS_MODE_CHANGE_IN_PROGRESS); it does not guard these fields
+-    * against concurrent readers. */
+-   _Atomic int mode_change_in_progress;
+-   HMONITOR    fs_monitor;          /* real Win32 monitor while fullscreen */
+-   LONG        fs_saved_style;
+-   LONG        fs_saved_exstyle;
+-   RECT        fs_saved_rect;
+-   bool        fs_did_modeset;      /* we changed the display mode */
+ };
+ 
+ static inline struct npt_guest_swapchain *
+@@ -611,167 +597,6 @@ gsc_ResizeBuffers1(void *self, UINT BufferCount, UINT Width, UINT Height,
+                             SwapChainFlags);
+ }
+ 
+-/* -------------------------------------------------------------------------
+- * Guest-side fullscreen window management.  The guest-fab swapchain owns the
+- * app's OutputWindow, so the window is driven here with plain Win32 calls.
+- * Real mode switches are gated on DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+- * without it we do borderless-fullscreen at the current desktop mode (the
+- * common path, and the only realizable one in the composited model).
+- * ------------------------------------------------------------------------- */
+-static bool
+-gsc_desktop_rect(HMONITOR mon, RECT *out)
+-{
+-   MONITORINFOEXW mi;
+-   memset(&mi, 0, sizeof(mi));
+-   mi.cbSize = sizeof(mi);
+-   if (!GetMonitorInfoW(mon, (MONITORINFO *)&mi))
+-      return false;
+-   *out = mi.rcMonitor;
+-   return true;
+-}
+-
+-/* Best-effort ChangeDisplaySettings.
+- * Returns true if the mode is now (or already was) w x h. */
+-static bool
+-gsc_set_display_mode(HMONITOR mon, uint32_t w, uint32_t h, uint32_t refresh)
+-{
+-   MONITORINFOEXW mi;
+-   memset(&mi, 0, sizeof(mi));
+-   mi.cbSize = sizeof(mi);
+-   if (!GetMonitorInfoW(mon, (MONITORINFO *)&mi))
+-      return false;
+-
+-   DEVMODEW cur;
+-   memset(&cur, 0, sizeof(cur));
+-   cur.dmSize = sizeof(cur);
+-   if (EnumDisplaySettingsW(mi.szDevice, ENUM_CURRENT_SETTINGS, &cur) &&
+-       cur.dmPelsWidth == w && cur.dmPelsHeight == h &&
+-       (!refresh || cur.dmDisplayFrequency == refresh))
+-      return true;
+-
+-   DEVMODEW dm;
+-   memset(&dm, 0, sizeof(dm));
+-   dm.dmSize        = sizeof(dm);
+-   dm.dmFields      = DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL;
+-   dm.dmPelsWidth   = w;
+-   dm.dmPelsHeight  = h;
+-   dm.dmBitsPerPel  = 32;
+-   if (refresh) {
+-      dm.dmFields |= DM_DISPLAYFREQUENCY;
+-      dm.dmDisplayFrequency = refresh;
+-   }
+-   LONG st = ChangeDisplaySettingsExW(mi.szDevice, &dm, NULL, CDS_FULLSCREEN, NULL);
+-   if (st != DISP_CHANGE_SUCCESSFUL) {
+-      dm.dmFields &= ~DM_DISPLAYFREQUENCY;
+-      st = ChangeDisplaySettingsExW(mi.szDevice, &dm, NULL, CDS_FULLSCREEN, NULL);
+-   }
+-   return st == DISP_CHANGE_SUCCESSFUL;
+-}
+-
+-static void
+-gsc_restore_display_mode(HMONITOR mon)
+-{
+-   MONITORINFOEXW mi;
+-   memset(&mi, 0, sizeof(mi));
+-   mi.cbSize = sizeof(mi);
+-   if (!GetMonitorInfoW(mon, (MONITORINFO *)&mi))
+-      return;
+-   DEVMODEW dm;
+-   memset(&dm, 0, sizeof(dm));
+-   dm.dmSize = sizeof(dm);
+-   if (EnumDisplaySettingsW(mi.szDevice, ENUM_REGISTRY_SETTINGS, &dm))
+-      ChangeDisplaySettingsExW(mi.szDevice, &dm, NULL, CDS_FULLSCREEN, NULL);
+-   else
+-      ChangeDisplaySettingsExW(mi.szDevice, NULL, NULL, 0, NULL);
+-}
+-
+-/* Strip decorations and stretch the window over the whole output. */
+-static bool
+-gsc_window_enter_fullscreen(struct npt_guest_swapchain *s, HWND hwnd,
+-                            HMONITOR mon)
+-{
+-   GetWindowRect(hwnd, &s->fs_saved_rect);
+-   LONG style   = GetWindowLongW(hwnd, GWL_STYLE);
+-   LONG exstyle = GetWindowLongW(hwnd, GWL_EXSTYLE);
+-   s->fs_saved_style   = style;
+-   s->fs_saved_exstyle = exstyle;
+-
+-   style   &= ~WS_OVERLAPPEDWINDOW;
+-   exstyle &= ~WS_EX_OVERLAPPEDWINDOW;
+-   SetWindowLongW(hwnd, GWL_STYLE, style);
+-   SetWindowLongW(hwnd, GWL_EXSTYLE, exstyle);
+-
+-   RECT r;
+-   if (!gsc_desktop_rect(mon, &r))
+-      return false;
+-   SetWindowPos(hwnd, HWND_TOPMOST, r.left, r.top,
+-                r.right - r.left, r.bottom - r.top,
+-                SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOACTIVATE);
+-   return true;
+-}
+-
+-/* Restore the pre-fullscreen style/rect.  Only touch the styles if the app
+- * hasn't changed them itself, matching native DXGI. */
+-static void
+-gsc_window_leave_fullscreen(struct npt_guest_swapchain *s, HWND hwnd)
+-{
+-   LONG curStyle = GetWindowLongW(hwnd, GWL_STYLE)   & ~WS_VISIBLE;
+-   LONG curEx    = GetWindowLongW(hwnd, GWL_EXSTYLE) & ~WS_EX_TOPMOST;
+-   if (curStyle == (s->fs_saved_style   & ~(WS_VISIBLE    | WS_OVERLAPPEDWINDOW)) &&
+-       curEx    == (s->fs_saved_exstyle & ~(WS_EX_TOPMOST | WS_EX_OVERLAPPEDWINDOW))) {
+-      SetWindowLongW(hwnd, GWL_STYLE,   s->fs_saved_style);
+-      SetWindowLongW(hwnd, GWL_EXSTYLE, s->fs_saved_exstyle);
+-   }
+-   RECT r = s->fs_saved_rect;
+-   SetWindowPos(hwnd,
+-                (s->fs_saved_exstyle & WS_EX_TOPMOST) ? HWND_TOPMOST : HWND_NOTOPMOST,
+-                r.left, r.top, r.right - r.left, r.bottom - r.top,
+-                SWP_FRAMECHANGED | SWP_NOACTIVATE);
+-}
+-
+-static HRESULT NPT_STDMETHODCALLTYPE
+-gsc_ResizeTarget(void *self, const DXGI_MODE_DESC *pNewTargetParameters)
+-{
+-   if (!pNewTargetParameters)
+-      return NPT_DXGI_ERROR_INVALID_CALL;
+-   struct npt_guest_swapchain *s = gsc(self);
+-   struct npt_guest_swapchain_common *c = &s->base;
+-   HWND hwnd = c->hwnd;
+-   if (!hwnd || !IsWindow(hwnd))
+-      return NPT_DXGI_ERROR_INVALID_CALL;
+-
+-   uint32_t w = pNewTargetParameters->Width;
+-   uint32_t h = pNewTargetParameters->Height;
+-
+-   if (!c->fullscreen) {
+-      /* Windowed: resize the client area to the requested size. */
+-      if (w && h)
+-         npt_gsc_window_resize(hwnd, w, h);
+-      return NPT_S_OK;
+-   }
+-
+-   /* Fullscreen: optionally re-program the mode, then re-cover the output.
+-    * Read fs_monitor once so a concurrent leave_fullscreen cannot NULL it
+-    * between uses; the transition itself is not excluded. */
+-   HMONITOR mon = s->fs_monitor;
+-   if (!mon)
+-      return NPT_S_OK;
+-   if ((c->desc.Flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH) && w && h) {
+-      uint32_t rr = pNewTargetParameters->RefreshRate.Denominator
+-         ? pNewTargetParameters->RefreshRate.Numerator /
+-           pNewTargetParameters->RefreshRate.Denominator : 0;
+-      /* Record the modeset: this is the same display-mode change
+-       * gsc_enter_fullscreen makes, and both restore paths are gated on the
+-       * flag, so without it a mode programmed only here outlives the app. */
+-      if (gsc_set_display_mode(mon, w, h, rr))
+-         s->fs_did_modeset = true;
+-   }
+-   RECT r;
+-   if (gsc_desktop_rect(mon, &r))
+-      MoveWindow(hwnd, r.left, r.top, r.right - r.left, r.bottom - r.top, TRUE);
+-   return NPT_S_OK;
+-}
+-
+ /* ------------------------------------------------------------------ */
+ /* fullscreen / outputs (guest-fab wrappers never reach the host)      */
+ /* ------------------------------------------------------------------ */
+@@ -805,97 +630,6 @@ gsc_resolve_first_output(struct npt_guest_swapchain *s)
+    return NPT_SUCCEEDED(hr) ? out : NULL;
+ }
+ 
+-/* Windowed -> fullscreen.  pTarget (may be NULL) is the app-requested output;
+- * the real Win32 monitor is resolved from the window so guest-fab HMONITOR
+- * cookies never reach GetMonitorInfoW. */
+-static HRESULT
+-gsc_enter_fullscreen(void *self, struct npt_guest_swapchain *s,
+-                     IDXGIOutput *pTarget)
+-{
+-   struct npt_guest_swapchain_common *c = &s->base;
+-
+-   if (atomic_exchange(&s->mode_change_in_progress, 1))
+-      return NPT_DXGI_STATUS_MODE_CHANGE_IN_PROGRESS;
+-
+-   HRESULT hr = NPT_DXGI_ERROR_NOT_CURRENTLY_AVAILABLE;
+-   HWND hwnd = c->hwnd;
+-   if (hwnd && IsWindow(hwnd)) {
+-      bool mode_switch =
+-         (c->desc.Flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH) != 0;
+-
+-      /* Hold a ref on the containing output for GetFullscreenState. */
+-      IDXGIOutput *out = pTarget;
+-      if (out)
+-         npt_gsc_output_vtbl(out)->AddRef(out);
+-      else
+-         out = gsc_resolve_first_output(s);
+-
+-      HMONITOR mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
+-
+-      if (mode_switch && out) {
+-         /* Snap the requested backbuffer size to a supported (capped) mode,
+-          * then program it.  Non-fatal: borderless still works on failure. */
+-         DXGI_MODE_DESC want, got;
+-         memset(&want, 0, sizeof(want));
+-         memset(&got, 0, sizeof(got));
+-         want.Width       = c->desc.Width;
+-         want.Height      = c->desc.Height;
+-         want.Format      = c->desc.Format;
+-         want.RefreshRate = c->fs_desc.RefreshRate;
+-         if (NPT_SUCCEEDED(npt_gsc_output_vtbl(out)->FindClosestMatchingMode(
+-                out, &want, &got, NULL))) {
+-            uint32_t rr = got.RefreshRate.Denominator
+-               ? got.RefreshRate.Numerator / got.RefreshRate.Denominator : 0;
+-            if (gsc_set_display_mode(mon, got.Width, got.Height, rr))
+-               s->fs_did_modeset = true;
+-         }
+-      }
+-
+-      if (gsc_window_enter_fullscreen(s, hwnd, mon)) {
+-         s->fs_monitor  = mon;
+-         c->fullscreen  = TRUE;
+-         npt_gsc_assign_output(c, &c->fullscreen_target, out);
+-         RECT dr = { 0 };
+-         gsc_desktop_rect(mon, &dr);
+-         npt_log("guest swapchain %p entered fullscreen: window -> %ldx%ld (mode_switch=%d, modeset=%d)",
+-                 self, dr.right - dr.left, dr.bottom - dr.top,
+-                 mode_switch, s->fs_did_modeset);
+-         hr = NPT_S_OK;
+-      } else if (s->fs_did_modeset) {
+-         gsc_restore_display_mode(mon);
+-         s->fs_did_modeset = false;
+-      }
+-      if (out)
+-         npt_gsc_output_vtbl(out)->Release(out);
+-   }
+-   atomic_store(&s->mode_change_in_progress, 0);
+-   return hr;
+-}
+-
+-/* Fullscreen -> windowed. */
+-static HRESULT
+-gsc_leave_fullscreen(void *self, struct npt_guest_swapchain *s)
+-{
+-   struct npt_guest_swapchain_common *c = &s->base;
+-
+-   if (atomic_exchange(&s->mode_change_in_progress, 1))
+-      return NPT_DXGI_STATUS_MODE_CHANGE_IN_PROGRESS;
+-
+-   if (s->fs_did_modeset) {
+-      gsc_restore_display_mode(s->fs_monitor);
+-      s->fs_did_modeset = false;
+-   }
+-   c->fullscreen = FALSE;
+-   HWND hwnd = c->hwnd;
+-   if (hwnd && IsWindow(hwnd))
+-      gsc_window_leave_fullscreen(s, hwnd);
+-   npt_gsc_assign_output(c, &c->fullscreen_target, NULL);
+-   s->fs_monitor = NULL;
+-   npt_log("guest swapchain %p left fullscreen", self);
+-   atomic_store(&s->mode_change_in_progress, 0);
+-   return NPT_S_OK;
+-}
+-
+ static HRESULT NPT_STDMETHODCALLTYPE
+ gsc_SetFullscreenState(void *self, BOOL Fullscreen, IDXGIOutput *pTarget)
+ {
+@@ -915,12 +649,14 @@ gsc_SetFullscreenState(void *self, BOOL Fullscreen, IDXGIOutput *pTarget)
+ 
+    HRESULT hr = NPT_S_OK;
+ 
+-   /* Dispatch the windowed <-> fullscreen transition; both directions place
+-    * and style the app's own OutputWindow guest-side. */
+-   if (!c->fullscreen && Fullscreen)
+-      hr = gsc_enter_fullscreen(self, s, pTarget);
+-   else if (c->fullscreen && !Fullscreen)
+-      hr = gsc_leave_fullscreen(self, s);
++   if (!c->fullscreen && Fullscreen) {
++      IDXGIOutput *first = pTarget ? NULL : gsc_resolve_first_output(s);
++      hr = npt_gsc_enter_fullscreen(c, pTarget ? pTarget : first);
++      if (first)
++         npt_gsc_output_vtbl(first)->Release(first);
++   } else if (c->fullscreen && !Fullscreen) {
++      hr = npt_gsc_leave_fullscreen(c);
++   }
+ 
+    if (c->fullscreen != was_fullscreen)
+       gsc_teardown_wsi(s, false);
+@@ -977,7 +713,7 @@ static const struct npt_idxgiswapchain4_client_vtbl gsc_vtbl = {
+    .GetFullscreenState = npt_gsc_GetFullscreenState,
+    .GetDesc = npt_gsc_GetDesc,
+    .ResizeBuffers = gsc_ResizeBuffers,
+-   .ResizeTarget = gsc_ResizeTarget,
++   .ResizeTarget = npt_gsc_ResizeTarget,
+    .GetContainingOutput = gsc_GetContainingOutput,
+    .GetFrameStatistics = npt_gsc_GetFrameStatistics,
+    .GetLastPresentCount = npt_gsc_GetLastPresentCount,
+@@ -1029,12 +765,7 @@ gsc_aux_destroy(void *aux)
+       return;
+    }
+ 
+-   /* A swap chain destroyed while still fullscreen leaves the display in the
+-    * app's mode; restore the desktop mode like DXGI does on teardown. */
+-   if (s->fs_did_modeset) {
+-      gsc_restore_display_mode(s->fs_monitor);
+-      s->fs_did_modeset = false;
+-   }
++   npt_gsc_restore_fullscreen_mode(c);
+ 
+    npt_gsc_release_outputs(c);
+ 
+diff --git a/src/virtio/neptune/npt_swapchain12.c b/src/virtio/neptune/npt_swapchain12.c
+index 1b8ab221f84..80073245387 100644
+--- a/src/virtio/neptune/npt_swapchain12.c
++++ b/src/virtio/neptune/npt_swapchain12.c
+@@ -812,41 +812,10 @@ gsc12_ResizeBuffers1(void *self, UINT BufferCount, UINT Width, UINT Height,
+                               SwapChainFlags);
+ }
+ 
+-static HRESULT NPT_STDMETHODCALLTYPE
+-gsc12_ResizeTarget(void *self, const DXGI_MODE_DESC *pNewTargetParameters)
+-{
+-   if (!pNewTargetParameters)
+-      return NPT_DXGI_ERROR_INVALID_CALL;
+-   struct npt_guest_swapchain12 *s = gsc12(self);
+-   struct npt_guest_swapchain_common *c = &s->base;
+-   HWND hwnd = c->hwnd;
+-   if (!hwnd || !IsWindow(hwnd))
+-      return NPT_DXGI_ERROR_INVALID_CALL;
+-   /* Windowed client-area resize only (fullscreen is a stored flag;
+-    * no guest-side modesetting yet). */
+-   if (!c->fullscreen && pNewTargetParameters->Width &&
+-       pNewTargetParameters->Height)
+-      npt_gsc_window_resize(hwnd, pNewTargetParameters->Width,
+-                            pNewTargetParameters->Height);
+-   return NPT_S_OK;
+-}
+-
+ /* ------------------------------------------------------------------ */
+ /* fullscreen / outputs                                                */
+ /* ------------------------------------------------------------------ */
+ 
+-/* Fullscreen is a stored flag only: the WSI presents to the app's
+- * window either way. */
+-static HRESULT NPT_STDMETHODCALLTYPE
+-gsc12_SetFullscreenState(void *self, BOOL Fullscreen, IDXGIOutput *pTarget)
+-{
+-   struct npt_guest_swapchain12 *s = gsc12(self);
+-   if (!Fullscreen && pTarget)
+-      return NPT_DXGI_ERROR_INVALID_CALL;
+-   s->base.fullscreen = Fullscreen;
+-   return NPT_S_OK;
+-}
+-
+ /* factory -> EnumAdapters(0) -> EnumOutputs(0); the adapter override
+  * fabricates the output, so the result is identity-compatible with
+  * EnumOutputs(0) callers.  Caller owns the returned ref. */
+@@ -871,6 +840,39 @@ gsc12_resolve_first_output(struct npt_guest_swapchain12 *s)
+    return NPT_SUCCEEDED(hr) ? out : NULL;
+ }
+ 
++static HRESULT NPT_STDMETHODCALLTYPE
++gsc12_SetFullscreenState(void *self, BOOL Fullscreen, IDXGIOutput *pTarget)
++{
++   struct npt_guest_swapchain12 *s = gsc12(self);
++   struct npt_guest_swapchain_common *c = &s->base;
++
++   if (!Fullscreen && pTarget)
++      return NPT_DXGI_ERROR_INVALID_CALL;
++
++   mtx_lock(&c->present_mutex);
++   const BOOL was_fullscreen = c->fullscreen;
++
++   HRESULT hr = NPT_S_OK;
++   if (!c->fullscreen && Fullscreen) {
++      IDXGIOutput *first = pTarget ? NULL : gsc12_resolve_first_output(s);
++      hr = npt_gsc_enter_fullscreen(c, pTarget ? pTarget : first);
++      if (first)
++         npt_gsc_output_vtbl(first)->Release(first);
++   } else if (c->fullscreen && !Fullscreen) {
++      hr = npt_gsc_leave_fullscreen(c);
++   }
++
++   if (c->fullscreen != was_fullscreen) {
++      /* The copy lists may still be executing on the host GPU. */
++      if (c->wsi_initialized)
++         gsc12_gpu_drain(s);
++      gsc12_teardown_wsi(s, false);
++   }
++
++   mtx_unlock(&c->present_mutex);
++   return hr;
++}
++
+ static HRESULT NPT_STDMETHODCALLTYPE
+ gsc12_GetContainingOutput(void *self, IDXGIOutput **ppOutput)
+ {
+@@ -912,7 +914,7 @@ static const struct npt_idxgiswapchain4_client_vtbl gsc12_vtbl = {
+    .GetFullscreenState = npt_gsc_GetFullscreenState,
+    .GetDesc = npt_gsc_GetDesc,
+    .ResizeBuffers = gsc12_ResizeBuffers,
+-   .ResizeTarget = gsc12_ResizeTarget,
++   .ResizeTarget = npt_gsc_ResizeTarget,
+    .GetContainingOutput = gsc12_GetContainingOutput,
+    .GetFrameStatistics = npt_gsc_GetFrameStatistics,
+    .GetLastPresentCount = npt_gsc_GetLastPresentCount,
+@@ -963,10 +965,13 @@ gsc12_aux_destroy(void *aux)
+    if (shutting_down) {
+       /* Device teardown frees wrappers via its own drain; leak the aux
+        * bookkeeping rather than touch freed wrappers (the skipped-join
+-       * workers may also still run with a pointer to this aux). */
++       * workers may also still run with a pointer to this aux).  A
++       * CDS_FULLSCREEN display mode is restored by the OS at process
++       * exit, so the modeset needs no undo here. */
+       return;
+    }
+ 
++   npt_gsc_restore_fullscreen_mode(c);
+    npt_gsc_release_outputs(c);
+ 
+    gsc12_release_backbuffers(s, dev);
+diff --git a/src/virtio/neptune/npt_swapchain_common.c b/src/virtio/neptune/npt_swapchain_common.c
+index eaa0970912a..cf15ece7a4f 100644
+--- a/src/virtio/neptune/npt_swapchain_common.c
++++ b/src/virtio/neptune/npt_swapchain_common.c
+@@ -601,6 +601,258 @@ npt_gsc_release_outputs(struct npt_guest_swapchain_common *c)
+       npt_gsc_output_vtbl(c->containing_output)->Release(c->containing_output);
+ }
+ 
++/* ------------------------------------------------------------------ */
++/* fullscreen                                                          */
++/* ------------------------------------------------------------------ */
++
++/* The guest-fab swapchain owns the app's OutputWindow, so the window is
++ * driven here with plain Win32 calls.  Real mode switches are gated on
++ * DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH; without it we do borderless
++ * fullscreen at the current desktop mode (the common path, and the only
++ * realizable one in the composited model). */
++static bool
++gsc_desktop_rect(HMONITOR mon, RECT *out)
++{
++   MONITORINFOEXW mi;
++   memset(&mi, 0, sizeof(mi));
++   mi.cbSize = sizeof(mi);
++   if (!GetMonitorInfoW(mon, (MONITORINFO *)&mi))
++      return false;
++   *out = mi.rcMonitor;
++   return true;
++}
++
++/* Best-effort ChangeDisplaySettings.
++ * Returns true if the mode is now (or already was) w x h. */
++static bool
++gsc_set_display_mode(HMONITOR mon, uint32_t w, uint32_t h, uint32_t refresh)
++{
++   MONITORINFOEXW mi;
++   memset(&mi, 0, sizeof(mi));
++   mi.cbSize = sizeof(mi);
++   if (!GetMonitorInfoW(mon, (MONITORINFO *)&mi))
++      return false;
++
++   DEVMODEW cur;
++   memset(&cur, 0, sizeof(cur));
++   cur.dmSize = sizeof(cur);
++   if (EnumDisplaySettingsW(mi.szDevice, ENUM_CURRENT_SETTINGS, &cur) &&
++       cur.dmPelsWidth == w && cur.dmPelsHeight == h &&
++       (!refresh || cur.dmDisplayFrequency == refresh))
++      return true;
++
++   DEVMODEW dm;
++   memset(&dm, 0, sizeof(dm));
++   dm.dmSize        = sizeof(dm);
++   dm.dmFields      = DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL;
++   dm.dmPelsWidth   = w;
++   dm.dmPelsHeight  = h;
++   dm.dmBitsPerPel  = 32;
++   if (refresh) {
++      dm.dmFields |= DM_DISPLAYFREQUENCY;
++      dm.dmDisplayFrequency = refresh;
++   }
++   LONG st = ChangeDisplaySettingsExW(mi.szDevice, &dm, NULL, CDS_FULLSCREEN, NULL);
++   if (st != DISP_CHANGE_SUCCESSFUL) {
++      dm.dmFields &= ~DM_DISPLAYFREQUENCY;
++      st = ChangeDisplaySettingsExW(mi.szDevice, &dm, NULL, CDS_FULLSCREEN, NULL);
++   }
++   return st == DISP_CHANGE_SUCCESSFUL;
++}
++
++static void
++gsc_restore_display_mode(HMONITOR mon)
++{
++   MONITORINFOEXW mi;
++   memset(&mi, 0, sizeof(mi));
++   mi.cbSize = sizeof(mi);
++   if (!GetMonitorInfoW(mon, (MONITORINFO *)&mi))
++      return;
++   DEVMODEW dm;
++   memset(&dm, 0, sizeof(dm));
++   dm.dmSize = sizeof(dm);
++   if (EnumDisplaySettingsW(mi.szDevice, ENUM_REGISTRY_SETTINGS, &dm))
++      ChangeDisplaySettingsExW(mi.szDevice, &dm, NULL, CDS_FULLSCREEN, NULL);
++   else
++      ChangeDisplaySettingsExW(mi.szDevice, NULL, NULL, 0, NULL);
++}
++
++/* Strip decorations and stretch the window over the whole output. */
++static bool
++gsc_window_enter_fullscreen(struct npt_guest_swapchain_common *c,
++                            HWND hwnd, HMONITOR mon)
++{
++   GetWindowRect(hwnd, &c->fs_saved_rect);
++   LONG style   = GetWindowLongW(hwnd, GWL_STYLE);
++   LONG exstyle = GetWindowLongW(hwnd, GWL_EXSTYLE);
++   c->fs_saved_style   = style;
++   c->fs_saved_exstyle = exstyle;
++
++   style   &= ~WS_OVERLAPPEDWINDOW;
++   exstyle &= ~WS_EX_OVERLAPPEDWINDOW;
++   SetWindowLongW(hwnd, GWL_STYLE, style);
++   SetWindowLongW(hwnd, GWL_EXSTYLE, exstyle);
++
++   RECT r;
++   if (!gsc_desktop_rect(mon, &r))
++      return false;
++   SetWindowPos(hwnd, HWND_TOPMOST, r.left, r.top,
++                r.right - r.left, r.bottom - r.top,
++                SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOACTIVATE);
++   return true;
++}
++
++/* Restore the pre-fullscreen style/rect.  Only touch the styles if the app
++ * hasn't changed them itself, matching native DXGI. */
++static void
++gsc_window_leave_fullscreen(struct npt_guest_swapchain_common *c,
++                            HWND hwnd)
++{
++   LONG curStyle = GetWindowLongW(hwnd, GWL_STYLE)   & ~WS_VISIBLE;
++   LONG curEx    = GetWindowLongW(hwnd, GWL_EXSTYLE) & ~WS_EX_TOPMOST;
++   if (curStyle == (c->fs_saved_style   & ~(WS_VISIBLE    | WS_OVERLAPPEDWINDOW)) &&
++       curEx    == (c->fs_saved_exstyle & ~(WS_EX_TOPMOST | WS_EX_OVERLAPPEDWINDOW))) {
++      SetWindowLongW(hwnd, GWL_STYLE,   c->fs_saved_style);
++      SetWindowLongW(hwnd, GWL_EXSTYLE, c->fs_saved_exstyle);
++   }
++   RECT r = c->fs_saved_rect;
++   SetWindowPos(hwnd,
++                (c->fs_saved_exstyle & WS_EX_TOPMOST) ? HWND_TOPMOST : HWND_NOTOPMOST,
++                r.left, r.top, r.right - r.left, r.bottom - r.top,
++                SWP_FRAMECHANGED | SWP_NOACTIVATE);
++}
++
++HRESULT NPT_STDMETHODCALLTYPE
++npt_gsc_ResizeTarget(void *self, const DXGI_MODE_DESC *pNewTargetParameters)
++{
++   if (!pNewTargetParameters)
++      return NPT_DXGI_ERROR_INVALID_CALL;
++   struct npt_guest_swapchain_common *c = npt_gsc(self);
++   HWND hwnd = c->hwnd;
++   if (!hwnd || !IsWindow(hwnd))
++      return NPT_DXGI_ERROR_INVALID_CALL;
++
++   uint32_t w = pNewTargetParameters->Width;
++   uint32_t h = pNewTargetParameters->Height;
++
++   if (!c->fullscreen) {
++      /* Windowed: resize the client area to the requested size. */
++      if (w && h)
++         npt_gsc_window_resize(hwnd, w, h);
++      return NPT_S_OK;
++   }
++
++   /* Fullscreen: optionally re-program the mode, then re-cover the output.
++    * Read fs_monitor once so a concurrent leave_fullscreen cannot NULL it
++    * between uses; the transition itself is not excluded. */
++   HMONITOR mon = c->fs_monitor;
++   if (!mon)
++      return NPT_S_OK;
++   if ((c->desc.Flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH) && w && h) {
++      uint32_t rr = pNewTargetParameters->RefreshRate.Denominator
++         ? pNewTargetParameters->RefreshRate.Numerator /
++           pNewTargetParameters->RefreshRate.Denominator : 0;
++      /* Record the modeset: this is the same display-mode change
++       * npt_gsc_enter_fullscreen makes, and both restore paths are gated on
++       * the flag, so without it a mode programmed only here outlives the app. */
++      if (gsc_set_display_mode(mon, w, h, rr))
++         c->fs_did_modeset = true;
++   }
++   RECT r;
++   if (gsc_desktop_rect(mon, &r))
++      MoveWindow(hwnd, r.left, r.top, r.right - r.left, r.bottom - r.top, TRUE);
++   return NPT_S_OK;
++}
++
++/* Windowed -> fullscreen.  out (may be NULL) is the app-requested or first
++ * output; the real Win32 monitor is resolved from the window so guest-fab
++ * HMONITOR cookies never reach GetMonitorInfoW. */
++HRESULT
++npt_gsc_enter_fullscreen(struct npt_guest_swapchain_common *c,
++                         IDXGIOutput *out)
++{
++   if (atomic_exchange(&c->mode_change_in_progress, 1))
++      return NPT_DXGI_STATUS_MODE_CHANGE_IN_PROGRESS;
++
++   HRESULT hr = NPT_DXGI_ERROR_NOT_CURRENTLY_AVAILABLE;
++   HWND hwnd = c->hwnd;
++   if (hwnd && IsWindow(hwnd)) {
++      bool mode_switch =
++         (c->desc.Flags & DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH) != 0;
++
++      HMONITOR mon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
++
++      if (mode_switch && out) {
++         /* Snap the requested backbuffer size to a supported (capped) mode,
++          * then program it.  Non-fatal: borderless still works on failure. */
++         DXGI_MODE_DESC want, got;
++         memset(&want, 0, sizeof(want));
++         memset(&got, 0, sizeof(got));
++         want.Width       = c->desc.Width;
++         want.Height      = c->desc.Height;
++         want.Format      = c->desc.Format;
++         want.RefreshRate = c->fs_desc.RefreshRate;
++         if (NPT_SUCCEEDED(npt_gsc_output_vtbl(out)->FindClosestMatchingMode(
++                out, &want, &got, NULL))) {
++            uint32_t rr = got.RefreshRate.Denominator
++               ? got.RefreshRate.Numerator / got.RefreshRate.Denominator : 0;
++            if (gsc_set_display_mode(mon, got.Width, got.Height, rr))
++               c->fs_did_modeset = true;
++         }
++      }
++
++      if (gsc_window_enter_fullscreen(c, hwnd, mon)) {
++         c->fs_monitor  = mon;
++         c->fullscreen  = TRUE;
++         npt_gsc_assign_output(c, &c->fullscreen_target, out);
++         RECT dr = { 0 };
++         gsc_desktop_rect(mon, &dr);
++         npt_log("%s %p entered fullscreen: window -> %ldx%ld (mode_switch=%d, modeset=%d)",
++                 c->tag, (void *)c->com, dr.right - dr.left, dr.bottom - dr.top,
++                 mode_switch, c->fs_did_modeset);
++         hr = NPT_S_OK;
++      } else if (c->fs_did_modeset) {
++         gsc_restore_display_mode(mon);
++         c->fs_did_modeset = false;
++      }
++   }
++   atomic_store(&c->mode_change_in_progress, 0);
++   return hr;
++}
++
++/* Fullscreen -> windowed. */
++HRESULT
++npt_gsc_leave_fullscreen(struct npt_guest_swapchain_common *c)
++{
++   if (atomic_exchange(&c->mode_change_in_progress, 1))
++      return NPT_DXGI_STATUS_MODE_CHANGE_IN_PROGRESS;
++
++   if (c->fs_did_modeset) {
++      gsc_restore_display_mode(c->fs_monitor);
++      c->fs_did_modeset = false;
++   }
++   c->fullscreen = FALSE;
++   HWND hwnd = c->hwnd;
++   if (hwnd && IsWindow(hwnd))
++      gsc_window_leave_fullscreen(c, hwnd);
++   npt_gsc_assign_output(c, &c->fullscreen_target, NULL);
++   c->fs_monitor = NULL;
++   npt_log("%s %p left fullscreen", c->tag, (void *)c->com);
++   atomic_store(&c->mode_change_in_progress, 0);
++   return NPT_S_OK;
++}
++
++/* A swap chain destroyed while still fullscreen leaves the display in the
++ * app's mode; restore the desktop mode like DXGI does on teardown. */
++void
++npt_gsc_restore_fullscreen_mode(struct npt_guest_swapchain_common *c)
++{
++   if (c->fs_did_modeset) {
++      gsc_restore_display_mode(c->fs_monitor);
++      c->fs_did_modeset = false;
++   }
++}
++
+ /* ------------------------------------------------------------------ */
+ /* lifecycle                                                           */
+ /* ------------------------------------------------------------------ */
+diff --git a/src/virtio/neptune/npt_swapchain_common.h b/src/virtio/neptune/npt_swapchain_common.h
+index fc87e6406da..0900c81ed13 100644
+--- a/src/virtio/neptune/npt_swapchain_common.h
++++ b/src/virtio/neptune/npt_swapchain_common.h
+@@ -130,6 +130,18 @@ struct npt_guest_swapchain_common {
+    mtx_t output_lock;
+    IDXGIOutput *fullscreen_target;
+    IDXGIOutput *containing_output;
++
++   /* Fullscreen window management, done entirely guest-side; fullscreen
++    * above is the authoritative windowed/fullscreen state.
++    * mode_change_in_progress rejects a transition that overlaps another
++    * (DXGI_STATUS_MODE_CHANGE_IN_PROGRESS); it does not guard these fields
++    * against concurrent readers. */
++   _Atomic int mode_change_in_progress;
++   HMONITOR    fs_monitor;          /* real Win32 monitor while fullscreen */
++   LONG        fs_saved_style;
++   LONG        fs_saved_exstyle;
++   RECT        fs_saved_rect;
++   bool        fs_did_modeset;      /* we changed the display mode */
+ };
+ 
+ static inline struct npt_guest_swapchain_common *
+@@ -251,6 +263,22 @@ npt_gsc_load_output_addref(struct npt_guest_swapchain_common *c,
+ void
+ npt_gsc_release_outputs(struct npt_guest_swapchain_common *c);
+ 
++/* ------------------------------------------------------------------ */
++/* fullscreen                                                          */
++/* ------------------------------------------------------------------ */
++
++/* Callers hold present_mutex and tear the WSI down when the state
++ * changed: the WSI caches the target window geometry. */
++HRESULT
++npt_gsc_enter_fullscreen(struct npt_guest_swapchain_common *c,
++                         IDXGIOutput *out);
++
++HRESULT
++npt_gsc_leave_fullscreen(struct npt_guest_swapchain_common *c);
++
++void
++npt_gsc_restore_fullscreen_mode(struct npt_guest_swapchain_common *c);
++
+ /* ------------------------------------------------------------------ */
+ /* shared vtbl methods                                                 */
+ /* ------------------------------------------------------------------ */
+@@ -284,6 +312,8 @@ HRESULT NPT_STDMETHODCALLTYPE
+ npt_gsc_GetFullscreenState(void *self, BOOL *pFullscreen,
+                            IDXGIOutput **ppTarget);
+ HRESULT NPT_STDMETHODCALLTYPE
++npt_gsc_ResizeTarget(void *self, const DXGI_MODE_DESC *pNewTargetParameters);
++HRESULT NPT_STDMETHODCALLTYPE
+ npt_gsc_GetRestrictToOutput(void *self, IDXGIOutput **ppRestrictToOutput);
+ HRESULT NPT_STDMETHODCALLTYPE
+ npt_gsc_GetFrameStatistics(void *self, DXGI_FRAME_STATISTICS *pStats);

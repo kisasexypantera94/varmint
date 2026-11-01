@@ -5,3 +5,4 @@
 0013-register-neptune-native-compiler.patch
 0015-bootstrap-neptune-d3d11-external-buffers.patch
 0016-report-no-neptune-meta-commands.patch
+0017-implement-neptune-d3d12-fullscreen.patch
