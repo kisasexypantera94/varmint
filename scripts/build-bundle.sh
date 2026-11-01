@@ -78,6 +78,28 @@ find_vmnet_helper() {
   printf '%s\n' "$helper"
 }
 
+# Apple's D3DMetal redist can't be fetched without an Apple sign-in, so it is
+# taken from a mounted "Evaluation environment for Windows games" volume:
+# D3DMETAL_REDIST=<volume>/redist/lib/external. Copied unmodified, with notices.
+install_d3dmetal() {
+  local contents="$1"
+  local redist="${D3DMETAL_REDIST:-}"
+  local volume
+
+  if [ -z "$redist" ] || [ ! -d "$redist/D3DMetal.framework" ]; then
+    printf 'warning: D3DMETAL_REDIST not set or missing D3DMetal.framework; building without D3DMetal\n' >&2
+    return
+  fi
+  volume="$(cd "$redist/../../.." && pwd)"
+  need_file "$redist/libd3dshared.dylib"
+  need_file "$volume/License.rtf"
+  need_file "$volume/Acknowledgements.rtf"
+  mkdir -p "$contents/Frameworks/D3DMetal" "$contents/Resources/D3DMetal"
+  ditto "$redist/D3DMetal.framework" "$contents/Frameworks/D3DMetal/D3DMetal.framework"
+  install -m 755 "$redist/libd3dshared.dylib" "$contents/Frameworks/D3DMetal/libd3dshared.dylib"
+  install -m 644 "$volume/License.rtf" "$volume/Acknowledgements.rtf" "$contents/Resources/D3DMetal/"
+}
+
 assemble_app() {
   log "assemble app"
   local contents="$APP_BUNDLE/Contents"
@@ -119,6 +141,7 @@ assemble_app() {
   install -m 644 "$system_image_id" "$contents/Resources/runtime/system-image-id"
   install -m 644 "$ICON" "$contents/Resources/Assets.car"
   install -m 644 "$MANIFEST" "$contents/Resources/runtime-manifest.toml"
+  install_d3dmetal "$contents"
 
   cat > "$contents/Info.plist" <<EOF_PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -378,6 +401,12 @@ sign_app() {
     need_file "$frameworks/${stem}.framework/Versions/A/Resources/Info.plist"
     codesign_file "$frameworks/${stem}.framework"
   done
+  if [ -d "$frameworks/D3DMetal" ]; then
+    while IFS= read -r -d '' dylib; do
+      codesign_file "$dylib"
+    done < <(find "$frameworks/D3DMetal" -type f -name '*.dylib' -print0)
+    codesign_file "$frameworks/D3DMetal/D3DMetal.framework"
+  fi
   codesign --force --sign - --timestamp=none \
     --entitlements "$ENTITLEMENTS" "$APP_BUNDLE"
 }

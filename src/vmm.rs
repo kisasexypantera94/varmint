@@ -156,10 +156,17 @@ pub fn run(config_path: &Path) -> Result<()> {
             if matches!(neptune_backend, NeptuneBackend::D3dmetal) {
                 let d3dmetal = contents.join("Frameworks/libd3dmetal-native.dylib");
                 if d3dmetal.is_file() {
+                    let framework = contents.join("Frameworks/D3DMetal/D3DMetal.framework");
                     if std::env::var_os("D3DMETAL_FRAMEWORK_PATH").is_none() {
-                        eprintln!(
-                            "warning: experimental d3dmetal backend selected but D3DMETAL_FRAMEWORK_PATH is not set"
-                        );
+                        if framework.is_dir() {
+                            unsafe {
+                                std::env::set_var("D3DMETAL_FRAMEWORK_PATH", framework);
+                            }
+                        } else {
+                            eprintln!(
+                                "warning: experimental d3dmetal backend selected but D3DMETAL_FRAMEWORK_PATH is not set"
+                            );
+                        }
                     }
 
                     unsafe {
