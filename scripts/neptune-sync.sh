@@ -63,15 +63,15 @@ sync_repo() {
         # development files survive a sync.
         if [ -n "$generated_patch" ]; then
             echo "apply $(basename "$generated_patch")"
-            git -C "$repo" apply --check "$generated_patch"
-            git -C "$repo" apply "$generated_patch"
+            git -C "$repo" apply --index --check "$generated_patch"
+            git -C "$repo" apply --index "$generated_patch"
         fi
 
         while IFS= read -r patch; do
             [ -n "$patch" ] || continue
             echo "apply $patch"
-            git -C "$repo" apply --check "$patches/$patch"
-            git -C "$repo" apply "$patches/$patch"
+            git -C "$repo" apply --index --check "$patches/$patch"
+            git -C "$repo" apply --index "$patches/$patch"
         done < "$patches/series"
     fi
 
@@ -86,15 +86,17 @@ sync_repo() {
 
     git -C "$repo" worktree add --detach "$tmp" "$commit" >/dev/null
 
+    # --index tracks files a patch adds, so both diffs below include them.
+
     if [ -n "$generated_patch" ]; then
-        git -C "$tmp" apply --check "$generated_patch"
-        git -C "$tmp" apply "$generated_patch"
+        git -C "$tmp" apply --index --check "$generated_patch"
+        git -C "$tmp" apply --index "$generated_patch"
     fi
 
     while IFS= read -r patch; do
         [ -n "$patch" ] || continue
-        git -C "$tmp" apply --check "$patches/$patch"
-        git -C "$tmp" apply "$patches/$patch"
+        git -C "$tmp" apply --index --check "$patches/$patch"
+        git -C "$tmp" apply --index "$patches/$patch"
     done < "$patches/series"
 
     git -C "$tmp" diff --binary "$commit" > "$expected"
