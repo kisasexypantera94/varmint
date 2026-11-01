@@ -168,6 +168,45 @@ assemble_app() {
     <string>$APP_VERSION</string>
     <key>CFBundleVersion</key>
     <string>$APP_VERSION</string>
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>varmint</string>
+            </array>
+            <key>CFBundleTypeName</key>
+            <string>Varmint Virtual Machine</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>dev.varmint.configuration</string>
+            </array>
+        </dict>
+    </array>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.text</string>
+            </array>
+            <key>UTTypeDescription</key>
+            <string>Varmint Virtual Machine</string>
+            <key>UTTypeIdentifier</key>
+            <string>dev.varmint.configuration</string>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>varmint</string>
+                </array>
+            </dict>
+        </dict>
+    </array>
     <key>LSMinimumSystemVersion</key>
     <string>$MINIMUM_MACOS</string>
     <key>NSHighResolutionCapable</key>

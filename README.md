@@ -14,25 +14,10 @@ It supports two graphics backends: Venus for Vulkan and Neptune for DirectX.
 
    **Varmint requires macOS 26 or later.**
 
-2. Create a VM configuration:
-   ```bash
-   cat > "$HOME/fresh.varmint" <<'EOF'
-   format_version = 2
+2. Open Varmint.
+   Since Varmint is not signed or notarized, macOS will block the first launch. Go to System Settings → Privacy & Security, click Open Anyway and confirm.
 
-   # memory_mib = 16384              # Guest RAM. Defaults to half of host memory.
-   # vcpus = 8                       # Guest CPUs. Defaults to about 3/4 of host CPUs.
-   # system_disk_capacity_gib = 32   # Replaceable system disk capacity. Defaults to bundled image size.
-   # data_disk_capacity_gib = 128    # Persistent /home capacity. Defaults to 128 GiB.
-   # storage_dir = "fresh"           # VM files. Defaults to a directory named after this config.
-   EOF
-   ```
-
-   By default, Varmint stores VM files in a directory next to the config with the same name. The system disk is replaced on updates, while `/home` lives on a separate persistent data disk.
-
-   Both disks are sparse. They only use as much host storage as the data inside them requires, and can grow or shrink as that data changes. Their maximum capacity can be increased later, but not reduced.
-
-3. Open Varmint and select `fresh.varmint`.
-   Since Varmint is not signed or notarized, macOS will block the first launch. Go to **System Settings → Privacy & Security**, click **Open Anyway** and confirm.
+3. Create a VM and launch it.
 
 4. Wait for Debian to start, create a user and password, then log in.
 

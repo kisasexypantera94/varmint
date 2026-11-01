@@ -8,6 +8,7 @@ mod cpu;
 mod devices;
 mod display;
 mod irq;
+mod launcher;
 mod machine;
 mod macos_ui;
 mod memory;
@@ -19,9 +20,11 @@ mod virtio;
 mod vmm;
 
 fn main() -> Result<()> {
-    let Some(config) = config::locate() else {
-        return Ok(());
-    };
-
-    vmm::run(&config)
+    match config::locate() {
+        Some(config) => vmm::run(&config),
+        None => {
+            launcher::run();
+            Ok(())
+        }
+    }
 }

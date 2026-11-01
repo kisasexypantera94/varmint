@@ -49,16 +49,7 @@ varmint-graphics neptune-dx12 %command%
 
 In this mode Neptune also handles the game's DirectX 11 devices, such as launchers, video playback and overlays.
 
-DirectX 12 needs the D3DMetal backend on the Mac. D3DMetal is part of Apple's Game Porting Toolkit ("Evaluation environment for Windows games") and is not bundled with Varmint. Download it from Apple, mount the disk image, and add the following to the VM configuration file, adjusting the volume name to the version you mounted:
-
-```toml
-neptune_backend = "d3dmetal"
-
-[host_environment]
-D3DMETAL_FRAMEWORK_PATH = "/Volumes/Evaluation environment for Windows games 4.0 beta 3/redist/lib/external/D3DMetal.framework"
-```
-
-Keep the disk image mounted, or copy `D3DMetal.framework` to another location and point the path there. Restart Varmint after changing the configuration.
+DirectX 12 needs D3DMetal: in the Varmint window, set DirectX to D3DMetal. If your build of Varmint doesn't include D3DMetal, the window links to Apple's download and lets you locate it after downloading.
 
 The backend applies to the whole VM: with D3DMetal selected, DirectX 11 games also run on D3DMetal instead of DXMT.
 

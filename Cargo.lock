@@ -1772,6 +1772,7 @@ version = "0.4.0"
 dependencies = [
  "applevisor",
  "applevisor-sys",
+ "block2 0.6.2",
  "coreaudio-rs",
  "crossterm",
  "font8x8",

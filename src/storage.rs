@@ -33,7 +33,7 @@ fn temporary_path(path: &Path) -> PathBuf {
     parent.join(name)
 }
 
-fn lock(disk: &Path) -> io::Result<File> {
+pub fn lock(disk: &Path) -> io::Result<File> {
     let parent = disk.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;
     let path = parent.join("vm.lock");
