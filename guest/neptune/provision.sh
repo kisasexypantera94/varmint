@@ -9,6 +9,26 @@ RUNTIME=/usr/local/lib/varmint/neptune
 
 . "$STATE/versions.env"
 
+# nptunix.so is a meson native target, so each builder produces the Wine
+# unix side for its own architecture. The image takes the PE frontend and
+# x86_64-unix from the amd64 builder and only aarch64-unix from arm64.
+case "$(dpkg --print-architecture)" in
+amd64)
+    UNIX_ARCH=x86_64-unix
+    NATIVE=native-x86_64.ini
+    BUILD_NAME=builddir-win64-x86unix
+    ;;
+arm64)
+    UNIX_ARCH=aarch64-unix
+    NATIVE=native-aarch64.ini
+    BUILD_NAME=builddir-win64-aarch64unix
+    ;;
+*)
+    echo "unsupported Neptune builder architecture: $(dpkg --print-architecture)" >&2
+    exit 1
+    ;;
+esac
+
 if [ "$(dpkg --print-architecture)" != "amd64" ]; then
     dpkg --add-architecture amd64
 fi
@@ -17,7 +37,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $(cat 
 
 install -d -m 0755 "$SRC" "$SHARE" \
     "$RUNTIME/x86_64-windows" \
-    "$RUNTIME/x86_64-unix"
+    "$RUNTIME/$UNIX_ARCH"
 
 cat > "$SHARE/build-win64.txt" <<'EOF_CROSS'
 [binaries]
@@ -52,6 +72,23 @@ pkg_config_libdir = '/usr/lib/x86_64-linux-gnu/pkgconfig:/usr/share/pkgconfig'
 system = 'linux'
 cpu_family = 'x86_64'
 cpu = 'x86_64'
+endian = 'little'
+EOF_NATIVE
+
+cat > "$SHARE/native-aarch64.ini" <<'EOF_NATIVE'
+[binaries]
+c = 'aarch64-linux-gnu-gcc'
+ar = 'aarch64-linux-gnu-ar'
+strip = 'aarch64-linux-gnu-strip'
+pkg-config = 'pkg-config'
+
+[properties]
+pkg_config_libdir = '/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig'
+
+[host_machine]
+system = 'linux'
+cpu_family = 'aarch64'
+cpu = 'aarch64'
 endian = 'little'
 EOF_NATIVE
 
@@ -97,11 +134,11 @@ git -C "$SRC/virtio-win-mesa" apply     "$PATCHES/neptune-generated/virtio-win-m
 
 apply_series "$SRC/virtio-win-mesa" "$PATCHES/virtio-win-mesa"
 
-BUILD="$SRC/virtio-win-mesa/builddir-win64-x86unix"
+BUILD="$SRC/virtio-win-mesa/$BUILD_NAME"
 
 meson setup "$BUILD" "$SRC/virtio-win-mesa" \
     --cross-file "$SHARE/build-win64.txt" \
-    --native-file "$SHARE/native-x86_64.ini" \
+    --native-file "$SHARE/$NATIVE" \
     -Dneptune=true \
     -Dnpt_wine=true \
     -Dnpt_umd=off \
@@ -126,7 +163,7 @@ install -m 0644 "$ART/d3d12.dll" \
 install -m 0644 "$ART/nptunix/nptunix.dll" \
     "$RUNTIME/x86_64-windows/nptunix.dll"
 install -m 0755 "$ART/nptunix/nptunix.so" \
-    "$RUNTIME/x86_64-unix/nptunix.so"
+    "$RUNTIME/$UNIX_ARCH/nptunix.so"
 
 # This is a builder-only checkout and is not copied into the final guest.
 # varmint-neptune-dev-setup remains the optional path for creating user-owned
@@ -137,7 +174,7 @@ test -f "$RUNTIME/x86_64-windows/d3d11.dll"
 test -f "$RUNTIME/x86_64-windows/dxgi.dll"
 test -f "$RUNTIME/x86_64-windows/d3d12.dll"
 test -f "$RUNTIME/x86_64-windows/nptunix.dll"
-test -f "$RUNTIME/x86_64-unix/nptunix.so"
+test -f "$RUNTIME/$UNIX_ARCH/nptunix.so"
 
 apt-get clean
 rm -rf /var/lib/apt/lists/*

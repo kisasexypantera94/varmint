@@ -117,6 +117,19 @@ RUN /usr/local/bin/varmint-neptune-provision && \
     test -f /usr/local/lib/varmint/neptune/x86_64-windows/nptunix.dll && \
     test -f /usr/local/lib/varmint/neptune/x86_64-unix/nptunix.so
 
+FROM --platform=linux/arm64 debian:trixie-slim AS neptune-aarch64-builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+COPY guest/neptune/provision.sh /usr/local/bin/varmint-neptune-provision
+COPY guest/neptune/versions.env /opt/varmint/neptune/versions.env
+COPY guest/neptune/deps.txt /opt/varmint/neptune/deps.txt
+COPY patches/neptune-protocol /opt/varmint/neptune/patches/neptune-protocol
+COPY patches/neptune-generated /opt/varmint/neptune/patches/neptune-generated
+COPY patches/virtio-win-mesa /opt/varmint/neptune/patches/virtio-win-mesa
+
+RUN /usr/local/bin/varmint-neptune-provision && \
+    test -f /usr/local/lib/varmint/neptune/aarch64-unix/nptunix.so
 
 FROM debian:trixie-slim
 
@@ -137,6 +150,7 @@ COPY --from=fex-rootfs /opt/fex-rootfs /opt/varmint/rootfs/usr/share/guestos/fex
 COPY --from=steam-bootstrap /opt/steam-bootstrap /opt/varmint/rootfs/usr/local/share/varmint/steam-bootstrap
 COPY --from=steam-helper-builder /usr/local/bin/steam-edge-resize /opt/varmint/rootfs/usr/local/bin/steam-edge-resize
 COPY --from=neptune-builder /usr/local/lib/varmint/neptune /opt/varmint/rootfs/usr/local/lib/varmint/neptune
+COPY --from=neptune-aarch64-builder /usr/local/lib/varmint/neptune/aarch64-unix /opt/varmint/rootfs/usr/local/lib/varmint/neptune/aarch64-unix
 COPY guest /opt/varmint/source
 COPY guest/neptune/versions.env /opt/varmint/rootfs/usr/local/share/varmint/neptune/versions.env
 COPY guest/neptune/deps.txt /opt/varmint/rootfs/usr/local/share/varmint/neptune/deps.txt

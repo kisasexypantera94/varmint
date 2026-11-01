@@ -18,3 +18,8 @@ libxcb-dri3-dev:amd64
 libxcb-present-dev:amd64
 libxcb-render0-dev:amd64
 libdrm-dev:amd64
+libxcb1-dev
+libxcb-dri3-dev
+libxcb-present-dev
+libxcb-render0-dev
+libdrm-dev

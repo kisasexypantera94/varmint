@@ -116,6 +116,23 @@ cpu = 'x86_64'
 endian = 'little'
 EOF_NATIVE
 
+cat > "$DEV_SHARE/native-aarch64.ini" <<'EOF_NATIVE'
+[binaries]
+c = 'aarch64-linux-gnu-gcc'
+ar = 'aarch64-linux-gnu-ar'
+strip = 'aarch64-linux-gnu-strip'
+pkg-config = 'pkg-config'
+
+[properties]
+pkg_config_libdir = '/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig'
+
+[host_machine]
+system = 'linux'
+cpu_family = 'aarch64'
+cpu = 'aarch64'
+endian = 'little'
+EOF_NATIVE
+
 # A failed meson setup may leave a directory without build.ninja.
 # Preserve it for diagnostics rather than deleting it.
 if [ -d "$BUILD" ] && [ ! -f "$BUILD/build.ninja" ]; then

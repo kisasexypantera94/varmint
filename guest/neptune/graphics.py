@@ -4,6 +4,7 @@ import fcntl
 import hashlib
 import json
 import os
+import platform
 import re
 import shutil
 import signal
@@ -17,7 +18,8 @@ SCHEMA = "shadow-v8"
 DEFAULT_NEPTUNE = Path("/usr/local/lib/varmint/neptune")
 DEFAULT_CACHE = Path.home() / ".cache/varmint/proton-graphics"
 PE_AMD64 = 0x8664
-ELF_X86_64 = 62
+PE_ARM64 = 0xAA64
+UNIX_ELF_MACHINES = {"x86_64-unix": 62, "aarch64-unix": 183}
 
 
 def graphics_policy(mode):
@@ -142,47 +144,56 @@ def require_amd64_pe(path, kind):
         fail(f"unsupported {kind}: {path} ({machine_text}, expected AMD64)")
 
 
-def require_x86_64_elf(path, kind):
+def require_unix_elf(path, kind, unix_arch):
     require_file(path, kind)
     machine = elf_machine(path)
-    if machine != ELF_X86_64:
+    if machine != UNIX_ELF_MACHINES[unix_arch]:
         machine_text = (
             "not 64-bit little-endian ELF"
             if machine is None
             else f"ELF machine {machine}"
         )
-        fail(f"unsupported {kind}: {path} ({machine_text}, expected x86_64)")
+        fail(f"unsupported {kind}: {path} ({machine_text}, expected {unix_arch})")
 
 
-def validate_artifacts(paths):
+def validate_artifacts(paths, unix_arch):
     require_amd64_pe(paths["dxgi"], "Neptune dxgi.dll")
     require_amd64_pe(paths["primary"], f"Neptune {paths['primary'].name}")
     require_amd64_pe(paths["nptdll"], "Neptune nptunix.dll")
-    require_x86_64_elf(paths["nptso"], "Neptune nptunix.so")
+    require_unix_elf(paths["nptso"], "Neptune nptunix.so", unix_arch)
     return paths
 
 
-def prebuilt_artifact_paths(mode, base):
+def prebuilt_artifact_paths(mode, base, unix_arch):
     windows = base / "x86_64-windows"
-    unix = base / "x86_64-unix"
+    unix = base / unix_arch
     return validate_artifacts({
         "dxgi": windows / "dxgi.dll",
         "nptdll": windows / "nptunix.dll",
         "nptso": unix / "nptunix.so",
         "primary": windows / ("d3d11.dll" if mode == "neptune" else "d3d12.dll"),
-    })
+    }, unix_arch)
 
 
-def build_artifact_paths(mode, base):
+def build_artifact_paths(mode, base, unix_arch):
     return validate_artifacts({
         "dxgi": base / "dxgi.dll",
         "nptdll": base / "nptunix" / "nptunix.dll",
         "nptso": base / "nptunix" / "nptunix.so",
         "primary": base / ("d3d11.dll" if mode == "neptune" else "d3d12.dll"),
-    })
+    }, unix_arch)
 
 
-def find_component_dir(root, wine_roots, component, names):
+def proton_uses_arm64(root):
+    # Mirrors the runtime selection in Proton's own launcher.
+    return (
+        os.environ.get("PROTON_USE_ARM64", "1") == "1"
+        and platform.machine() == "aarch64"
+        and (root / "files/bin-arm64").is_dir()
+    )
+
+
+def find_component_dir(root, wine_roots, component, names, machine):
     matches = []
     seen = set()
 
@@ -196,46 +207,55 @@ def find_component_dir(root, wine_roots, component, names):
             if directory in seen:
                 continue
             candidates = [directory / name for name in names]
-            if all(path.is_file() and pe_machine(path) == PE_AMD64 for path in candidates):
+            if all(path.is_file() and pe_machine(path) == machine for path in candidates):
                 seen.add(directory)
                 matches.append(directory)
 
+    machine_text = "ARM64" if machine == PE_ARM64 else "AMD64"
     if not matches:
         wanted = " + ".join(names)
-        fail(f"unsupported Proton layout: no AMD64 {wanted} found under {component}")
+        fail(f"unsupported Proton layout: no {machine_text} {wanted} found under {component}")
     if len(matches) != 1:
         found = ", ".join(str(path.relative_to(root)) for path in matches)
-        fail(f"unsupported Proton layout: ambiguous AMD64 {component} directories: {found}")
+        fail(f"unsupported Proton layout: ambiguous {machine_text} {component} directories: {found}")
     return matches[0]
 
 
-def discover_proton_layout(mode, root):
+def discover_proton_layout(mode, root, arm64):
     wine_roots = proton_wine_roots(root)
     if not wine_roots:
         fail("unsupported Proton layout: no files/dist lib*/wine root found")
 
+    # Neptune's PE frontend is AMD64 in both runtimes. ARM64EC Wine loads an
+    # AMD64 builtin from x86_64-windows and its unixlib from aarch64-unix.
+    # Proton copies the ARM64X DXVK/vkd3d-proton DLLs into ARM64 prefixes.
+    unix_arch = "aarch64-unix" if arm64 else "x86_64-unix"
+    component_machine = PE_ARM64 if arm64 else PE_AMD64
+
     arch_pairs = []
     for wine in wine_roots:
         windows = wine / "x86_64-windows"
-        unix = wine / "x86_64-unix"
+        unix = wine / unix_arch
         if windows.is_dir() and unix.is_dir():
             arch_pairs.append((windows, unix))
 
     if not arch_pairs:
-        fail("unsupported Proton layout: no x86_64-windows/x86_64-unix Wine pair found")
+        fail(f"unsupported Proton layout: no x86_64-windows/{unix_arch} Wine pair found")
     if len(arch_pairs) != 1:
         found = ", ".join(str(w.relative_to(root).parent) for w, _ in arch_pairs)
-        fail(f"unsupported Proton layout: ambiguous x86_64 Wine roots: {found}")
+        fail(f"unsupported Proton layout: ambiguous {unix_arch} Wine roots: {found}")
 
     dxvk_names = ["dxgi.dll"]
     if mode == "neptune":
         dxvk_names.append("d3d11.dll")
-    dxvk_dir = find_component_dir(root, wine_roots, "dxvk", dxvk_names)
+    dxvk_dir = find_component_dir(root, wine_roots, "dxvk", dxvk_names, component_machine)
 
     if mode == "neptune":
         primary = dxvk_dir / "d3d11.dll"
     else:
-        vkd3d_dir = find_component_dir(root, wine_roots, "vkd3d-proton", ["d3d12.dll"])
+        vkd3d_dir = find_component_dir(
+            root, wine_roots, "vkd3d-proton", ["d3d12.dll"], component_machine
+        )
         primary = vkd3d_dir / "d3d12.dll"
 
     windows, unix = arch_pairs[0]
@@ -679,18 +699,20 @@ def main():
         fail(f"unsupported graphics mode: {mode}")
 
     proton_index, proton_root = find_proton(command)
-    layout = discover_proton_layout(mode, proton_root)
+    arm64 = proton_uses_arm64(proton_root)
+    layout = discover_proton_layout(mode, proton_root, arm64)
+    unix_arch = layout["npt_unix"].name
 
     build = os.environ.get("VARMINT_NEPTUNE_BUILD")
     if build:
         artifacts = build_artifact_paths(
-            mode, Path(build).expanduser().resolve()
+            mode, Path(build).expanduser().resolve(), unix_arch
         )
     else:
         base = Path(
             os.environ.get("VARMINT_NEPTUNE_PREBUILT", str(DEFAULT_NEPTUNE))
         ).expanduser()
-        artifacts = prebuilt_artifact_paths(mode, base)
+        artifacts = prebuilt_artifact_paths(mode, base, unix_arch)
 
     shadow, use_lock, mode_dir = acquire_shadow(
         mode, proton_root, artifacts, layout
@@ -705,9 +727,8 @@ def main():
     # PROTON_USE_WINED3D11 alias in Proton 7+.
     env["PROTON_USE_WINED3D"] = "0"
 
-    # Neptune ships an AMD64 PE frontend and x86_64 Unix library. Proton 11+
-    # can otherwise select its ARM64 Wine runtime when launched natively.
-    env["PROTON_USE_ARM64"] = "0"
+    # Pin Proton to the Wine runtime the shadow was built for.
+    env["PROTON_USE_ARM64"] = "1" if arm64 else "0"
 
     # Neptune does not implement NVAPI. Proton 7/8 use ENABLE_NVAPI, while
     # Proton 9+ use DISABLE_NVAPI/FORCE_NVAPI. Set both generations explicitly

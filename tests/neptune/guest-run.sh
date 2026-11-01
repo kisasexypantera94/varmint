@@ -64,17 +64,26 @@ test -f "$PROTON" || {
     echo "missing Proton launcher: $PROTON" >&2
     exit 1
 }
-WINESERVER="$(dirname "$PROTON")/files/bin/wineserver"
+# ARM64 Proton runs natively; x86_64 Proton runs through FEX.
+if [ -d "$(dirname "$PROTON")/files/bin-arm64" ]; then
+    WINESERVER="$(dirname "$PROTON")/files/bin-arm64/wineserver"
+    RUNNER=()
+    COMPATDATA="$BUILD_ROOT/compatdata-$API-arm64"
+else
+    WINESERVER="$(dirname "$PROTON")/files/bin/wineserver"
+    test -x "$FEX_COMPAT_TOOL" || {
+        echo "missing FEX compatibility tool: $FEX_COMPAT_TOOL" >&2
+        exit 1
+    }
+    RUNNER=("$FEX_COMPAT_TOOL" run)
+    COMPATDATA="$BUILD_ROOT/compatdata-$API"
+fi
 test -x "$WINESERVER" || {
     echo "missing Proton wineserver: $WINESERVER" >&2
     exit 1
 }
-test -x "$FEX_COMPAT_TOOL" || {
-    echo "missing FEX compatibility tool: $FEX_COMPAT_TOOL" >&2
-    exit 1
-}
 
-mkdir -p "$BUILD_ROOT/bin" "$BUILD_ROOT/compatdata-$API"
+mkdir -p "$BUILD_ROOT/bin" "$COMPATDATA"
 EXE="$BUILD_ROOT/bin/$API-$TEST.exe"
 
 echo "building $API $TEST" >&2
@@ -97,7 +106,7 @@ echo "building $API $TEST" >&2
 echo "running $API $TEST through $MODE" >&2
 export VARMINT_NEPTUNE_BUILD="$NEPTUNE_BUILD"
 export STEAM_COMPAT_CLIENT_INSTALL_PATH="$STEAM_ROOT"
-export STEAM_COMPAT_DATA_PATH="$BUILD_ROOT/compatdata-$API"
+export STEAM_COMPAT_DATA_PATH="$COMPATDATA"
 export STEAM_FEX_TSOENABLED="${STEAM_FEX_TSOENABLED:-0}"
 export PROTON_LOG=1
 export PROTON_LOG_DIR="$BUILD_ROOT"
@@ -162,7 +171,7 @@ terminate_prefix() {
     if [ -d "$STEAM_COMPAT_DATA_PATH/pfx" ]; then
         WINEPREFIX="$STEAM_COMPAT_DATA_PATH/pfx" \
             timeout --signal=TERM --kill-after=2s 5s \
-            "$FEX_COMPAT_TOOL" run "$WINESERVER" -k \
+            "${RUNNER[@]}" "$WINESERVER" -k \
             >/dev/null 2>&1 || true
     fi
 }
@@ -172,7 +181,7 @@ terminate_prefix() {
 : >"$LAUNCH_STDERR_LOG"
 timeout "$TIMEOUT" \
     varmint-graphics "$MODE" \
-        "$FEX_COMPAT_TOOL" run "$PROTON" run "$EXE" \
+        "${RUNNER[@]}" "$PROTON" run "$EXE" \
         2>"$LAUNCH_STDERR_LOG" &
 run_pid=$!
 
