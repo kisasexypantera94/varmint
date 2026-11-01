@@ -1,0 +1,117 @@
+diff --git a/src/dmn_com_hooks.cpp b/src/dmn_com_hooks.cpp
+index 0729bcd..8383de6 100644
+--- a/src/dmn_com_hooks.cpp
++++ b/src/dmn_com_hooks.cpp
+@@ -3376,6 +3376,13 @@ HRESULT STDMETHODCALLTYPE hook_d3d12_CreateComputePipelineState(
+     auto orig = DMN_ORIG(d3d12_CreateComputePipelineState, This);
+     if (!orig)
+         return E_FAIL;
++    /* An empty CS is invalid input; D3DMetal dereferences a null
++     * bytecode-cache entry for one instead of failing the create. */
++    if (desc && (!desc->CS.pShaderBytecode || !desc->CS.BytecodeLength)) {
++        if (out)
++            *out = nullptr;
++        return E_INVALIDARG;
++    }
+     D3D12_COMPUTE_PIPELINE_STATE_DESC norm;
+     DmnNormalizedStage cs;
+     if (desc) {
+diff --git a/tests/d3d12_empty_cs_test.cpp b/tests/d3d12_empty_cs_test.cpp
+new file mode 100644
+index 0000000..1c0379f
+--- /dev/null
++++ b/tests/d3d12_empty_cs_test.cpp
+@@ -0,0 +1,74 @@
++/*
++ * Copyright 2026 Turing Software LLC
++ * SPDX-License-Identifier: MIT
++ *
++ * A compute pipeline whose CS is empty is refused with E_INVALIDARG rather
++ * than created.  D3DMetal does not check it: its stage cache looks the empty
++ * bytecode up, gets NULL back and dereferences it, killing the process.
++ *
++ * Prints "EMPTYCS: PASS" and exits 0 on success.
++ */
++
++#include <cstdio>
++
++#include <d3d12.h>
++#include <windows.h>
++
++#include "d3dmetal_native.h"
++
++#define T_TAG "EMPTYCS"
++#include "common/check.h"
++
++namespace {
++
++int run() {
++    if (dmn_init(nullptr) != DMN_SUCCESS) {
++        fprintf(stderr, T_TAG ": dmn_init FAILED\n");
++        return 1;
++    }
++
++    ID3D12Device* dev = nullptr;
++    CK(D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0,
++                         __uuidof(ID3D12Device), (void**)&dev),
++       "D3D12CreateDevice");
++
++    D3D12_ROOT_SIGNATURE_DESC rd = {};
++    ID3DBlob* blob = nullptr;
++    ID3DBlob* err = nullptr;
++    CK(D3D12SerializeRootSignature(&rd, D3D_ROOT_SIGNATURE_VERSION_1, &blob,
++                                   &err),
++       "D3D12SerializeRootSignature");
++    ID3D12RootSignature* rs = nullptr;
++    CK(dev->CreateRootSignature(0, blob->GetBufferPointer(),
++                                blob->GetBufferSize(),
++                                __uuidof(ID3D12RootSignature), (void**)&rs),
++       "CreateRootSignature");
++    blob->Release();
++
++    static const unsigned char kByte = 0;
++    const D3D12_SHADER_BYTECODE empties[] = {{nullptr, 0}, {&kByte, 0}};
++    for (const D3D12_SHADER_BYTECODE& cs : empties) {
++        D3D12_COMPUTE_PIPELINE_STATE_DESC cd = {};
++        cd.pRootSignature = rs;
++        cd.CS = cs;
++        ID3D12PipelineState* pso = nullptr;
++        HRESULT hr = dev->CreateComputePipelineState(
++            &cd, __uuidof(ID3D12PipelineState), (void**)&pso);
++        printf(T_TAG ": CS {%p, 0} -> 0x%08x\n", cs.pShaderBytecode,
++               (unsigned)hr);
++        EXPECT(hr == E_INVALIDARG, "an empty CS was not refused");
++        EXPECT(!pso, "a refused create returned a pipeline");
++    }
++
++    rs->Release();
++    dev->Release();
++    T_PASS();
++    return 0;
++}
++
++} // namespace
++
++int main() {
++    setvbuf(stdout, nullptr, _IONBF, 0);
++    return run();
++}
+diff --git a/tests/meson.build b/tests/meson.build
+index ab88b88..da4a424 100644
+--- a/tests/meson.build
++++ b/tests/meson.build
+@@ -126,6 +126,14 @@ d3d12_dxconv_subroutine_test = executable('d3d12-dxconv-subroutine-test',
+   dependencies: [directx_native_hdr])
+ test('d3d12-dxconv-subroutine', d3d12_dxconv_subroutine_test, env: ['DMN_LOG=info'], timeout: 300)
+ 
++# A compute pipeline with an empty CS is refused instead of crashing D3DMetal.
++d3d12_empty_cs_test = executable('d3d12-empty-cs-test',
++  ['d3d12_empty_cs_test.cpp'],
++  include_directories: test_native_inc,
++  link_with: dmn_lib,
++  dependencies: [directx_native_hdr])
++test('d3d12-empty-cs', d3d12_empty_cs_test, env: ['DMN_LOG=info'], timeout: 60)
++
+ # A guest-built DXIL container whose part offset or size wraps the 32-bit
+ # bounds check is rejected instead of read out of bounds.
+ dxil_container_bounds_test = executable('dxil-container-bounds-test',

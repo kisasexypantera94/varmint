@@ -26,6 +26,7 @@ DXMT_PATCHES=(
 )
 D3DMETAL_PATCHES=(
   "$ROOT/patches/d3dmetal-native/0001-keep-impostors-resident-on-metal4-queues.patch"
+  "$ROOT/patches/d3dmetal-native/0002-refuse-empty-compute-shader.patch"
 )
 ENTITLEMENTS="$ROOT/runtime/entitlements.plist"
 VMNET_HELPER_ENTITLEMENTS="$ROOT/runtime/vmnet-helper-entitlements.plist"
