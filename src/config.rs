@@ -13,6 +13,10 @@ const DEFAULT_KERNEL_ARGS: &str = "console=ttyAMA0 earlycon=pl011,mmio32,0x09000
 const MIB: u64 = 1024 * 1024;
 const GIB: u64 = 1024 * MIB;
 
+mod document;
+
+pub use document::VmConfigDocument;
+
 pub fn locate() -> Option<PathBuf> {
     let mut arguments = env::args_os().skip(1);
     let config = match arguments.next() {
@@ -43,7 +47,7 @@ fn choose_config() -> Option<PathBuf> {
     (!path.is_empty()).then_some(PathBuf::from(path))
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum NeptuneBackend {
     #[default]
@@ -84,6 +88,29 @@ pub struct VmConfig {
     pub host_environment: BTreeMap<String, String>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct VmConfigDefaults {
+    pub memory_mib: u64,
+    pub vcpus: usize,
+    pub data_disk_capacity_gib: u64,
+    pub neptune_backend: NeptuneBackend,
+    pub host_memory_mib: u64,
+    pub host_cpus: usize,
+}
+
+impl VmConfigDefaults {
+    pub fn for_host() -> Self {
+        Self {
+            memory_mib: default_memory_mib(),
+            vcpus: default_vcpus(),
+            data_disk_capacity_gib: default_data_disk_capacity_gib(),
+            neptune_backend: NeptuneBackend::default(),
+            host_memory_mib: host_memory_bytes() / MIB,
+            host_cpus: host_cpus(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct VmConfigFile {
@@ -106,6 +133,31 @@ struct VmConfigFile {
     host_environment: BTreeMap<String, String>,
 }
 
+fn validate_config_file(config: &VmConfigFile) -> Result<(), String> {
+    if config.format_version != 2 {
+        return Err(format!(
+            "unsupported VM config format_version {}; expected 2",
+            config.format_version
+        ));
+    }
+    if config.vcpus == 0 {
+        return Err("vcpus must be greater than zero".to_owned());
+    }
+    if config.memory_mib < 256 {
+        return Err("memory_mib must be at least 256".to_owned());
+    }
+    if config.system_disk_capacity_gib == Some(0) {
+        return Err("system_disk_capacity_gib must be greater than zero".to_owned());
+    }
+    if config.data_disk_capacity_gib == 0 {
+        return Err("data_disk_capacity_gib must be greater than zero".to_owned());
+    }
+    if config.kernel.is_none() && config.initrd.is_some() {
+        return Err("initrd requires a custom kernel".to_owned());
+    }
+    Ok(())
+}
+
 impl VmConfig {
     pub fn load(path: &Path) -> Self {
         let path = absolute_path(path);
@@ -113,40 +165,11 @@ impl VmConfig {
             .unwrap_or_else(|error| panic!("failed to read VM config {}: {error}", path.display()));
         let config: VmConfigFile = toml::from_str(&source)
             .unwrap_or_else(|error| panic!("failed to parse VM config {}: {error}", path.display()));
-
-        if config.format_version != 2 {
-            panic!(
-                "unsupported VM config format_version {}; expected 2",
-                config.format_version
-            );
-        }
-        if config.vcpus == 0 {
-            panic!("vcpus must be greater than zero");
-        }
-        if config.memory_mib < 256 {
-            panic!("memory_mib must be at least 256");
-        }
-        if config.system_disk_capacity_gib == Some(0) {
-            panic!("system_disk_capacity_gib must be greater than zero");
-        }
-        if config.data_disk_capacity_gib == 0 {
-            panic!("data_disk_capacity_gib must be greater than zero");
-        }
-        if config.kernel.is_none() && config.initrd.is_some() {
-            panic!("initrd requires a custom kernel");
-        }
+        validate_config_file(&config).unwrap_or_else(|error| panic!("{error}"));
 
         let base = path.parent().unwrap_or_else(|| Path::new("."));
         let resources = bundle_resources();
-        let storage_dir = config
-            .storage_dir
-            .map(|path| resolve_path(base, path))
-            .unwrap_or_else(|| {
-                let name = path
-                    .file_stem()
-                    .unwrap_or_else(|| panic!("VM config path has no file name: {}", path.display()));
-                base.join(name)
-            });
+        let storage_dir = storage_dir_for(&path, config.storage_dir);
         let disk = storage_dir.join("system.raw");
         let data_disk = storage_dir.join("data.raw");
         let base_image = config
@@ -205,24 +228,30 @@ impl VmConfig {
 }
 
 fn default_memory_mib() -> u64 {
-    let host_bytes = Command::new("/usr/sbin/sysctl")
+    (host_memory_bytes() / 2 / MIB).max(256)
+}
+
+fn host_memory_bytes() -> u64 {
+    Command::new("/usr/sbin/sysctl")
         .args(["-n", "hw.memsize"])
         .output()
         .ok()
         .filter(|output| output.status.success())
         .and_then(|output| String::from_utf8(output.stdout).ok())
         .and_then(|value| value.trim().parse::<u64>().ok())
-        .unwrap_or(32 * GIB);
-
-    (host_bytes / 2 / MIB).max(256)
+        .unwrap_or(32 * GIB)
 }
 
 fn default_vcpus() -> usize {
-    let host = std::thread::available_parallelism()
-        .map(|count| count.get())
-        .unwrap_or(8);
+    let host = host_cpus();
     let target = (host * 3 / 4).max(1);
     target.min(host.saturating_sub(2).max(1))
+}
+
+fn host_cpus() -> usize {
+    std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(8)
 }
 
 fn default_data_disk_capacity_gib() -> u64 {
@@ -242,6 +271,21 @@ fn absolute_path(path: &Path) -> PathBuf {
     env::current_dir()
         .unwrap_or_else(|error| panic!("failed to resolve current directory: {error}"))
         .join(path)
+}
+
+/// The VM's storage directory: `storage_dir` relative to the config, or by default a sibling
+/// directory named after the config.
+pub fn storage_dir_for(config_path: &Path, storage_dir: Option<PathBuf>) -> PathBuf {
+    let base = config_path.parent().unwrap_or_else(|| Path::new("."));
+    match storage_dir {
+        Some(path) => resolve_path(base, path),
+        None => {
+            let name = config_path
+                .file_stem()
+                .unwrap_or_else(|| panic!("VM config path has no file name: {}", config_path.display()));
+            base.join(name)
+        }
+    }
 }
 
 fn resolve_path(base: &Path, path: PathBuf) -> PathBuf {
