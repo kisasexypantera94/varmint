@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD_ROOT="${VARMINT_NEPTUNE_TEST_BUILD:-$HOME/.cache/varmint/neptune-tests}"
-NEPTUNE_BUILD="${VARMINT_NEPTUNE_BUILD:-$HOME/virtio-win-mesa-neptune/builddir-win64-x86unix/src/virtio/neptune}"
+NEPTUNE_BUILD="${VARMINT_NEPTUNE_BUILD:-}"
 CXX="${VARMINT_MINGW_CXX:-x86_64-w64-mingw32-g++}"
 STEAM_ROOT="${VARMINT_STEAM_ROOT:-$HOME/.local/share/Steam}"
 FEX_COMPAT_TOOL="$STEAM_ROOT/steamapps/common/FEX-Emu/fex-compat-tool"
@@ -19,6 +19,10 @@ TEST="$2"
 
 case "$API:$TEST" in
     d3d11:smoke)
+        MODE=neptune
+        LIBRARIES=(-ld3d11)
+        ;;
+    d3d11:fence_event)
         MODE=neptune
         LIBRARIES=(-ld3d11)
         ;;
@@ -52,11 +56,6 @@ command -v varmint-graphics >/dev/null || {
     echo "missing guest runner: varmint-graphics" >&2
     exit 1
 }
-test -d "$NEPTUNE_BUILD" || {
-    echo "missing Neptune development build: $NEPTUNE_BUILD" >&2
-    exit 1
-}
-
 if [ -n "${VARMINT_TEST_PROTON:-}" ]; then
     PROTON="$VARMINT_TEST_PROTON"
 elif [ -f "$STEAM_ROOT/steamapps/common/Proton - Experimental/proton" ]; then
@@ -81,6 +80,7 @@ if [ -d "$(dirname "$PROTON")/files/bin-arm64" ]; then
     WINESERVER="$(dirname "$PROTON")/files/bin-arm64/wineserver"
     RUNNER=()
     COMPATDATA="$BUILD_ROOT/compatdata-$API-arm64"
+    DEFAULT_NEPTUNE_BUILD="$HOME/virtio-win-mesa-neptune/builddir-win64-aarch64unix/src/virtio/neptune"
 else
     WINESERVER="$(dirname "$PROTON")/files/bin/wineserver"
     test -x "$FEX_COMPAT_TOOL" || {
@@ -89,9 +89,15 @@ else
     }
     RUNNER=("$FEX_COMPAT_TOOL" run)
     COMPATDATA="$BUILD_ROOT/compatdata-$API"
+    DEFAULT_NEPTUNE_BUILD="$HOME/virtio-win-mesa-neptune/builddir-win64-x86unix/src/virtio/neptune"
 fi
+NEPTUNE_BUILD="${NEPTUNE_BUILD:-$DEFAULT_NEPTUNE_BUILD}"
 test -x "$WINESERVER" || {
     echo "missing Proton wineserver: $WINESERVER" >&2
+    exit 1
+}
+test -d "$NEPTUNE_BUILD" || {
+    echo "missing Neptune development build: $NEPTUNE_BUILD" >&2
     exit 1
 }
 

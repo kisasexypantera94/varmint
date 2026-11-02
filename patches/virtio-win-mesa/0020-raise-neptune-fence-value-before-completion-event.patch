@@ -252,3 +252,87 @@ index 8b9fa587ee8..ab8e82cd5ec 100644
     if (!token)
        return NPT_E_OUTOFMEMORY;
     /* The wire HANDLE slot carries the single-use token; the host
+diff --git a/src/virtio/neptune/npt_overrides_d3d11_fence.c b/src/virtio/neptune/npt_overrides_d3d11_fence.c
+index 7b3df52dfdd..4ecbc624bb3 100644
+--- a/src/virtio/neptune/npt_overrides_d3d11_fence.c
++++ b/src/virtio/neptune/npt_overrides_d3d11_fence.c
+@@ -32,6 +32,7 @@ static const GUID *const fence_tiers[] = { &NPT_IID_ID3D11Fence, NULL };
+ /* Slot is a single atomic completed_value -- no type-specific fields. */
+ struct npt_d3d11_fence_aux {
+    struct npt_d3d11_feedback_aux base;
++   struct npt_event_reached *reached;
+ };
+
+ static void npt_d3d11_fence_aux_destroy(void *aux_raw);
+@@ -45,6 +46,7 @@ npt_d3d11_fence_aux_init(struct npt_com_base *com,
+    aux->base.fb_shmem = NULL;
+    aux->base.fb_offset = 0;
+    aux->base.registered = false;
++   aux->reached = npt_event_reached_create();
+    com->aux_destroy = npt_d3d11_fence_aux_destroy;
+    /* Slot alloc + REGISTER happen post-Create (aux_init has no
+     * InitialValue).  A fence opened from a shared handle stays
+@@ -63,6 +65,7 @@ npt_d3d11_fence_aux_destroy(void *aux_raw)
+       npt_renderer_shmem_unref(aux->base.com->base.device->renderer,
+                                aux->base.fb_shmem);
+    }
++   npt_event_reached_unref(aux->reached);
+    free(aux);
+ }
+
+@@ -126,6 +129,16 @@ fence_slot(struct npt_d3d11_fence_aux *aux)
+       ((uint8_t *)aux->base.fb_shmem->mmap_ptr + aux->base.fb_offset);
+ }
+
++static uint64_t
++fence_snapshot(const struct npt_d3d11_fence_aux *aux,
++               struct npt_d3d11_fence_feedback_slot *slot)
++{
++   const uint64_t published =
++      atomic_load_explicit(&slot->completed_value, memory_order_acquire);
++   const uint64_t reached = npt_event_reached_value(aux->reached);
++   return published > reached ? published : reached;
++}
++
+ static UINT64 NPT_STDMETHODCALLTYPE
+ fence_GetCompletedValue_override(void *self)
+ {
+@@ -137,8 +150,7 @@ fence_GetCompletedValue_override(void *self)
+    }
+    /* Acquire pairs with the host's release-CAS.  Monotonic fences
+     * mean any observed value is a valid lower bound. */
+-   return atomic_load_explicit(&slot->completed_value,
+-                               memory_order_acquire);
++   return fence_snapshot(aux, slot);
+ }
+
+ static bool
+@@ -148,8 +160,7 @@ fence_reached(void *self, uint64_t value)
+    struct npt_d3d11_fence_feedback_slot *slot = fence_slot(aux);
+    if (slot && aux->base.registered) {
+       /* Monotonic fence: any observed value is a valid lower bound. */
+-      return atomic_load_explicit(&slot->completed_value,
+-                                  memory_order_acquire) >= value;
++      return fence_snapshot(aux, slot) >= value;
+    }
+    return npt_id3d11fence_default_GetCompletedValue(self) >= value;
+ }
+@@ -189,8 +200,7 @@ fence_SetEventOnCompletion_override(void *self, UINT64 Value, HANDLE hEvent)
+     * guard is needed; a stale-low read only means we fall through to
+     * the normal arm -- conservative. */
+    if (slot && aux->base.registered &&
+-       atomic_load_explicit(&slot->completed_value,
+-                            memory_order_acquire) >= Value) {
++       fence_snapshot(aux, slot) >= Value) {
+       if (hEvent)
+          SetEvent(hEvent);
+       return NPT_S_OK;
+@@ -206,6 +216,7 @@ fence_SetEventOnCompletion_override(void *self, UINT64 Value, HANDLE hEvent)
+
+    /* Arm before the D3D call so the host's npt_win32_handle_replace
+     * sees the proxy when it decodes the token. */
+-   uint64_t token = npt_event_arm(dev, (void *)hEvent);
++   uint64_t token = npt_event_arm_reached(dev, (void *)hEvent,
++                                          aux ? aux->reached : NULL, Value);
+    if (!token)
+       return NPT_E_OUTOFMEMORY;
