@@ -455,8 +455,13 @@ impl GamepadPort {
             let attach_pending = self.outbox.pending.iter().any(|pending| {
                 matches!(pending, Pending::Attach { id: queued, .. } | Pending::HidAttach { id: queued, .. } if *queued == id)
             });
+            let detach_pending = self
+                .outbox
+                .pending
+                .iter()
+                .any(|pending| matches!(pending, Pending::Detach { id: queued } if *queued == id));
             self.outbox.pending.retain(|pending| pending.id() != Some(id));
-            if !attach_pending {
+            if !attach_pending || detach_pending {
                 self.outbox.push(Pending::Detach { id });
             }
         }

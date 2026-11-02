@@ -99,8 +99,9 @@ impl Passthrough {
             manager.register_device_matching_callback(Some(device_matched), context);
             manager.register_device_removal_callback(Some(device_removed), context);
             manager.register_input_report_callback(Some(input_report), context);
-            manager.set_dispatch_queue(&queue);
         }
+        // A manager associated with a dispatch queue must be activated and cancelled before
+        // release, so open it first while failure can still return through the simple path.
         let result = manager.open(0);
         if result != kIOReturnSuccess {
             eprintln!(
@@ -108,6 +109,9 @@ impl Passthrough {
                 describe(result)
             );
             return None;
+        }
+        unsafe {
+            manager.set_dispatch_queue(&queue);
         }
         manager.activate();
 
@@ -258,10 +262,14 @@ impl State {
 
 unsafe extern "C-unwind" fn device_matched(
     context: *mut c_void,
-    _: IOReturn,
+    result: IOReturn,
     _: *mut c_void,
     device: NonNull<IOHIDDevice>,
 ) {
+    if result != kIOReturnSuccess {
+        eprintln!("gamepad: not passing through a DualSense: {}", describe(result));
+        return;
+    }
     let state = unsafe { &*(context as *const Mutex<State>) };
     let device = unsafe { CFRetained::retain(device) };
     state.lock().unwrap().add(device);

@@ -763,3 +763,31 @@ fn the_dualsense_moves_between_paths_as_its_hid_device_comes_and_goes() {
         "back on GameController with its current state"
     );
 }
+
+#[test]
+fn rapid_hid_reconnect_keeps_the_gamecontroller_detach() {
+    let (mut port, _) = port();
+    port.on_host_event(Event::Connected {
+        id: 1,
+        name: "DualSense".into(),
+        raw_hid: true,
+    });
+    port.receive(&guest_hello_raw_hid());
+    drain(&mut port);
+
+    port.on_host_event(Event::HidConnected {
+        id: 2,
+        identity: dualsense(),
+    });
+    port.on_host_event(Event::Disconnected { id: 2 });
+    port.on_host_event(Event::HidConnected {
+        id: 3,
+        identity: dualsense(),
+    });
+
+    assert_eq!(
+        drain(&mut port),
+        ["detach 1", "hid-attach 3 054c:0ce6"],
+        "the guest already has controller 1, even though its replacement attach was still queued"
+    );
+}
