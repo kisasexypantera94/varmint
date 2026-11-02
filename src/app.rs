@@ -14,9 +14,9 @@ const PRESENT_KEEPALIVE: Duration = Duration::from_millis(250);
 use winit::{
     application::ApplicationHandler,
     dpi::{LogicalSize, PhysicalPosition, PhysicalSize},
-    event::{DeviceEvent, ElementState, MouseButton, WindowEvent},
+    event::{DeviceEvent, ElementState, Modifiers, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    keyboard::{KeyCode, PhysicalKey},
+    keyboard::PhysicalKey,
     window::{CursorGrabMode, Fullscreen, Window, WindowId},
 };
 
@@ -163,6 +163,7 @@ struct AppState<'a> {
 
     last_mouse_pos: Option<(f64, f64)>,
     mouse_captured: bool,
+    capture_chord_held: bool,
     rel_mouse_frac_dx: f64,
     rel_mouse_frac_dy: f64,
 
@@ -194,6 +195,7 @@ impl<'a> AppState<'a> {
             next_keepalive: Instant::now(),
             last_mouse_pos: None,
             mouse_captured: false,
+            capture_chord_held: false,
             rel_mouse_frac_dx: 0.0,
             rel_mouse_frac_dy: 0.0,
             stats_visible: false,
@@ -355,6 +357,17 @@ impl<'a> AppState<'a> {
         }
     }
 
+    /// Ctrl+Command toggles capture. Command is never forwarded, so the chord can't trigger a
+    /// guest shortcut.
+    fn update_capture_chord(&mut self, modifiers: Modifiers) {
+        let state = modifiers.state();
+        let held = state.control_key() && state.super_key();
+        if held && !self.capture_chord_held {
+            self.set_mouse_capture(!self.mouse_captured);
+        }
+        self.capture_chord_held = held;
+    }
+
     fn take_relative_mouse_delta(accum: &mut f64, delta: f64) -> i32 {
         *accum += delta;
         let whole = if *accum >= 0.0 {
@@ -447,19 +460,18 @@ impl<'a> ApplicationHandler<AppEvent> for AppState<'a> {
                 }
             }
 
-            WindowEvent::Focused(focused) => {
-                self.set_mouse_capture(focused);
+            WindowEvent::Focused(false) => {
+                self.set_mouse_capture(false);
+                self.capture_chord_held = false;
+            }
+
+            WindowEvent::ModifiersChanged(modifiers) => {
+                self.update_capture_chord(modifiers);
             }
 
             WindowEvent::KeyboardInput { event, .. } => {
                 let pressed = event.state == ElementState::Pressed;
                 if let PhysicalKey::Code(code) = event.physical_key {
-                    if code == KeyCode::F12 {
-                        if pressed {
-                            self.set_mouse_capture(!self.mouse_captured);
-                        }
-                        return;
-                    }
                     if let Some(linux_code) = winit_to_linux_key(code) {
                         let _ = self.host_tx.send(RuntimeEvent::Input(RuntimeInputEvent::Key {
                             code: linux_code,
@@ -492,6 +504,13 @@ impl<'a> ApplicationHandler<AppEvent> for AppState<'a> {
                     MouseButton::Middle => BTN_MIDDLE,
                     _ => return,
                 };
+
+                if !self.mouse_captured && state == ElementState::Pressed {
+                    self.set_mouse_capture(true);
+                    if self.mouse_captured {
+                        return;
+                    }
+                }
 
                 let _ = self.host_tx.send(RuntimeEvent::Input(RuntimeInputEvent::PointerButton {
                     button: btn,
