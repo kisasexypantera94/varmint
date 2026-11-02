@@ -11,7 +11,7 @@ use crate::{
 use applevisor::prelude::*;
 use std::{
     fs::File,
-    io::Read,
+    io::{self, Read},
     path::Path,
     sync::{Mutex, mpsc::Receiver},
     thread,
@@ -20,6 +20,29 @@ use winit::event_loop::EventLoopProxy;
 
 /// Exit status after the guest asked for a reset; the launcher starts the VM again.
 pub const RESTART_EXIT_CODE: i32 = 75;
+
+// Renderer blob resources keep an fd for their lifetime, and worker processes
+// inherit this limit from the VMM.
+fn raise_open_file_limit() -> io::Result<()> {
+    let mut limit = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if limit.rlim_cur == limit.rlim_max {
+        return Ok(());
+    }
+
+    limit.rlim_cur = limit.rlim_max;
+    if unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &limit) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    Ok(())
+}
 
 fn read_file(path: &Path) -> std::io::Result<Vec<u8>> {
     let mut f = File::open(path)?;
@@ -132,6 +155,10 @@ fn validate_boot_layout(memory_size: usize, image_size: usize, initrd: Option<&[
 }
 
 pub fn run(config_path: &Path) -> Result<()> {
+    if let Err(err) = raise_open_file_limit() {
+        eprintln!("vmm: failed to raise the open file limit: {err}");
+    }
+
     let mut config = VmConfig::load(config_path);
 
     let ui_scale = macos_ui::backing_scale_factor();
