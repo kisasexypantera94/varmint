@@ -49,6 +49,7 @@ vm-fdt = "0.3.0"
 zstd = "0.13"
 font8x8 = "0.3.1"
 uuid = { version = "1", features = ["v4"] }
-objc2-game-controller = { version = "0.3.2", default-features = false, features = ["std", "block2", "dispatch2", "objc2-core-haptics", "GCController", "GCControllerAxisInput", "GCControllerButtonInput", "GCControllerDirectionPad", "GCControllerElement", "GCDevice", "GCDeviceHaptics", "GCExtendedGamepad", "GCPhysicalInputProfile"] }
+objc2-game-controller = { version = "0.3.2", default-features = false, features = ["std", "block2", "dispatch2", "objc2-core-haptics", "GCController", "GCDualSenseGamepad", "GCControllerAxisInput", "GCControllerButtonInput", "GCControllerDirectionPad", "GCControllerElement", "GCDevice", "GCDeviceHaptics", "GCExtendedGamepad", "GCPhysicalInputProfile"] }
 objc2-core-haptics = { version = "0.3.2", default-features = false, features = ["std", "block2", "CHHapticEngine", "CHHapticEvent", "CHHapticParameter", "CHHapticPattern", "CHHapticPatternPlayer"] }
 dispatch2 = "0.3.1"
+objc2-io-kit = { version = "0.3.2", default-features = false, features = ["std", "hid", "dispatch2", "libc"] }

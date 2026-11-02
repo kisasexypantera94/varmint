@@ -2,10 +2,14 @@
 """Host game controllers as Linux gamepads.
 
 Reads controllers from the Varmint `gamepad` virtio-console port (protocol: the host's
-src/virtio/console/gamepad.rs) and creates one /dev/uinput device per controller. Every device
-looks like an Xbox 360 pad driven by the kernel's xpad driver (identity, buttons, axis ranges), the
-layout SDL, Steam and Proton map without configuration. Force feedback (FF_RUMBLE) is played here
-with the kernel's ff-memless semantics and its combined level goes back to the host.
+src/virtio/console/gamepad.rs) and creates one device per controller:
+
+- a /dev/uinput device for a controller the host reads through GameController. It looks like an
+  Xbox 360 pad driven by the kernel's xpad driver (identity, buttons, axis ranges), the layout SDL,
+  Steam and Proton map without configuration. Force feedback (FF_RUMBLE) is played here with the
+  kernel's ff-memless semantics and its combined level goes back to the host.
+- a /dev/uhid device for a controller the host passes through as raw HID (a DualSense). The
+  kernel's own driver (hid-playstation) binds to it; reports pass through unchanged both ways.
 """
 
 import errno
@@ -19,15 +23,23 @@ from pathlib import Path
 
 PORT_NAME = "gamepad"
 UINPUT = "/dev/uinput"
+UHID = "/dev/uhid"
 
 PROTOCOL_VERSION = 1
-MAX_MESSAGE_LEN = 512
+MAX_MESSAGE_LEN = 4000
+FEATURE_RAW_HID = 1 << 0
 
 MSG_HELLO = 1
 MSG_ATTACH = 2
 MSG_DETACH = 3
 MSG_STATE = 4
 MSG_RUMBLE = 5
+MSG_HID_ATTACH = 6
+MSG_HID_INPUT = 7
+MSG_HID_REPLY = 8
+MSG_HID_OUTPUT = 9
+MSG_HID_GET = 10
+MSG_HID_SET = 11
 
 # Button bits of a STATE message.
 SOUTH = 1 << 0
@@ -148,12 +160,57 @@ class State:
         self.right_trigger = right_trigger
 
 
+class HidAttach:
+    def __init__(self, id, bus, vendor, product, version, country, name, descriptor):
+        self.id = id
+        self.bus = bus
+        self.vendor = vendor
+        self.product = product
+        self.version = version
+        self.country = country
+        self.name = name
+        self.descriptor = descriptor
+
+
+class HidInput:
+    def __init__(self, id, report):
+        self.id = id
+        self.report = report
+
+
+class HidReply:
+    def __init__(self, id, request, errno, data):
+        self.id = id
+        self.request = request
+        self.errno = errno
+        self.data = data
+
+
 def encode(kind, payload):
     return struct.pack("<HB", 1 + len(payload), kind) + payload
 
 
-def encode_hello():
-    return encode(MSG_HELLO, struct.pack("<H", PROTOCOL_VERSION))
+def encode_hello(features=0):
+    return encode(MSG_HELLO, struct.pack("<HI", PROTOCOL_VERSION, features))
+
+
+def encode_hid_output(id, report_type, report):
+    return encode(MSG_HID_OUTPUT, struct.pack("<IBH", id, report_type, len(report)) + report)
+
+
+def encode_hid_get(id, request, report_type, report_id):
+    return encode(MSG_HID_GET, struct.pack("<IIBB", id, request, report_type, report_id))
+
+
+def encode_hid_set(id, request, report_type, report):
+    return encode(MSG_HID_SET, struct.pack("<IIBH", id, request, report_type, len(report)) + report)
+
+
+def sized(payload, at):
+    """The u16-length-prefixed bytes at `at` and the offset after them, or None if cut short."""
+    (length,) = struct.unpack_from("<H", payload, at)
+    data = payload[at + 2 : at + 2 + length]
+    return (data, at + 2 + length) if len(data) == length else None
 
 
 def encode_rumble(id, strong, weak):
@@ -175,6 +232,21 @@ def decode_message(kind, payload):
             return Detach(*struct.unpack_from("<I", payload))
         if kind == MSG_STATE:
             return State(*struct.unpack_from("<IIhhhhHH", payload))
+        if kind == MSG_HID_ATTACH:
+            id, bus, vendor, product, version, country, name_len = struct.unpack_from("<IHHHHIB", payload)
+            name = payload[17 : 17 + name_len]
+            descriptor = sized(payload, 17 + name_len) if len(name) == name_len else None
+            if descriptor is None:
+                return None
+            return HidAttach(id, bus, vendor, product, version, country, name.decode("utf-8", "replace"), descriptor[0])
+        if kind == MSG_HID_INPUT:
+            (id,) = struct.unpack_from("<I", payload)
+            report = sized(payload, 4)
+            return HidInput(id, report[0]) if report else None
+        if kind == MSG_HID_REPLY:
+            id, request, error = struct.unpack_from("<IIH", payload)
+            data = sized(payload, 10)
+            return HidReply(id, request, error, data[0]) if data else None
     except struct.error:
         return None
     return None
@@ -204,15 +276,23 @@ def coalesce(messages):
     """
     kept = []
     newer_buttons = {}
+    newer_report = set()
     for message in reversed(messages):
         if isinstance(message, State):
             if newer_buttons.get(message.id) == message.buttons:
                 continue
             newer_buttons[message.id] = message.buttons
-        elif isinstance(message, (Attach, Detach)):
+        elif isinstance(message, HidInput):
+            # Raw reports are whole state too; the newest wins.
+            if message.id in newer_report:
+                continue
+            newer_report.add(message.id)
+        elif isinstance(message, (Attach, Detach, HidAttach, HidReply)):
             newer_buttons.pop(message.id, None)
+            newer_report.discard(message.id)
         else:
             newer_buttons.clear()
+            newer_report.clear()
         kept.append(message)
     kept.reverse()
     return kept
@@ -433,7 +513,116 @@ class UinputPad:
             os.close(self.fd)
 
 
+# --- uhid -------------------------------------------------------------------------------------
+
+# <linux/uhid.h>: one packed struct uhid_event per read or write.
+UHID_EVENT_SIZE = 4376
+UHID_DATA_MAX = 4096
+UHID_START = 2
+UHID_STOP = 3
+UHID_OUTPUT = 6
+UHID_GET_REPORT = 9
+UHID_GET_REPORT_REPLY = 10
+UHID_CREATE2 = 11
+UHID_INPUT2 = 12
+UHID_SET_REPORT = 13
+UHID_SET_REPORT_REPLY = 14
+UHID_DESTROY = 1
+
+
+def uhid_create2(attach, phys):
+    """UHID_CREATE2: name[128], phys[64], uniq[64], rd_size, bus, vendor, product, version,
+    country, rd_data. uniq stays empty: hid-playstation sets it from the controller's address."""
+    name = attach.name.encode()[:127]
+    return struct.pack(
+        "<I128s64s64sHHIIII4096s",
+        UHID_CREATE2,
+        name,
+        phys.encode()[:63],
+        b"",
+        len(attach.descriptor),
+        attach.bus,
+        attach.vendor,
+        attach.product,
+        attach.version,
+        attach.country,
+        attach.descriptor,
+    )
+
+
+def uhid_input2(report):
+    return struct.pack("<IH", UHID_INPUT2, len(report)) + report
+
+
+def uhid_get_report_reply(request, error, data):
+    return struct.pack("<IIHH", UHID_GET_REPORT_REPLY, request, error, len(data)) + data
+
+
+def uhid_set_report_reply(request, error):
+    return struct.pack("<IIH", UHID_SET_REPORT_REPLY, request, error)
+
+
+def uhid_decode(event):
+    """(type, fields) for the events the host needs, None for the rest. Report data keeps its
+    report ID first, as Linux passes reports."""
+    if len(event) < UHID_EVENT_SIZE:
+        return None
+    (kind,) = struct.unpack_from("<I", event)
+    if kind == UHID_OUTPUT:
+        size, report_type = struct.unpack_from("<HB", event, 4 + UHID_DATA_MAX)
+        return kind, (report_type, bytes(event[4 : 4 + min(size, UHID_DATA_MAX)]))
+    if kind == UHID_GET_REPORT:
+        request, report_id, report_type = struct.unpack_from("<IBB", event, 4)
+        return kind, (request, report_type, report_id)
+    if kind == UHID_SET_REPORT:
+        request, _, report_type, size = struct.unpack_from("<IBBH", event, 4)
+        return kind, (request, report_type, bytes(event[12 : 12 + min(size, UHID_DATA_MAX)]))
+    return None
+
+
+class UhidPad:
+    def __init__(self, attach, path=UHID):
+        self.fd = os.open(path, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC)
+        try:
+            os.write(self.fd, uhid_create2(attach, f"varmint-gamepad/{attach.id}"))
+        except OSError:
+            os.close(self.fd)
+            raise
+
+    def write(self, event):
+        os.write(self.fd, event)
+
+    def read_requests(self):
+        """Pending requests of the guest's driver and hidraw users."""
+        requests = []
+        while True:
+            try:
+                event = os.read(self.fd, UHID_EVENT_SIZE)
+            except BlockingIOError:
+                return requests
+            if not event:
+                return requests
+            decoded = uhid_decode(event)
+            if decoded:
+                requests.append(decoded)
+
+    def close(self):
+        try:
+            os.write(self.fd, struct.pack("<I", UHID_DESTROY))
+        finally:
+            os.close(self.fd)
+
+
 # --- service ----------------------------------------------------------------------------------
+
+
+class HidPad:
+    def __init__(self, id, name, device):
+        self.id = id
+        self.name = name
+        self.device = device
+        # uhid request id -> UHID_GET_REPORT or UHID_SET_REPORT, awaiting the host's HID_REPLY.
+        self.requests = {}
 
 
 class Pad:
@@ -453,18 +642,21 @@ class Pad:
 
 
 class Agent:
-    def __init__(self, send, make_device=UinputPad, clock=time.monotonic):
+    def __init__(self, send, make_device=UinputPad, make_hid_device=UhidPad, clock=time.monotonic, raw_hid=True):
         self.send = send
         self.make_device = make_device
+        self.make_hid_device = make_hid_device
         self.clock = clock
+        self.raw_hid = raw_hid
         self.pads = {}
+        self.hid_pads = {}
         self.received = bytearray()
 
     def now_ms(self):
         return int(self.clock() * 1000)
 
     def start(self):
-        self.send(encode_hello())
+        self.send(encode_hello(FEATURE_RAW_HID if self.raw_hid else 0))
 
     def receive(self, data):
         self.received.extend(data)
@@ -484,6 +676,32 @@ class Agent:
                 return
             self.pads[message.id] = Pad(message.id, message.name, device)
             log(f"controller {message.id} ({message.name}) is now an Xbox 360 pad")
+        elif isinstance(message, HidAttach):
+            self.remove(message.id)
+            try:
+                device = self.make_hid_device(message)
+            except OSError as error:
+                log(f"cannot create a HID device for {message.name}: {error}")
+                return
+            self.hid_pads[message.id] = HidPad(message.id, message.name, device)
+            log(f"controller {message.id} ({message.name}, {message.vendor:04x}:{message.product:04x}) passed through as HID")
+        elif isinstance(message, HidInput):
+            pad = self.hid_pads.get(message.id)
+            if pad is not None:
+                try:
+                    pad.device.write(uhid_input2(message.report))
+                except OSError as error:
+                    log(f"cannot pass an input report to controller {message.id}: {error}")
+        elif isinstance(message, HidReply):
+            pad = self.hid_pads.get(message.id)
+            kind = pad.requests.pop(message.request, None) if pad else None
+            try:
+                if kind == UHID_GET_REPORT:
+                    pad.device.write(uhid_get_report_reply(message.request, message.errno, message.data))
+                elif kind == UHID_SET_REPORT:
+                    pad.device.write(uhid_set_report_reply(message.request, message.errno))
+            except OSError as error:
+                log(f"cannot answer a report request of controller {message.id}: {error}")
         elif isinstance(message, Detach):
             self.remove(message.id)
         elif isinstance(message, State):
@@ -495,6 +713,10 @@ class Agent:
                     log(f"cannot update controller {message.id}: {error}")
 
     def remove(self, id):
+        hid_pad = self.hid_pads.pop(id, None)
+        if hid_pad is not None:
+            hid_pad.device.close()
+            log(f"controller {id} ({hid_pad.name}) removed")
         pad = self.pads.pop(id, None)
         if pad is None:
             return
@@ -506,8 +728,22 @@ class Agent:
         log(f"controller {id} ({pad.name}) removed")
 
     def remove_all(self):
-        for id in list(self.pads):
+        for id in [*self.pads, *self.hid_pads]:
             self.remove(id)
+
+    def serve_hid_device(self, pad):
+        for kind, fields in pad.device.read_requests():
+            if kind == UHID_OUTPUT:
+                report_type, report = fields
+                self.send(encode_hid_output(pad.id, report_type, report))
+            elif kind == UHID_GET_REPORT:
+                request, report_type, report_id = fields
+                pad.requests[request] = kind
+                self.send(encode_hid_get(pad.id, request, report_type, report_id))
+            elif kind == UHID_SET_REPORT:
+                request, report_type, report = fields
+                pad.requests[request] = kind
+                self.send(encode_hid_set(pad.id, request, report_type, report))
 
     def serve_device(self, pad):
         now = self.now_ms()
@@ -559,13 +795,13 @@ def write_all(fd, data):
 def run():
     port = find_port()
     fd = os.open(port, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC)
-    agent = Agent(lambda data: write_all(fd, data))
+    agent = Agent(lambda data: write_all(fd, data), raw_hid=os.path.exists(UHID))
     log(f"using {port}")
     try:
         agent.start()
         while True:
             wait = agent.update_rumble()
-            devices = {pad.device.fd: pad for pad in agent.pads.values()}
+            devices = {pad.device.fd: pad for pad in [*agent.pads.values(), *agent.hid_pads.values()]}
             timeout = None if wait is None else max(wait, 0) / 1000
             readable, _, _ = select.select([fd, *devices], [], [], timeout)
             for ready in readable:
@@ -574,8 +810,12 @@ def run():
                     if not data:
                         raise ConnectionError("the host closed the port")
                     agent.receive(data)
-                elif ready in devices and agent.pads.get(devices[ready].id) is devices[ready]:
-                    agent.serve_device(devices[ready])
+                elif ready in devices:
+                    pad = devices[ready]
+                    if agent.pads.get(pad.id) is pad:
+                        agent.serve_device(pad)
+                    elif agent.hid_pads.get(pad.id) is pad:
+                        agent.serve_hid_device(pad)
     finally:
         agent.remove_all()
         os.close(fd)

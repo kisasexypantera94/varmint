@@ -54,6 +54,7 @@ fn run(emit: &(dyn Fn(Event) + Send + Sync), stop: &AtomicBool) {
         emit(Event::Connected {
             id: ID,
             name: "Varmint self-test".into(),
+            raw_hid: false,
         });
         for state in [pressed, State::default()].into_iter().cycle().take(20) {
             emit(Event::State { id: ID, state });

@@ -241,6 +241,40 @@
    "left_trigger": 0,
    "right_trigger": 0,
    "bytes": "1500040100000000400000000000000000000000000000"
+  },
+  {
+   "message": "hid_attach",
+   "id": 2,
+   "bus": 5,
+   "vendor": 1356,
+   "product": 3302,
+   "version": 256,
+   "country": 0,
+   "name": "DualSense Wireless Controller",
+   "descriptor": "05010905a101",
+   "bytes": "3700060200000005004c05e60c0001000000001d4475616c53656e736520576972656c65737320436f6e74726f6c6c6572060005010905a101"
+  },
+  {
+   "message": "hid_input",
+   "id": 2,
+   "report": "3101807f",
+   "bytes": "0b00070200000004003101807f"
+  },
+  {
+   "message": "hid_reply",
+   "id": 2,
+   "request": 7,
+   "errno": 0,
+   "data": "05aa",
+   "bytes": "0f000802000000070000000000020005aa"
+  },
+  {
+   "message": "hid_reply",
+   "id": 2,
+   "request": 8,
+   "errno": 5,
+   "data": "",
+   "bytes": "0d0008020000000800000005000000"
   }
  ],
  "guest_to_host": [
@@ -255,6 +289,35 @@
    "strong": 65535,
    "weak": 1,
    "bytes": "09000502000000ffff0100"
+  },
+  {
+   "message": "hello",
+   "version": 1,
+   "features": 1,
+   "bytes": "070001010001000000"
+  },
+  {
+   "message": "hid_output",
+   "id": 2,
+   "type": 1,
+   "report": "3102",
+   "bytes": "0a0009020000000102003102"
+  },
+  {
+   "message": "hid_get",
+   "id": 2,
+   "request": 7,
+   "type": 0,
+   "report_id": 5,
+   "bytes": "0b000a02000000070000000005"
+  },
+  {
+   "message": "hid_set",
+   "id": 2,
+   "request": 8,
+   "type": 0,
+   "report": "8001",
+   "bytes": "0e000b02000000080000000002008001"
   }
  ]
 }

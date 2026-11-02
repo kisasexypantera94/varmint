@@ -181,6 +181,12 @@ SUBSYSTEM=="virtio-ports", ATTR{name}=="clipboard", MODE="0660", TAG+="uaccess"
 EOF_UDEV
 cat > /etc/udev/rules.d/70-varmint-gamepad.rules <<'EOF_UDEV'
 SUBSYSTEM=="virtio-ports", ATTR{name}=="gamepad", TAG+="systemd", ENV{SYSTEMD_WANTS}+="varmint-gamepad.service"
+# Passed-through DualSense and DualSense Edge: Steam reads touchpad and motion through hidraw.
+SUBSYSTEM=="hidraw", KERNELS=="*:054C:0CE6.*", TAG+="uaccess"
+SUBSYSTEM=="hidraw", KERNELS=="*:054C:0DF2.*", TAG+="uaccess"
+# Steam Input presents controllers to games as virtual pads it creates through uinput, as
+# Steam's own steam-devices rules allow on other distributions.
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
 EOF_UDEV
 
 # Host keys are deliberately removed from the published image so cloned VMs do

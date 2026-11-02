@@ -12,13 +12,13 @@ use objc2::{
 use objc2_app_kit::{
     NSAlert, NSAlertFirstButtonReturn, NSAppearance, NSAppearanceNameDarkAqua, NSApplication,
     NSApplicationActivationOptions, NSApplicationActivationPolicy, NSApplicationDelegate, NSAutoresizingMaskOptions,
-    NSBackingStoreType, NSBox, NSBoxType, NSButton, NSColor, NSControl, NSControlSize, NSControlTextEditingDelegate,
-    NSEventModifierFlags, NSEventType, NSFont, NSFontAttributeName, NSForegroundColorAttributeName, NSGridCell,
-    NSGridCellPlacement, NSGridView, NSImage, NSLayoutAttribute, NSLineBreakMode, NSMenu, NSMenuItem,
-    NSMenuItemValidation, NSModalResponse, NSModalResponseOK, NSMutableParagraphStyle, NSOpenPanel,
-    NSParagraphStyleAttributeName, NSPopUpButton, NSRunningApplication, NSScrollView, NSSlider, NSStackView, NSText,
-    NSTextAlignment, NSTextField, NSTextFieldDelegate, NSTextView, NSTitlebarAccessoryViewController, NSView, NSWindow,
-    NSWindowDelegate, NSWindowStyleMask, NSWorkspace,
+    NSBackingStoreType, NSBox, NSBoxType, NSButton, NSColor, NSControl, NSControlSize, NSControlStateValueOn,
+    NSControlTextEditingDelegate, NSEventModifierFlags, NSEventType, NSFont, NSFontAttributeName,
+    NSForegroundColorAttributeName, NSGridCell, NSGridCellPlacement, NSGridView, NSImage, NSLayoutAttribute,
+    NSLineBreakMode, NSMenu, NSMenuItem, NSMenuItemValidation, NSModalResponse, NSModalResponseOK,
+    NSMutableParagraphStyle, NSOpenPanel, NSParagraphStyleAttributeName, NSPopUpButton, NSRunningApplication,
+    NSScrollView, NSSlider, NSStackView, NSText, NSTextAlignment, NSTextField, NSTextFieldDelegate, NSTextView,
+    NSTitlebarAccessoryViewController, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask, NSWorkspace,
 };
 use objc2_foundation::{
     MainThreadMarker, NSArray, NSAttributedString, NSBundle, NSDictionary, NSNotification, NSObject, NSObjectProtocol,
@@ -47,7 +47,7 @@ const SIDEBAR_WIDTH: f64 = 190.0;
 const SIDEBAR_ROW_HEIGHT: f64 = 38.0;
 const FOOTER_HEIGHT: f64 = 48.0;
 const FORM_ROW_HEIGHT: f64 = 30.0;
-const HINT_ROWS: [isize; 4] = [1, 4, 6, 8];
+const HINT_ROWS: [isize; 5] = [1, 4, 6, 8, 10];
 
 // Navy/indigo palette from the app icon.
 const WINDOW_COLOR: u32 = 0x232543;
@@ -88,6 +88,8 @@ struct LauncherControls {
     disk_field: Retained<NSTextField>,
     disk_auto: Retained<NSButton>,
     disk_hint: Retained<NSTextField>,
+    dualsense_passthrough: Retained<NSButton>,
+    controllers_hint: Retained<NSTextField>,
     launch: Retained<NSButton>,
 }
 
@@ -479,6 +481,12 @@ define_class!(
                 _ => NeptuneBackend::Dxmt,
             };
             self.edit_document(|document| document.set_neptune_backend(Some(backend)));
+        }
+
+        #[unsafe(method(dualSensePassthroughChanged:))]
+        fn dualsense_passthrough_changed(&self, sender: &NSButton) {
+            let passthrough = sender.state() == NSControlStateValueOn;
+            self.edit_document(|document| document.set_dualsense_passthrough(passthrough));
         }
 
         #[unsafe(method(useAutoGraphics:))]
@@ -881,8 +889,23 @@ impl LauncherDelegate {
         let disk_auto = auto_button(self, sel!(useAutoDisk:), mtm);
         let disk_hint = hint_label("", NSRect::ZERO, mtm);
 
+        let dualsense_passthrough = unsafe {
+            NSButton::checkboxWithTitle_target_action(
+                ns_string!("DualSense passthrough"),
+                Some(self),
+                Some(sel!(dualSensePassthroughChanged:)),
+                mtm,
+            )
+        };
+        dualsense_passthrough.setToolTip(Some(ns_string!(
+            "Off: a DualSense appears in the VM as an Xbox controller. On: it appears as itself, \
+             with touchpad, motion sensors, light bar and adaptive triggers. Other controllers \
+             appear as Xbox controllers either way."
+        )));
+        let controllers_hint = hint_label("", NSRect::ZERO, mtm);
+
         let empty = || NSGridCell::emptyContentView(mtm);
-        let rows: [[Retained<NSView>; 4]; 9] = [
+        let rows: [[Retained<NSView>; 4]; 11] = [
             [
                 form_label("DirectX:", mtm),
                 into_view(&graphics),
@@ -912,6 +935,13 @@ impl LauncherDelegate {
                 into_view(&disk_auto),
             ],
             [empty(), into_view(&disk_hint), empty(), empty()],
+            [
+                form_label("Controllers:", mtm),
+                into_view(&dualsense_passthrough),
+                empty(),
+                empty(),
+            ],
+            [empty(), into_view(&controllers_hint), empty(), empty()],
         ];
         let rows = rows
             .iter()
@@ -931,15 +961,15 @@ impl LauncherDelegate {
             column.setWidth(width);
             column.setXPlacement(placement);
         }
-        for index in [0, 3, 5, 7] {
+        for index in [0, 3, 5, 7, 9] {
             grid.rowAtIndex(index).setHeight(FORM_ROW_HEIGHT);
         }
-        for index in [0, 7] {
+        for index in [0, 7, 9] {
             grid.rowAtIndex(index).mergeCellsInRange(NSRange::new(1, 2));
             grid.cellAtColumnIndex_rowIndex(1, index)
                 .setXPlacement(NSGridCellPlacement::Leading);
         }
-        for index in [1, 2, 4, 6, 8] {
+        for index in [1, 2, 4, 6, 8, 10] {
             grid.rowAtIndex(index).mergeCellsInRange(NSRange::new(1, 3));
         }
         for index in HINT_ROWS {
@@ -968,6 +998,8 @@ impl LauncherDelegate {
             disk_field,
             disk_auto,
             disk_hint,
+            dualsense_passthrough,
+            controllers_hint,
             launch,
         });
 
@@ -1257,6 +1289,7 @@ impl LauncherDelegate {
             controls.cpu_slider.as_ref(),
             controls.cpu_field.as_ref(),
             controls.disk_field.as_ref(),
+            controls.dualsense_passthrough.as_ref(),
             controls.launch.as_ref(),
         ] {
             control.setEnabled(idle);
@@ -1342,11 +1375,19 @@ impl LauncherDelegate {
             Some((format_disk_hint(configured_disk, current_disk), false)),
         );
 
+        let passthrough = state.document.dualsense_passthrough();
+        controls.dualsense_passthrough.setState(passthrough.into());
+        set_hint(
+            &controls.controllers_hint,
+            passthrough.then(|| ("Needs Input Monitoring access.".to_owned(), false)),
+        );
+
         for (row, hint) in HINT_ROWS.into_iter().zip([
             &controls.graphics_hint,
             &controls.memory_hint,
             &controls.cpu_hint,
             &controls.disk_hint,
+            &controls.controllers_hint,
         ]) {
             controls
                 .grid

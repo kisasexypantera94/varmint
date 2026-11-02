@@ -250,7 +250,7 @@ pub fn run(config_path: &Path) -> Result<()> {
     });
 
     let gamepad_tx = runtime_event_tx.clone();
-    let gamepads = gamepad::start(move |event| {
+    let gamepads = gamepad::start(config.dualsense_passthrough, move |event| {
         let _ = gamepad_tx.send(RuntimeEvent::Gamepad(event));
     });
 

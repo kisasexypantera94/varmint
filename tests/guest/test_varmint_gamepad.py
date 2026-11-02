@@ -78,7 +78,7 @@ def make_agent():
         devices[id] = device
         return device
 
-    agent = gp.Agent(sent.append, make_device, clock)
+    agent = gp.Agent(sent.append, make_device=make_device, clock=clock)
     return agent, log, sent, devices, clock
 
 
@@ -197,6 +197,20 @@ class SharedVectors(unittest.TestCase):
                 if kind == "hello":
                     self.assertIsInstance(message, gp.Hello)
                     self.assertEqual(message.version, vector["version"])
+                elif kind == "hid_attach":
+                    self.assertIsInstance(message, gp.HidAttach)
+                    for field in ("id", "bus", "vendor", "product", "version", "country", "name"):
+                        self.assertEqual(getattr(message, field), vector[field], field)
+                    self.assertEqual(message.descriptor.hex(), vector["descriptor"])
+                elif kind == "hid_input":
+                    self.assertIsInstance(message, gp.HidInput)
+                    self.assertEqual((message.id, message.report.hex()), (vector["id"], vector["report"]))
+                elif kind == "hid_reply":
+                    self.assertIsInstance(message, gp.HidReply)
+                    self.assertEqual(
+                        (message.id, message.request, message.errno, message.data.hex()),
+                        (vector["id"], vector["request"], vector["errno"], vector["data"]),
+                    )
                 elif kind == "attach":
                     self.assertIsInstance(message, gp.Attach)
                     self.assertEqual((message.id, message.name), (vector["id"], vector["name"]))
@@ -214,11 +228,22 @@ class SharedVectors(unittest.TestCase):
     def test_guest_messages_encode(self):
         for vector in VECTORS["guest_to_host"]:
             with self.subTest(vector=vector):
-                if vector["message"] == "hello":
+                kind = vector["message"]
+                if kind == "hello" and "features" not in vector:
+                    continue  # an older guest's HELLO, which only the host has to accept
+                if kind == "hello":
                     self.assertEqual(vector["version"], gp.PROTOCOL_VERSION)
-                    encoded = gp.encode_hello()
-                else:
+                    encoded = gp.encode_hello(vector["features"])
+                elif kind == "rumble":
                     encoded = gp.encode_rumble(vector["id"], vector["strong"], vector["weak"])
+                elif kind == "hid_output":
+                    encoded = gp.encode_hid_output(vector["id"], vector["type"], bytes.fromhex(vector["report"]))
+                elif kind == "hid_get":
+                    encoded = gp.encode_hid_get(vector["id"], vector["request"], vector["type"], vector["report_id"])
+                else:
+                    encoded = gp.encode_hid_set(
+                        vector["id"], vector["request"], vector["type"], bytes.fromhex(vector["report"])
+                    )
                 self.assertEqual(encoded.hex(), vector["bytes"])
 
 
@@ -260,7 +285,7 @@ class Protocol(unittest.TestCase):
             gp.take_messages(bytearray(struct.pack("<H", gp.MAX_MESSAGE_LEN + 1)))
 
     def test_encodes_guest_messages(self):
-        self.assertEqual(gp.encode_hello(), b"\x03\x00\x01\x01\x00")
+        self.assertEqual(gp.encode_hello(0), b"\x07\x00\x01\x01\x00\x00\x00\x00\x00")
         self.assertEqual(gp.encode_rumble(2, 0xFFFF, 1), b"\x09\x00\x05\x02\x00\x00\x00\xff\xff\x01\x00")
 
 
@@ -296,7 +321,12 @@ class Lifecycle(unittest.TestCase):
     def test_says_hello_first(self):
         agent, _, sent, _, _ = make_agent()
         agent.start()
-        self.assertEqual(sent, [gp.encode_hello()])
+        self.assertEqual(sent, [gp.encode_hello(gp.FEATURE_RAW_HID)])
+
+    def test_hello_offers_raw_hid_only_with_uhid(self):
+        sent = []
+        gp.Agent(sent.append, raw_hid=False).start()
+        self.assertEqual(sent, [gp.encode_hello(0)])
 
     def test_attach_state_detach(self):
         agent, log, _, devices, _ = make_agent()
@@ -364,7 +394,7 @@ class Lifecycle(unittest.TestCase):
         def fail(_):
             raise PermissionError("denied")
 
-        agent = gp.Agent(sent.append, fail, Clock())
+        agent = gp.Agent(sent.append, make_device=fail, clock=Clock())
         agent.receive(attach(1) + state(1, gp.SOUTH))
         self.assertEqual(agent.pads, {})
 
@@ -510,3 +540,158 @@ class ForceFeedbackPath(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def hid_attach(id, descriptor=b"\x05\x01\x09\x05"):
+    name = b"DualSense Wireless Controller"
+    payload = struct.pack("<IHHHHIB", id, 5, 0x054C, 0x0CE6, 0x0100, 0, len(name)) + name
+    return gp.encode(gp.MSG_HID_ATTACH, payload + struct.pack("<H", len(descriptor)) + descriptor)
+
+
+def hid_input(id, report):
+    return gp.encode(gp.MSG_HID_INPUT, struct.pack("<IH", id, len(report)) + report)
+
+
+def hid_reply(id, request, error, data=b""):
+    return gp.encode(gp.MSG_HID_REPLY, struct.pack("<IIHH", id, request, error, len(data)) + data)
+
+
+class FakeUhid:
+    def __init__(self, attach, log):
+        self.attach = attach
+        self.log = log
+        self.fd = -2
+        self.requests = []
+        self.closed = False
+        log.append(("create", attach.id, attach.name, attach.descriptor))
+
+    def write(self, event):
+        self.log.append(("write", event))
+
+    def read_requests(self):
+        requests, self.requests = self.requests, []
+        return requests
+
+    def close(self):
+        self.closed = True
+        self.log.append(("close", self.attach.id))
+
+
+def make_hid_agent():
+    log, sent, devices = [], [], {}
+
+    def make_hid_device(attach):
+        devices[attach.id] = FakeUhid(attach, log)
+        return devices[attach.id]
+
+    agent = gp.Agent(sent.append, make_hid_device=make_hid_device, clock=Clock())
+    return agent, log, sent, devices
+
+
+class Uhid(unittest.TestCase):
+    def test_create2_puts_fields_at_the_kernel_offsets(self):
+        attach = gp.take_messages(bytearray(hid_attach(2)))[0]
+        event = gp.uhid_create2(attach, "varmint-gamepad/2")
+        self.assertEqual(len(event), gp.UHID_EVENT_SIZE)
+        self.assertEqual(struct.unpack_from("<I", event)[0], gp.UHID_CREATE2)
+        self.assertEqual(event[4:33], b"DualSense Wireless Controller")
+        self.assertEqual(event[33], 0)
+        self.assertEqual(event[132:149], b"varmint-gamepad/2")
+        self.assertEqual(event[196:260], bytes(64), "uniq stays empty")
+        self.assertEqual(struct.unpack_from("<HHIIII", event, 260), (4, 5, 0x054C, 0x0CE6, 0x0100, 0))
+        self.assertEqual(event[280:284], b"\x05\x01\x09\x05")
+
+    def test_long_names_keep_their_terminator(self):
+        attach = gp.HidAttach(1, 3, 1, 2, 0, 0, "n" * 200, b"\x00")
+        event = gp.uhid_create2(attach, "p" * 100)
+        self.assertEqual(event[4 + 127], 0)
+        self.assertEqual(event[132 + 63], 0)
+
+    def test_input_and_replies(self):
+        self.assertEqual(gp.uhid_input2(b"\x31\x80"), struct.pack("<IH", gp.UHID_INPUT2, 2) + b"\x31\x80")
+        self.assertEqual(
+            gp.uhid_get_report_reply(3, 0, b"\x09\x01"),
+            struct.pack("<IIHH", gp.UHID_GET_REPORT_REPLY, 3, 0, 2) + b"\x09\x01",
+        )
+        self.assertEqual(gp.uhid_set_report_reply(4, 5), struct.pack("<IIH", gp.UHID_SET_REPORT_REPLY, 4, 5))
+
+    def test_decodes_output_and_report_requests(self):
+        event = bytearray(gp.UHID_EVENT_SIZE)
+        struct.pack_into("<I", event, 0, gp.UHID_OUTPUT)
+        event[4:7] = b"\x31\x02\xff"
+        struct.pack_into("<HB", event, 4 + gp.UHID_DATA_MAX, 3, 1)
+        self.assertEqual(gp.uhid_decode(bytes(event)), (gp.UHID_OUTPUT, (1, b"\x31\x02\xff")))
+
+        event = bytearray(gp.UHID_EVENT_SIZE)
+        struct.pack_into("<IIBB", event, 0, gp.UHID_GET_REPORT, 7, 0x05, 0)
+        self.assertEqual(gp.uhid_decode(bytes(event)), (gp.UHID_GET_REPORT, (7, 0, 0x05)))
+
+        event = bytearray(gp.UHID_EVENT_SIZE)
+        struct.pack_into("<IIBBH", event, 0, gp.UHID_SET_REPORT, 9, 0x80, 0, 2)
+        event[12:14] = b"\x80\x01"
+        self.assertEqual(gp.uhid_decode(bytes(event)), (gp.UHID_SET_REPORT, (9, 0, b"\x80\x01")))
+
+    def test_ignores_short_reads_and_other_events(self):
+        self.assertIsNone(gp.uhid_decode(b"\x00" * 8))
+        event = bytearray(gp.UHID_EVENT_SIZE)
+        struct.pack_into("<I", event, 0, gp.UHID_START)
+        self.assertIsNone(gp.uhid_decode(bytes(event)))
+
+
+class HidLifecycle(unittest.TestCase):
+    def test_attach_input_detach(self):
+        agent, log, _, devices = make_hid_agent()
+        agent.receive(hid_attach(2) + hid_input(2, b"\x31\x01") + hid_input(2, b"\x31\x02"))
+        self.assertEqual(log[0], ("create", 2, "DualSense Wireless Controller", b"\x05\x01\x09\x05"))
+        self.assertEqual(log[1:], [("write", gp.uhid_input2(b"\x31\x02"))], "the newest report wins")
+        agent.receive(gp.encode(gp.MSG_DETACH, struct.pack("<I", 2)))
+        self.assertTrue(devices[2].closed)
+        self.assertEqual(agent.hid_pads, {})
+
+    def test_requests_go_to_the_host_and_replies_back_to_the_driver(self):
+        agent, log, sent, devices = make_hid_agent()
+        agent.receive(hid_attach(2))
+        devices[2].requests = [
+            (gp.UHID_GET_REPORT, (7, 0, 0x05)),
+            (gp.UHID_SET_REPORT, (8, 0, b"\x80\x01")),
+            (gp.UHID_OUTPUT, (1, b"\x31\x02")),
+        ]
+        agent.serve_hid_device(agent.hid_pads[2])
+        self.assertEqual(
+            sent,
+            [
+                gp.encode_hid_get(2, 7, 0, 0x05),
+                gp.encode_hid_set(2, 8, 0, b"\x80\x01"),
+                gp.encode_hid_output(2, 1, b"\x31\x02"),
+            ],
+        )
+        agent.receive(hid_reply(2, 7, 0, b"\x05\xaa") + hid_reply(2, 8, 5) + hid_reply(2, 99, 0))
+        self.assertEqual(
+            log[1:],
+            [("write", gp.uhid_get_report_reply(7, 0, b"\x05\xaa")), ("write", gp.uhid_set_report_reply(8, 5))],
+            "a reply nobody waits for is dropped",
+        )
+
+    def test_reattach_replaces_and_remove_all_closes(self):
+        agent, _, _, devices = make_hid_agent()
+        agent.receive(hid_attach(2))
+        first = devices[2]
+        agent.receive(hid_attach(2))
+        self.assertTrue(first.closed)
+        agent.remove_all()
+        self.assertTrue(devices[2].closed)
+
+    def test_input_for_unknown_devices_is_ignored(self):
+        agent, log, _, _ = make_hid_agent()
+        agent.receive(hid_input(5, b"\x31"))
+        self.assertEqual(log, [])
+
+    def test_coalescing_keeps_order_across_kinds(self):
+        messages = gp.take_messages(
+            bytearray(hid_input(2, b"\x01") + hid_reply(2, 1, 0) + hid_input(2, b"\x02") + hid_input(2, b"\x03"))
+        )
+        kept = gp.coalesce(messages)
+        self.assertEqual(
+            [(type(m).__name__, getattr(m, "report", b"").hex()) for m in kept],
+            [("HidInput", "01"), ("HidReply", ""), ("HidInput", "03")],
+        )

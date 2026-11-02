@@ -8,7 +8,7 @@
 use block2::RcBlock;
 use dispatch2::{DispatchQueue, DispatchRetained};
 use objc2::{
-    AnyThread, msg_send,
+    AnyThread, ClassType, msg_send,
     rc::Retained,
     runtime::{AnyObject, ProtocolObject},
 };
@@ -21,20 +21,21 @@ use objc2_core_haptics::{
 use objc2_foundation::{NSArray, NSError, NSNotification, NSNotificationCenter, NSObjectProtocol};
 use objc2_game_controller::{
     GCController, GCControllerDidConnectNotification, GCControllerDidDisconnectNotification, GCControllerElement,
-    GCDevice, GCExtendedGamepad, GCHapticDurationInfinite, GCHapticsLocalityDefault, GCHapticsLocalityLeftHandle,
-    GCHapticsLocalityRightHandle, GCSystemGestureState,
+    GCDevice, GCDualSenseGamepad, GCExtendedGamepad, GCHapticDurationInfinite, GCHapticsLocalityDefault,
+    GCHapticsLocalityLeftHandle, GCHapticsLocalityRightHandle, GCSystemGestureState,
 };
 use std::{
     cell::Cell,
     ptr::NonNull,
     sync::{
         Arc, Mutex, Weak,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
         mpsc,
     },
     time::{Duration, Instant},
 };
 
+mod hid;
 mod self_test;
 
 /// Button bits of `State::buttons`, by position (GameController's A is the bottom face button on
@@ -70,11 +71,33 @@ pub struct State {
     pub right_trigger: u16,
 }
 
+/// A controller passed through as a raw HID device: what Linux's uhid device is created with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HidIdentity {
+    /// Linux bus type (BUS_USB, BUS_BLUETOOTH).
+    pub bus: u16,
+    pub vendor: u16,
+    pub product: u16,
+    pub version: u16,
+    pub country: u32,
+    pub name: String,
+    pub descriptor: Vec<u8>,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum HidReportType {
+    Feature,
+    Output,
+    Input,
+}
+
+/// Controller ids are never reused within a VMM run, across GameController and HID controllers.
 pub enum Event {
-    /// `id` is never reused within a VMM run.
     Connected {
         id: u32,
         name: String,
+        /// The HID passthrough provides this controller too (a DualSense).
+        raw_hid: bool,
     },
     State {
         id: u32,
@@ -83,16 +106,52 @@ pub enum Event {
     Disconnected {
         id: u32,
     },
+    HidConnected {
+        id: u32,
+        identity: HidIdentity,
+    },
+    /// One input report, report ID first.
+    HidInput {
+        id: u32,
+        report: Vec<u8>,
+    },
+    /// The answer to a `Sink::hid_get_report` or `Sink::hid_set_report`: report data (empty for
+    /// SET_REPORT) or an errno.
+    HidReply {
+        id: u32,
+        request: u32,
+        result: Result<Vec<u8>, u16>,
+    },
 }
 
-/// Rumble requests for the controllers, from the guest.
+/// The guest's requests for the controllers: rumble, and reports for raw HID controllers.
 pub struct Sink {
     send: Box<dyn Fn(Feedback) + Send>,
 }
 
 enum Feedback {
-    Rumble { id: u32, strong: u16, weak: u16 },
+    Rumble {
+        id: u32,
+        strong: u16,
+        weak: u16,
+    },
     StopAll,
+    HidOutput {
+        id: u32,
+        data: Vec<u8>,
+    },
+    HidGetReport {
+        id: u32,
+        request: u32,
+        report_type: HidReportType,
+        report_id: u8,
+    },
+    HidSetReport {
+        id: u32,
+        request: u32,
+        report_type: HidReportType,
+        data: Vec<u8>,
+    },
 }
 
 impl Sink {
@@ -105,6 +164,29 @@ impl Sink {
         (self.send)(Feedback::StopAll);
     }
 
+    /// An output report (report ID first) for a HID controller.
+    pub fn hid_output(&self, id: u32, data: Vec<u8>) {
+        (self.send)(Feedback::HidOutput { id, data });
+    }
+
+    pub fn hid_get_report(&self, id: u32, request: u32, report_type: HidReportType, report_id: u8) {
+        (self.send)(Feedback::HidGetReport {
+            id,
+            request,
+            report_type,
+            report_id,
+        });
+    }
+
+    pub fn hid_set_report(&self, id: u32, request: u32, report_type: HidReportType, data: Vec<u8>) {
+        (self.send)(Feedback::HidSetReport {
+            id,
+            request,
+            report_type,
+            data,
+        });
+    }
+
     #[cfg(test)]
     pub fn recording() -> (Sink, Arc<Mutex<Vec<String>>>) {
         let log = Arc::new(Mutex::new(Vec::new()));
@@ -114,6 +196,19 @@ impl Sink {
                 record.lock().unwrap().push(match feedback {
                     Feedback::Rumble { id, strong, weak } => format!("rumble {id} {strong} {weak}"),
                     Feedback::StopAll => "stop".to_string(),
+                    Feedback::HidOutput { id, data } => format!("hid-output {id} {data:02x?}"),
+                    Feedback::HidGetReport {
+                        id,
+                        request,
+                        report_type,
+                        report_id,
+                    } => format!("hid-get {id} {request} {report_type:?} {report_id:#04x}"),
+                    Feedback::HidSetReport {
+                        id,
+                        request,
+                        report_type,
+                        data,
+                    } => format!("hid-set {id} {request} {report_type:?} {data:02x?}"),
                 })
             }),
         };
@@ -133,11 +228,16 @@ pub struct Gamepads {
     _bridge: Arc<Mutex<Bridge>>,
     _haptics: Arc<Mutex<Haptics>>,
     observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
+    hid: Option<hid::Passthrough>,
     self_test: Option<self_test::SelfTest>,
 }
 
-pub fn start(emit: impl Fn(Event) + Send + Sync + 'static) -> Gamepads {
+pub fn start(dualsense_passthrough: bool, emit: impl Fn(Event) + Send + Sync + 'static) -> Gamepads {
     let emit: Arc<dyn Fn(Event) + Send + Sync> = Arc::new(emit);
+    let next_id = Arc::new(AtomicU32::new(1));
+    let hid = dualsense_passthrough
+        .then(|| hid::Passthrough::start(emit.clone(), next_id.clone()))
+        .flatten();
     let input_queue = DispatchQueue::new("varmint-gamepad", None);
     let haptics_queue = DispatchQueue::new("varmint-gamepad-haptics", None);
 
@@ -159,7 +259,8 @@ pub fn start(emit: impl Fn(Event) + Send + Sync + 'static) -> Gamepads {
         emit: emit.clone(),
         haptics: haptics.clone(),
         pads: Vec::new(),
-        next_id: 1,
+        next_id,
+        raw_hid: hid.is_some(),
     }));
     let input = OnQueue {
         queue: input_queue,
@@ -188,6 +289,7 @@ pub fn start(emit: impl Fn(Event) + Send + Sync + 'static) -> Gamepads {
         _bridge: bridge_state,
         _haptics: haptics_state,
         observers,
+        hid,
         self_test: std::env::var_os("VARMINT_GAMEPAD_SELFTEST").map(|_| self_test::SelfTest::start(emit)),
     }
 }
@@ -195,6 +297,7 @@ pub fn start(emit: impl Fn(Event) + Send + Sync + 'static) -> Gamepads {
 impl Gamepads {
     pub fn sink(&self) -> Sink {
         let haptics = self.haptics.clone();
+        let hid = self.hid.as_ref().map(hid::Passthrough::requests);
         let self_test = self.self_test.is_some();
         Sink {
             send: Box::new(move |feedback| match feedback {
@@ -203,6 +306,11 @@ impl Gamepads {
                 }
                 Feedback::Rumble { id, strong, weak } => haptics.run(move |h| h.set(id, Some((strong, weak)))),
                 Feedback::StopAll => haptics.run(Haptics::stop_all),
+                hid_request => {
+                    if let Some(hid) = &hid {
+                        hid.handle(hid_request);
+                    }
+                }
             }),
         }
     }
@@ -216,6 +324,9 @@ impl Gamepads {
         }
         if let Some(self_test) = &self.self_test {
             self_test.stop();
+        }
+        if let Some(hid) = &self.hid {
+            hid.shutdown();
         }
 
         let (done_tx, done_rx) = mpsc::channel();
@@ -258,7 +369,6 @@ impl<T: Send + 'static> OnQueue<T> {
     }
 }
 
-/// A GameController object handed from the input queue to the haptics queue.
 struct Handoff(Retained<GCController>);
 
 // SAFETY: GameController objects may be messaged from any queue; each queue keeps to its own
@@ -271,7 +381,9 @@ struct Bridge {
     emit: Arc<dyn Fn(Event) + Send + Sync>,
     haptics: OnQueue<Haptics>,
     pads: Vec<Pad>,
-    next_id: u32,
+    next_id: Arc<AtomicU32>,
+    /// The HID passthrough runs and provides DualSense controllers too.
+    raw_hid: bool,
 }
 
 // SAFETY: the GameController objects a Bridge holds are only used on the input queue.
@@ -322,8 +434,8 @@ impl Bridge {
             return;
         };
 
-        let id = self.next_id;
-        self.next_id += 1;
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let raw_hid = self.raw_hid && gamepad.isKindOfClass(GCDualSenseGamepad::class());
 
         unsafe { controller.setHandlerQueue(&self.queue) };
         // Keep Home, Options and Menu for the guest (Steam button, View, Start) instead of macOS.
@@ -356,7 +468,11 @@ impl Bridge {
         };
         eprintln!("gamepad: {name} connected as controller {id}{haptics}");
 
-        (self.emit)(Event::Connected { id, name: name.clone() });
+        (self.emit)(Event::Connected {
+            id,
+            name: name.clone(),
+            raw_hid,
+        });
         (self.emit)(Event::State { id, state: initial });
 
         let handoff = Handoff(controller.clone());

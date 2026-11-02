@@ -9,6 +9,7 @@ const MEMORY_MIB: &str = "memory_mib";
 const VCPUS: &str = "vcpus";
 const DATA_DISK_CAPACITY_GIB: &str = "data_disk_capacity_gib";
 const NEPTUNE_BACKEND: &str = "neptune_backend";
+const DUALSENSE_PASSTHROUGH: &str = "dualsense_passthrough";
 const STORAGE_DIR: &str = "storage_dir";
 const HOST_ENVIRONMENT: &str = "host_environment";
 
@@ -77,6 +78,21 @@ impl VmConfigDocument {
             NeptuneBackend::D3dmetal => "d3dmetal",
         });
         self.set_value(NEPTUNE_BACKEND, backend.map(value));
+    }
+
+    pub fn dualsense_passthrough(&self) -> bool {
+        self.document
+            .get(DUALSENSE_PASSTHROUGH)
+            .and_then(Item::as_bool)
+            .unwrap_or(false)
+    }
+
+    /// Off is the default, so it is stored by removing the key.
+    pub fn set_dualsense_passthrough(&mut self, enabled: bool) {
+        if enabled == self.dualsense_passthrough() {
+            return;
+        }
+        self.set_value(DUALSENSE_PASSTHROUGH, enabled.then(|| value(true)));
     }
 
     pub fn storage_dir(&self) -> Option<PathBuf> {
@@ -351,6 +367,27 @@ WINEDEBUG = "-all"
             saved,
             SOURCE.replacen("data_disk_capacity_gib = 160", "data_disk_capacity_gib = 256", 1)
         );
+    }
+
+    #[test]
+    fn dualsense_passthrough_is_off_unless_stored() {
+        let source = "format_version = 2\n";
+        let mut document = VmConfigDocument::parse(source).unwrap();
+        assert!(!document.dualsense_passthrough());
+
+        document.set_dualsense_passthrough(true);
+        assert_eq!(
+            document.to_string(),
+            "format_version = 2\ndualsense_passthrough = true\n"
+        );
+        assert!(
+            VmConfigDocument::parse(&document.to_string())
+                .unwrap()
+                .dualsense_passthrough()
+        );
+
+        document.set_dualsense_passthrough(false);
+        assert_eq!(document.to_string(), source);
     }
 
     #[test]

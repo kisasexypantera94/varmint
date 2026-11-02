@@ -24,7 +24,9 @@ It supports two graphics backends: Venus for Vulkan and Neptune for DirectX.
 5. Open Steam, wait for it to finish setting up, then sign in and install a game.
 
 ## Controllers
-Game controllers that macOS supports as gamepads (GameController.framework) appear in the VM automatically, including ones connected while it runs. Each shows up as an Xbox 360 controller with analog triggers, which Steam, SDL and Proton games handle without configuration; games' rumble plays on controllers that expose haptics to macOS. Gyro, touchpad, adaptive triggers and the light bar are not passed through.
+Game controllers that macOS supports as gamepads (GameController.framework) appear in the VM automatically, including ones connected while it runs. Each shows up as an Xbox 360 controller with analog triggers, which Steam, SDL and Proton games handle without configuration; games' rumble plays on controllers that expose haptics to macOS.
+
+With **DualSense passthrough** checked in a VM's settings, a DualSense or DualSense Edge is passed through as itself instead: Linux's own driver and Steam get its touchpad, motion sensors, light bar, rumble and adaptive triggers. This needs Input Monitoring access for Varmint (System Settings → Privacy & Security); without it, the DualSense appears as an Xbox 360 controller like the others.
 
 ## Games
 

@@ -67,6 +67,8 @@ pub struct VmConfig {
     pub initrd: Option<PathBuf>,
     pub kernel_args: String,
     pub neptune_backend: NeptuneBackend,
+    /// Pass a DualSense through as itself instead of as an Xbox 360 controller.
+    pub dualsense_passthrough: bool,
     pub host_environment: BTreeMap<String, String>,
 }
 
@@ -111,6 +113,8 @@ struct VmConfigFile {
     kernel_args: Option<Vec<String>>,
     #[serde(default)]
     neptune_backend: NeptuneBackend,
+    #[serde(default)]
+    dualsense_passthrough: bool,
     #[serde(default)]
     host_environment: BTreeMap<String, String>,
 }
@@ -204,6 +208,7 @@ impl VmConfig {
             initrd,
             kernel_args,
             neptune_backend: config.neptune_backend,
+            dualsense_passthrough: config.dualsense_passthrough,
             host_environment: config.host_environment,
         }
     }
