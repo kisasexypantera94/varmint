@@ -2018,11 +2018,7 @@ fn graphics_hint(backend: NeptuneBackend, document: &VmConfigDocument) -> (Strin
             Some(version) => (format!("D3DMetal {version} · Chosen in Advanced."), false, false),
             None => ("D3DMetal wasn't found where it was chosen.".to_owned(), true, true),
         },
-        None => (
-            "D3DMetal isn't included in this build of Varmint.".to_owned(),
-            true,
-            true,
-        ),
+        None => ("D3DMetal isn't included in this build.".to_owned(), true, true),
     }
 }
 
