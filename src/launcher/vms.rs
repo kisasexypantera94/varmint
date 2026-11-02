@@ -9,7 +9,7 @@ use std::{
     ffi::CString,
     fs::{self, File, OpenOptions},
     io::Write,
-    os::unix::ffi::OsStrExt,
+    os::unix::{ffi::OsStrExt, fs::MetadataExt},
     path::{Path, PathBuf},
 };
 
@@ -135,6 +135,9 @@ pub fn unused_vm_name(directory: &Path) -> String {
 fn create_vm_config_in(name: &str, directory: &Path) -> Result<PathBuf, String> {
     let name = validate_vm_name(name)?;
     fs::create_dir_all(directory).map_err(|error| error.to_string())?;
+    if directory.join(name).exists() {
+        return Err(format!("A storage directory named “{name}” already exists."));
+    }
     let path = directory.join(format!("{name}.varmint"));
     write_new_config(&path, b"format_version = 2\n", name)?;
     Ok(path)
@@ -185,22 +188,20 @@ pub fn rename_vm_files(path: &Path, document: &VmConfigDocument, name: &str) -> 
     if new_path == path {
         return Ok(new_path);
     }
-    if new_path.exists() {
+    if new_path.exists() && !same_file(path, &new_path) {
         return Err(format!("A virtual machine named “{name}” already exists."));
     }
 
     let storage_move = if document.storage_dir().is_none() {
         let old_storage = implicit_storage_dir(path);
         let new_storage = parent.join(name);
+        if new_storage.exists() && !same_file(&old_storage, &new_storage) {
+            return Err(format!("A storage directory named “{name}” already exists."));
+        }
         old_storage.exists().then_some((old_storage, new_storage))
     } else {
         None
     };
-    if let Some((_, new_storage)) = &storage_move
-        && new_storage.exists()
-    {
-        return Err(format!("A storage directory named “{name}” already exists."));
-    }
 
     let _lock = match &storage_move {
         Some((old_storage, _)) => lock_storage(old_storage)?,
@@ -216,6 +217,16 @@ pub fn rename_vm_files(path: &Path, document: &VmConfigDocument, name: &str) -> 
         return Err(error.to_string());
     }
     Ok(new_path)
+}
+
+fn same_file(left: &Path, right: &Path) -> bool {
+    let Ok(left) = fs::metadata(left) else {
+        return false;
+    };
+    let Ok(right) = fs::metadata(right) else {
+        return false;
+    };
+    left.dev() == right.dev() && left.ino() == right.ino()
 }
 
 /// Copies the config byte for byte and clones its disks with APFS copy-on-write, so the
@@ -335,6 +346,13 @@ mod tests {
                 .contains("already exists")
         );
         assert!(create_vm_config_in("bad/name", &directory).is_err());
+        fs::create_dir(directory.join("Old VM")).unwrap();
+        assert!(
+            create_vm_config_in("Old VM", &directory)
+                .unwrap_err()
+                .contains("storage directory")
+        );
+        assert!(!directory.join("Old VM.varmint").exists());
         fs::remove_dir_all(directory).unwrap();
     }
 
@@ -358,6 +376,33 @@ mod tests {
         let document = VmConfigDocument::open(&explicit).unwrap();
         rename_vm_files(&explicit, &document, "External").unwrap();
         assert!(directory.join("shared").is_dir());
+
+        let fresh = create_vm_config_in("Fresh", &directory).unwrap();
+        fs::create_dir(directory.join("Old Storage")).unwrap();
+        let document = VmConfigDocument::open(&fresh).unwrap();
+        assert!(rename_vm_files(&fresh, &document, "Old Storage").is_err());
+        assert!(fresh.exists());
+
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn rename_can_only_change_letter_case() {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let directory = std::env::temp_dir().join(format!("varmint-case-rename-test-{}-{unique}", std::process::id()));
+
+        let original = create_vm_config_in("Case Name", &directory).unwrap();
+        fs::create_dir(directory.join("Case Name")).unwrap();
+        let document = VmConfigDocument::open(&original).unwrap();
+        let renamed = rename_vm_files(&original, &document, "case name").unwrap();
+
+        assert_eq!(renamed, directory.join("case name.varmint"));
+        let names = fs::read_dir(&directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        assert!(names.iter().any(|name| name == "case name.varmint"));
+        assert!(names.iter().any(|name| name == "case name"));
 
         fs::remove_dir_all(directory).unwrap();
     }
