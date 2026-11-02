@@ -51,6 +51,34 @@ sync_repo() {
     git -C "$repo" cat-file -e "$commit^{commit}" 2>/dev/null ||
         git -C "$repo" fetch origin "$commit"
 
+    apply_stack() {
+        tree="$1"
+        if [ -n "$generated_patch" ]; then
+            git -C "$tree" apply --index --check "$generated_patch"
+            git -C "$tree" apply --index "$generated_patch"
+        fi
+
+        while IFS= read -r patch; do
+            [ -n "$patch" ] || continue
+            git -C "$tree" apply --index --check "$patches/$patch"
+            git -C "$tree" apply --index "$patches/$patch"
+        done < "$patches/series"
+    }
+
+    tmp="$(mktemp -d "/tmp/${name}.XXXXXX")"
+    expected="$(mktemp)"
+    actual="$(mktemp)"
+    actual_index="$(mktemp)"
+    rm -f "$actual_index"
+
+    cleanup() {
+        git -C "$repo" worktree remove --force "$tmp" >/dev/null 2>&1 || true
+        rm -f "$expected" "$actual" "$actual_index"
+    }
+
+    git -C "$repo" worktree add --detach "$tmp" "$commit" >/dev/null
+    apply_stack "$tmp"
+
     if [ "$FORCE" = 1 ]; then
         echo "reset -> ${commit:0:12}"
 
@@ -59,48 +87,24 @@ sync_repo() {
         git -C "$repo" checkout --force --detach "$commit"
         git -C "$repo" reset --hard "$commit"
 
-        # Deliberately no git clean: build directories and other untracked
-        # development files survive a sync.
-        if [ -n "$generated_patch" ]; then
-            echo "apply $(basename "$generated_patch")"
-            git -C "$repo" apply --index --check "$generated_patch"
-            git -C "$repo" apply --index "$generated_patch"
-        fi
+        # Preserve build products and unrelated development files, but replace
+        # untracked files that the current patch stack is responsible for.
+        while IFS= read -r -d '' path; do
+            rm -f -- "$repo/$path"
+        done < <(git -C "$tmp" diff --name-only --diff-filter=A -z "$commit")
 
-        while IFS= read -r patch; do
-            [ -n "$patch" ] || continue
-            echo "apply $patch"
-            git -C "$repo" apply --index --check "$patches/$patch"
-            git -C "$repo" apply --index "$patches/$patch"
-        done < "$patches/series"
+        apply_stack "$repo"
     fi
-
-    tmp="$(mktemp -d "/tmp/${name}.XXXXXX")"
-    expected="$(mktemp)"
-    actual="$(mktemp)"
-
-    cleanup() {
-        git -C "$repo" worktree remove --force "$tmp" >/dev/null 2>&1 || true
-        rm -f "$expected" "$actual"
-    }
-
-    git -C "$repo" worktree add --detach "$tmp" "$commit" >/dev/null
-
-    # --index tracks files a patch adds, so both diffs below include them.
-
-    if [ -n "$generated_patch" ]; then
-        git -C "$tmp" apply --index --check "$generated_patch"
-        git -C "$tmp" apply --index "$generated_patch"
-    fi
-
-    while IFS= read -r patch; do
-        [ -n "$patch" ] || continue
-        git -C "$tmp" apply --index --check "$patches/$patch"
-        git -C "$tmp" apply --index "$patches/$patch"
-    done < "$patches/series"
 
     git -C "$tmp" diff --binary "$commit" > "$expected"
-    git -C "$repo" diff --binary "$commit" > "$actual"
+    GIT_INDEX_FILE="$actual_index" git -C "$repo" read-tree "$commit"
+    GIT_INDEX_FILE="$actual_index" git -C "$repo" add -u
+    while IFS= read -r -d '' path; do
+        if [ -e "$repo/$path" ]; then
+            GIT_INDEX_FILE="$actual_index" git -C "$repo" add -- "$path"
+        fi
+    done < <(git -C "$tmp" diff --name-only --diff-filter=A -z "$commit")
+    GIT_INDEX_FILE="$actual_index" git -C "$repo" diff --cached --binary "$commit" > "$actual"
 
     if ! cmp -s "$expected" "$actual"; then
         echo "$name: guest tree does NOT match varmint pin + patches" >&2

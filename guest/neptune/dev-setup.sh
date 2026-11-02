@@ -40,8 +40,8 @@ prepare_repo() {
     fi
 
     if [ -n "$generated_patch" ]; then
-        if git -C "$dir" apply --check "$generated_patch" 2>/dev/null; then
-            git -C "$dir" apply "$generated_patch"
+        if git -C "$dir" apply --index --check "$generated_patch" 2>/dev/null; then
+            git -C "$dir" apply --index "$generated_patch"
         elif git -C "$dir" apply --reverse --check "$generated_patch" 2>/dev/null; then
             :
         else
@@ -54,8 +54,8 @@ prepare_repo() {
         [ -n "$patch" ] || continue
         patch="$patch_dir/$patch"
 
-        if git -C "$dir" apply --check "$patch" 2>/dev/null; then
-            git -C "$dir" apply "$patch"
+        if git -C "$dir" apply --index --check "$patch" 2>/dev/null; then
+            git -C "$dir" apply --index "$patch"
         elif git -C "$dir" apply --reverse --check "$patch" 2>/dev/null; then
             :
         else
