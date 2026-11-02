@@ -48,6 +48,7 @@ meson_install() {
   rm -rf "$source/build"
   (
     cd "$source"
+    export MACOSX_DEPLOYMENT_TARGET="$MINIMUM_MACOS"
     PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" \
     CFLAGS="-I$PREFIX/include" \
     CPPFLAGS="-I$PREFIX/include" \
@@ -249,6 +250,7 @@ build_virglrenderer() {
 
   (
     export PATH="$DEPS_VENV/bin:$PATH"
+    export MACOSX_DEPLOYMENT_TARGET="$MINIMUM_MACOS"
 
     meson setup "$x86_root/epoxy-build" "$epoxy_source" \
       --cross-file "$cross_file" \
@@ -317,6 +319,7 @@ build_d3dmetal() {
 
   (
     export PATH="$DEPS_VENV/bin:$PATH"
+    export MACOSX_DEPLOYMENT_TARGET="$MINIMUM_MACOS"
     meson setup "$x86_root/build" "$source" \
       --cross-file "$cross_file" \
       --prefix "$x86_prefix" \
@@ -371,18 +374,22 @@ build_dxmt() {
 
 verify_dependency_prefix() {
   local dylib
-  require_commands lipo pkg-config
+  require_commands lipo pkg-config xcrun
   log "verify dependency prefix"
   for dylib in "${RUNTIME_DYLIBS[@]}"; do
     need_file "$PREFIX/lib/$dylib"
     lipo -archs "$PREFIX/lib/$dylib" | tr ' ' '\n' | grep -qx "$ARCH" \
       || die "$dylib does not contain $ARCH"
+    verify_macos_deployment_target "$PREFIX/lib/$dylib"
   done
   PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"     pkg-config --exists epoxy egl glesv2 vulkan dxmt-native
+  need_file "$PREFIX/libexec/virgl_render_server"
+  verify_macos_deployment_target "$PREFIX/libexec/virgl_render_server"
   need_file "$PREFIX/lib/x86_64/libd3dmetal-native.dylib"
   lipo -archs "$PREFIX/lib/x86_64/libd3dmetal-native.dylib" |
     tr ' ' '\n' | grep -qx x86_64 \
     || die "d3dmetal-native is missing x86_64 slice"
+  verify_macos_deployment_target "$PREFIX/lib/x86_64/libd3dmetal-native.dylib"
 
 }
 

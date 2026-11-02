@@ -155,6 +155,21 @@ codesign_file() {
   codesign --force --sign - --timestamp=none "$1"
 }
 
+verify_macos_deployment_target() {
+  local file="$1"
+  local targets target
+
+  targets="$(
+    xcrun vtool -show-build "$file" |
+      sed -nE 's/^[[:space:]]+minos (.+)$/\1/p'
+  )"
+  [ -n "$targets" ] || die "cannot read deployment target: $file"
+  while IFS= read -r target; do
+    [ "$target" = "$MINIMUM_MACOS" ] \
+      || die "$file has deployment target $target, expected $MINIMUM_MACOS"
+  done <<< "$targets"
+}
+
 write_pkgconfig() {
   local file="$1"
   local name="$2"

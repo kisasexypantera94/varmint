@@ -79,13 +79,21 @@ find_vmnet_helper() {
 }
 
 # Apple's D3DMetal redist can't be fetched without an Apple sign-in, so it is
-# taken from a mounted "Evaluation environment for Windows games" volume:
-# D3DMETAL_REDIST=<volume>/redist/lib/external. Copied unmodified, with notices.
+# taken from a mounted "Evaluation environment for Windows games" volume.
+# D3DMETAL_REDIST overrides automatic volume discovery. Copied unmodified, with notices.
 install_d3dmetal() {
   local contents="$1"
   local redist="${D3DMETAL_REDIST:-}"
+  local framework
   local volume
 
+  if [ -z "$redist" ]; then
+    for framework in /Volumes/*/redist/lib/external/D3DMetal.framework; do
+      [ -d "$framework" ] || continue
+      redist="${framework%/D3DMetal.framework}"
+      break
+    done
+  fi
   if [ -z "$redist" ] || [ ! -d "$redist/D3DMetal.framework" ]; then
     printf 'warning: D3DMETAL_REDIST not set or missing D3DMetal.framework; building without D3DMetal\n' >&2
     return
@@ -476,6 +484,7 @@ verify_bundle_macho() {
 
   lipo -archs "$file" | tr ' ' '\n' | grep -qx "$expected_arch" \
     || die "$file does not contain $expected_arch"
+  verify_macos_deployment_target "$file"
   while IFS= read -r dependency; do
     [ -n "$dependency" ] && verify_bundle_dependency \
       "$file" "$dependency" "$executable" "$frameworks"
