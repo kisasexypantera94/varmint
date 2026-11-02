@@ -1,6 +1,7 @@
 use super::{NeptuneBackend, VmConfigFile, validate_config_file};
 use std::{
-    fs, io,
+    fs::{self, OpenOptions},
+    io::{self, Write},
     path::{Path, PathBuf},
 };
 use toml_edit::{DocumentMut, Item, value};
@@ -34,7 +35,23 @@ impl VmConfigDocument {
     }
 
     pub fn save(&self, path: &Path) -> io::Result<()> {
-        fs::write(path, self.to_string())
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        let temporary = parent.join(format!(".{name}.{}.tmp", uuid::Uuid::new_v4()));
+        let result = (|| {
+            let mut file = OpenOptions::new().write(true).create_new(true).open(&temporary)?;
+            if let Ok(metadata) = fs::metadata(path) {
+                file.set_permissions(metadata.permissions())?;
+            }
+            file.write_all(self.to_string().as_bytes())?;
+            file.sync_all()?;
+            drop(file);
+            fs::rename(&temporary, path)
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(temporary);
+        }
+        result
     }
 
     pub fn memory_mib(&self) -> Option<u64> {
@@ -177,26 +194,31 @@ impl VmConfigDocument {
         let Ok(document) = toml_edit::Document::parse(source.clone()) else {
             return;
         };
-        let key = match table {
-            Some(table) => document
-                .get(table)
-                .and_then(Item::as_table)
-                .and_then(|table| table.key(key)),
-            None => document.key(key),
+        let (key, item) = match table {
+            Some(table) => {
+                let Some(table) = document.get(table).and_then(Item::as_table) else {
+                    return;
+                };
+                (table.key(key), table.get(key))
+            }
+            None => (document.key(key), document.get(key)),
         };
         let Some(span) = key.and_then(|key| key.span()) else {
             return;
         };
+        let Some(item_span) = item.and_then(Item::span) else {
+            return;
+        };
         let line_start = source[..span.start].rfind('\n').map_or(0, |index| index + 1);
-        let line_end = source[span.end..]
+        let line_end = source[item_span.end..]
             .find('\n')
-            .map_or(source.len(), |index| span.end + index + 1);
-        let line = &source[line_start..line_end];
-        let replacement = line
+            .map_or(source.len(), |index| item_span.end + index + 1);
+        let suffix = &source[item_span.end..line_end];
+        let replacement = suffix
             .find('#')
             .map(|comment| {
-                let newline = if line.ends_with('\n') { "\n" } else { "" };
-                format!("{}{}", line[comment..].trim_end_matches(['\r', '\n']), newline)
+                let newline = if suffix.ends_with('\n') { "\n" } else { "" };
+                format!("{}{}", suffix[comment..].trim_end_matches(['\r', '\n']), newline)
             })
             .unwrap_or_default();
 
@@ -350,6 +372,45 @@ WINEDEBUG = "-all"
         document.set_host_environment("D3DMETAL_FRAMEWORK_PATH", None);
 
         assert_eq!(document.to_string(), source);
+    }
+
+    #[test]
+    fn removing_a_host_variable_ignores_hashes_inside_its_value() {
+        let source = r#"format_version = 2
+
+[host_environment]
+D3DMETAL_FRAMEWORK_PATH = "/Volumes/Games#2/D3DMetal.framework" # Keep this note.
+WINEDEBUG = "-all"
+"#;
+        let mut document = VmConfigDocument::parse(source).unwrap();
+
+        document.set_host_environment("D3DMETAL_FRAMEWORK_PATH", None);
+
+        assert_eq!(
+            document.to_string(),
+            "format_version = 2\n\n[host_environment]\n# Keep this note.\nWINEDEBUG = \"-all\"\n"
+        );
+    }
+
+    #[test]
+    fn removes_a_multiline_host_variable() {
+        let source = r#"format_version = 2
+
+[host_environment]
+SCRIPT = """
+first
+second
+""" # Keep this note.
+WINEDEBUG = "-all"
+"#;
+        let mut document = VmConfigDocument::parse(source).unwrap();
+
+        document.set_host_environment("SCRIPT", None);
+
+        assert_eq!(
+            document.to_string(),
+            "format_version = 2\n\n[host_environment]\n# Keep this note.\nWINEDEBUG = \"-all\"\n"
+        );
     }
 
     #[test]
