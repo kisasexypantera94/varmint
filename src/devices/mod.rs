@@ -3,8 +3,8 @@ mod gpu;
 
 use crate::{
     audio, clipboard,
-    cpu::CpuRuntime,
-    display::{DisplayBuffer, DisplayEvent},
+    cpu::{CpuRuntime, SystemRequest},
+    display::DisplayBuffer,
     gamepad, irq,
     machine::*,
     memory::GuestMemory,
@@ -16,7 +16,6 @@ use std::{
     sync::{Mutex, mpsc::Receiver},
     thread,
 };
-use winit::event_loop::EventLoopProxy;
 
 pub struct HostBackends {
     pub disk: virtio::Blk,
@@ -204,10 +203,11 @@ impl<'a> Runtime<'a> {
         display: &Mutex<DisplayBuffer>,
         runtime_event_rx: Receiver<RuntimeEvent>,
         audio_event_rx: Receiver<audio::BackendEvent>,
-        display_proxy: &EventLoopProxy<DisplayEvent>,
+        on_display_changed: &(dyn Fn() + Sync),
+        on_system_request: &(dyn Fn(SystemRequest) + Sync),
     ) -> Result<()> {
         thread::scope(|scope| -> Result<()> {
-            scope.spawn(|| self.gpu_worker.run(mem, display, display_proxy));
+            scope.spawn(|| self.gpu_worker.run(mem, display, on_display_changed));
 
             scope.spawn(|| {
                 let runtime_events = events::RuntimeEventPump::new(mem, &self.devices, runtime_event_rx);
@@ -219,7 +219,7 @@ impl<'a> Runtime<'a> {
                 audio_events.run();
             });
 
-            self.cpus.run(self.vm, mem, &self.devices)
+            self.cpus.run(self.vm, mem, &self.devices, on_system_request)
         })
     }
 }

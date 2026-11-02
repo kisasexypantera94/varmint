@@ -10,11 +10,6 @@ use stats::AngleCopyStats;
 use zerocopy::IntoBytes;
 
 #[derive(Clone, Copy)]
-pub enum DisplayEvent {
-    Changed,
-}
-
-#[derive(Clone, Copy)]
 struct Rect {
     x: usize,
     y: usize,

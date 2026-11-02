@@ -1,4 +1,4 @@
-use super::{SecondaryCpus, StartResult};
+use super::{SecondaryCpus, StartResult, SystemRequest};
 use applevisor::prelude::*;
 
 const PSCI_VERSION: u64 = 0x84000000;
@@ -16,6 +16,7 @@ const PSCI_ALREADY_ON: u64 = -4i64 as u64;
 pub enum Action {
     Continue,
     CpuOff,
+    System(SystemRequest),
 }
 
 pub fn handle_hvc(vcpu: &Vcpu, vcpu_id: usize, secondaries: &SecondaryCpus) -> Result<Action> {
@@ -42,10 +43,8 @@ pub fn handle_hvc(vcpu: &Vcpu, vcpu_id: usize, secondaries: &SecondaryCpus) -> R
             }
             PSCI_DENIED
         }
-        PSCI_SYSTEM_OFF | PSCI_SYSTEM_RESET => {
-            eprintln!("PSCI system off/reset requested");
-            PSCI_SUCCESS
-        }
+        PSCI_SYSTEM_OFF => return Ok(Action::System(SystemRequest::PowerOff)),
+        PSCI_SYSTEM_RESET => return Ok(Action::System(SystemRequest::Reset)),
         _ => PSCI_NOT_SUPPORTED,
     };
 

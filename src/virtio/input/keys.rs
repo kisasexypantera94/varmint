@@ -134,6 +134,7 @@ pub const KEY_DOWN: u16 = 108;
 pub const KEY_PAGEDOWN: u16 = 109;
 pub const KEY_INSERT: u16 = 110;
 pub const KEY_DELETE: u16 = 111;
+pub const KEY_POWER: u16 = 116;
 
 pub const SUPPORTED_KEYS: &[u16] = &[
     KEY_ESC,
@@ -235,6 +236,7 @@ pub const SUPPORTED_KEYS: &[u16] = &[
     KEY_PAGEDOWN,
     KEY_INSERT,
     KEY_DELETE,
+    KEY_POWER,
 ];
 
 pub fn set_bit(bitmap: &mut [u8], bit: usize) {

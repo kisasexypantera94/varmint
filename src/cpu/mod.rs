@@ -17,6 +17,12 @@ const PSTATE_EL1H_DAIF_MASKED: u64 = 0x3c5;
 const ESR_EC_HVC_AARCH64: u64 = 0x16;
 
 #[derive(Debug, Clone, Copy)]
+pub enum SystemRequest {
+    PowerOff,
+    Reset,
+}
+
+#[derive(Debug, Clone, Copy)]
 struct SecondaryStart {
     entry_point: u64,
     context_id: u64,
@@ -64,7 +70,13 @@ impl CpuRuntime {
         })
     }
 
-    pub fn run(self, vm: &VirtualMachineInstance<GicEnabled>, mem: &GuestMemory, devices: &Devices) -> Result<()> {
+    pub fn run(
+        self,
+        vm: &VirtualMachineInstance<GicEnabled>,
+        mem: &GuestMemory,
+        devices: &Devices,
+        on_system_request: &(dyn Fn(SystemRequest) + Sync),
+    ) -> Result<()> {
         let Self {
             boot_vcpu,
             secondaries,
@@ -74,10 +86,10 @@ impl CpuRuntime {
         thread::scope(|scope| -> Result<()> {
             for worker in secondary_workers {
                 let secondaries = &secondaries;
-                scope.spawn(move || worker.run(vm, mem, devices, secondaries).unwrap());
+                scope.spawn(move || worker.run(vm, mem, devices, secondaries, on_system_request).unwrap());
             }
 
-            run_loop(&boot_vcpu, BOOT_VCPU_ID, mem, devices, &secondaries)
+            run_loop(&boot_vcpu, BOOT_VCPU_ID, mem, devices, &secondaries, on_system_request)
         })
     }
 }
@@ -150,12 +162,13 @@ impl SecondaryWorker {
         mem: &GuestMemory,
         devices: &Devices,
         secondaries: &SecondaryCpus,
+        on_system_request: &(dyn Fn(SystemRequest) + Sync),
     ) -> Result<()> {
         let vcpu = vm.vcpu_create()?;
         configure_vcpu(&vcpu, self.vcpu_id)?;
         while let Ok(start) = self.boot_rx.recv() {
             set_entry_state(&vcpu, start.entry_point, start.context_id)?;
-            run_loop(&vcpu, self.vcpu_id, mem, devices, secondaries)?;
+            run_loop(&vcpu, self.vcpu_id, mem, devices, secondaries, on_system_request)?;
         }
 
         Ok(())
@@ -240,6 +253,7 @@ fn run_loop(
     mem: &GuestMemory,
     devices: &Devices,
     secondaries: &SecondaryCpus,
+    on_system_request: &(dyn Fn(SystemRequest) + Sync),
 ) -> Result<()> {
     loop {
         vcpu.run()?;
@@ -256,6 +270,11 @@ fn run_loop(
                     ESR_EC_HVC_AARCH64 => match psci::handle_hvc(vcpu, vcpu_id, secondaries)? {
                         psci::Action::Continue => continue,
                         psci::Action::CpuOff => return Ok(()),
+                        // The vCPU stays stopped; the host tears the VM down from the app thread.
+                        psci::Action::System(request) => {
+                            on_system_request(request);
+                            return Ok(());
+                        }
                     },
 
                     0x18 => {

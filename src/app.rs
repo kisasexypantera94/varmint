@@ -1,6 +1,7 @@
 use crate::{
+    cpu::SystemRequest,
     devices::{RuntimeEvent, RuntimeInputEvent},
-    display::{DisplayBuffer, DisplayEvent, PresentMode, Presenter},
+    display::{DisplayBuffer, PresentMode, Presenter},
     macos_ui,
     virtio::input::keys::*,
 };
@@ -18,6 +19,12 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
     window::{CursorGrabMode, Fullscreen, Window, WindowId},
 };
+
+#[derive(Clone, Copy)]
+pub enum AppEvent {
+    DisplayChanged,
+    System(SystemRequest),
+}
 
 fn display_refresh_millihertz(window: &Window) -> u32 {
     window
@@ -160,6 +167,9 @@ struct AppState<'a> {
     rel_mouse_frac_dy: f64,
 
     stats_visible: bool,
+
+    shutdown_requested: bool,
+    restart: bool,
 }
 
 impl<'a> AppState<'a> {
@@ -187,6 +197,8 @@ impl<'a> AppState<'a> {
             rel_mouse_frac_dx: 0.0,
             rel_mouse_frac_dy: 0.0,
             stats_visible: false,
+            shutdown_requested: false,
+            restart: false,
         }
     }
 
@@ -325,6 +337,24 @@ impl<'a> AppState<'a> {
         }
     }
 
+    fn request_shutdown(&mut self, event_loop: &ActiveEventLoop) {
+        if self.shutdown_requested {
+            eprintln!("vm: quitting without waiting for guest shutdown");
+            event_loop.exit();
+            return;
+        }
+
+        eprintln!("vm: requesting guest shutdown");
+        self.shutdown_requested = true;
+        self.set_mouse_capture(false);
+        for pressed in [true, false] {
+            let _ = self.host_tx.send(RuntimeEvent::Input(RuntimeInputEvent::Key {
+                code: KEY_POWER,
+                pressed,
+            }));
+        }
+    }
+
     fn take_relative_mouse_delta(accum: &mut f64, delta: f64) -> i32 {
         *accum += delta;
         let whole = if *accum >= 0.0 {
@@ -337,7 +367,7 @@ impl<'a> AppState<'a> {
     }
 }
 
-impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
+impl<'a> ApplicationHandler<AppEvent> for AppState<'a> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let attrs = Window::default_attributes()
             .with_title("Varmint")
@@ -376,7 +406,7 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _window_id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => {
-                event_loop.exit();
+                self.request_shutdown(event_loop);
             }
 
             WindowEvent::Resized(PhysicalSize { width, height }) => {
@@ -496,11 +526,20 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
         }
     }
 
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: DisplayEvent) {
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: AppEvent) {
         match event {
-            DisplayEvent::Changed => {
+            AppEvent::DisplayChanged => {
                 self.poll_display();
                 self.present_pending_if_due();
+            }
+            AppEvent::System(SystemRequest::PowerOff) => {
+                eprintln!("vm: guest powered off");
+                event_loop.exit();
+            }
+            AppEvent::System(SystemRequest::Reset) => {
+                eprintln!("vm: guest reset");
+                self.restart = true;
+                event_loop.exit();
             }
         }
     }
@@ -521,7 +560,7 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
         }
     }
 
-    /// Also runs for Quit (NSApp terminate:), which exits the process without returning from `run`.
+    /// Also runs for NSApp terminate: (Dock Quit, logout), which exits the process without returning from `run`.
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
         if let Some(on_exit) = self.on_exit.take() {
             on_exit();
@@ -539,6 +578,9 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
         }
         if macos_ui::take_show_about() {
             macos_ui::show_about();
+        }
+        if macos_ui::take_quit() {
+            self.request_shutdown(event_loop);
         }
 
         self.present_pending_if_due();
@@ -560,16 +602,18 @@ impl<'a> ApplicationHandler<DisplayEvent> for AppState<'a> {
     }
 }
 
-pub fn event_loop() -> EventLoop<DisplayEvent> {
-    EventLoop::<DisplayEvent>::with_user_event().build().unwrap()
+pub fn event_loop() -> EventLoop<AppEvent> {
+    EventLoop::<AppEvent>::with_user_event().build().unwrap()
 }
 
+/// Returns true when the guest asked for a reset.
 pub fn run<'a>(
-    event_loop: EventLoop<DisplayEvent>,
+    event_loop: EventLoop<AppEvent>,
     display: &'a Mutex<DisplayBuffer>,
     host_tx: Sender<RuntimeEvent>,
     on_exit: impl FnOnce() + 'a,
-) {
+) -> bool {
     let mut app = AppState::new(display, host_tx, Box::new(on_exit));
     event_loop.run_app(&mut app).unwrap();
+    app.restart
 }

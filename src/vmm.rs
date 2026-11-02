@@ -1,8 +1,9 @@
 use crate::{
-    app, audio, clipboard,
+    app::{self, AppEvent},
+    audio, clipboard,
     config::{NeptuneBackend, VmConfig},
     devices::{HostBackends, Runtime, RuntimeEvent},
-    display::{DisplayBuffer, DisplayEvent},
+    display::DisplayBuffer,
     gamepad,
     machine::*,
     macos_ui, memory, net, stdio, storage, virtio,
@@ -16,6 +17,9 @@ use std::{
     thread,
 };
 use winit::event_loop::EventLoopProxy;
+
+/// Exit status after the guest asked for a reset; the launcher starts the VM again.
+pub const RESTART_EXIT_CODE: i32 = 75;
 
 fn read_file(path: &Path) -> std::io::Result<Vec<u8>> {
     let mut f = File::open(path)?;
@@ -45,7 +49,7 @@ fn vmm_thread(
     display: &Mutex<DisplayBuffer>,
     runtime_event_rx: Receiver<RuntimeEvent>,
     audio_event_rx: Receiver<audio::BackendEvent>,
-    display_proxy: EventLoopProxy<DisplayEvent>,
+    display_proxy: EventLoopProxy<AppEvent>,
     config: &VmConfig,
     boot: BootPayload,
     backends: HostBackends,
@@ -83,7 +87,20 @@ fn vmm_thread(
     }
     mem.write(DTB_START, &dtb)?;
 
-    Runtime::new(vm, backends, config.vcpus)?.run(&mem, display, runtime_event_rx, audio_event_rx, &display_proxy)?;
+    let on_display_changed = || {
+        let _ = display_proxy.send_event(AppEvent::DisplayChanged);
+    };
+    let on_system_request = |request| {
+        let _ = display_proxy.send_event(AppEvent::System(request));
+    };
+    Runtime::new(vm, backends, config.vcpus)?.run(
+        &mem,
+        display,
+        runtime_event_rx,
+        audio_event_rx,
+        &on_display_changed,
+        &on_system_request,
+    )?;
 
     Ok(())
 }
@@ -292,7 +309,7 @@ pub fn run(config_path: &Path) -> Result<()> {
             )
         });
 
-        app::run(event_loop, display, runtime_event_tx, || gamepads.shutdown());
-        std::process::exit(0);
+        let restart = app::run(event_loop, display, runtime_event_tx, || gamepads.shutdown());
+        std::process::exit(if restart { RESTART_EXIT_CODE } else { 0 });
     })
 }

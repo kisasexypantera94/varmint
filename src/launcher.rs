@@ -1,7 +1,10 @@
 mod vm_log;
 mod vms;
 
-use crate::config::{NeptuneBackend, VmConfigDefaults, VmConfigDocument};
+use crate::{
+    config::{NeptuneBackend, VmConfigDefaults, VmConfigDocument},
+    vmm,
+};
 use block2::RcBlock;
 use objc2::{
     ClassType, DefinedClass, MainThreadOnly, Message, define_class, msg_send,
@@ -418,27 +421,8 @@ define_class!(
             if self.ivars().edit_rejected.get() {
                 return;
             }
-            // Only probes the lock; it is released before the VMM takes it.
-            let checked = VmConfigDocument::open(&path)
-                .and_then(|document| lock_storage(&storage_dir(&path, &document)).map(drop));
-            if let Err(error) = checked {
+            if let Err(error) = self.start_vm(&path) {
                 show_error(self.mtm(), "Varmint could not be launched.", &error);
-                return;
-            }
-            let executable = match std::env::current_exe() {
-                Ok(executable) => executable,
-                Err(error) => {
-                    show_error(self.mtm(), "Varmint could not be launched.", &error.to_string());
-                    return;
-                }
-            };
-            match VmLog::spawn(&executable, &path, vm_name(&path)) {
-                Ok((child, log)) => {
-                    *self.ivars().child.borrow_mut() = Some(child);
-                    *self.ivars().log.borrow_mut() = Some(log);
-                    self.refresh_controls();
-                }
-                Err(error) => show_error(self.mtm(), "Varmint could not be launched.", &error.to_string()),
             }
         }
 
@@ -452,6 +436,17 @@ define_class!(
                     return;
                 }
                 Some(Ok(Some(status))) if status.success() => None,
+                Some(Ok(Some(status))) if status.code() == Some(vmm::RESTART_EXIT_CODE) => {
+                    self.ivars().child.borrow_mut().take();
+                    let restarted = match self.current_path() {
+                        Some(path) => self.start_vm(&path),
+                        None => Err("The virtual machine configuration is no longer open.".to_owned()),
+                    };
+                    match restarted {
+                        Ok(()) => return,
+                        Err(error) => Some(error),
+                    }
+                }
                 Some(Ok(Some(status))) => {
                     let mut detail = format!("The virtual machine process exited with {status}.");
                     if let Some(log) = self.ivars().log.borrow().as_ref() {
@@ -1465,6 +1460,17 @@ impl LauncherDelegate {
             window.orderOut(None);
         }
         app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+    }
+
+    fn start_vm(&self, path: &Path) -> Result<(), String> {
+        // Only probes the lock; it is released before the VMM takes it.
+        VmConfigDocument::open(path).and_then(|document| lock_storage(&storage_dir(path, &document)).map(drop))?;
+        let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+        let (child, log) = VmLog::spawn(&executable, path, vm_name(path)).map_err(|error| error.to_string())?;
+        *self.ivars().child.borrow_mut() = Some(child);
+        *self.ivars().log.borrow_mut() = Some(log);
+        self.refresh_controls();
+        Ok(())
     }
 
     fn come_back(&self) {

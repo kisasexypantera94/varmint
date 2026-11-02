@@ -19,6 +19,7 @@ const NS_UTF8_STRING_ENCODING: usize = 4;
 static MENU_INSTALLED: AtomicBool = AtomicBool::new(false);
 static TOGGLE_STATISTICS: AtomicBool = AtomicBool::new(false);
 static SHOW_ABOUT: AtomicBool = AtomicBool::new(false);
+static QUIT: AtomicBool = AtomicBool::new(false);
 static STATISTICS_ITEM: AtomicPtr<AnyObject> = AtomicPtr::new(ptr::null_mut());
 
 unsafe extern "C-unwind" fn toggle_statistics_action(
@@ -31,6 +32,10 @@ unsafe extern "C-unwind" fn toggle_statistics_action(
 
 unsafe extern "C-unwind" fn show_about_action(_receiver: *mut AnyObject, _selector: Sel, _sender: *mut AnyObject) {
     SHOW_ABOUT.store(true, Ordering::Release);
+}
+
+unsafe extern "C-unwind" fn quit_action(_receiver: *mut AnyObject, _selector: Sel, _sender: *mut AnyObject) {
+    QUIT.store(true, Ordering::Release);
 }
 
 unsafe fn install_action(
@@ -124,6 +129,7 @@ pub fn install_main_menu() {
     unsafe {
         install_action(sel!(varmintToggleStatistics:), toggle_statistics_action);
         install_action(sel!(varmintShowAbout:), show_about_action);
+        install_action(sel!(varmintQuit:), quit_action);
 
         let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
         let main_menu = new_menu("");
@@ -136,7 +142,7 @@ pub fn install_main_menu() {
         add_separator(app_menu);
         add_item(
             app_menu,
-            new_menu_item("Quit Varmint", Some(sel!(terminate:)), "q", COMMAND, app),
+            new_menu_item("Quit Varmint", Some(sel!(varmintQuit:)), "q", COMMAND, app),
         );
         add_submenu(main_menu, "Varmint", app_menu);
 
@@ -174,6 +180,10 @@ pub fn take_toggle_statistics() -> bool {
 
 pub fn take_show_about() -> bool {
     SHOW_ABOUT.swap(false, Ordering::AcqRel)
+}
+
+pub fn take_quit() -> bool {
+    QUIT.swap(false, Ordering::AcqRel)
 }
 
 pub fn set_statistics_checked(checked: bool) {
