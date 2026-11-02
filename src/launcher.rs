@@ -14,18 +14,18 @@ use objc2::{
 };
 use objc2_app_kit::{
     NSAlert, NSAlertFirstButtonReturn, NSAppearance, NSAppearanceNameDarkAqua, NSApplication,
-    NSApplicationActivationOptions, NSApplicationActivationPolicy, NSApplicationDelegate, NSAutoresizingMaskOptions,
-    NSBackingStoreType, NSBox, NSBoxType, NSButton, NSColor, NSControl, NSControlSize, NSControlStateValueOn,
-    NSControlTextEditingDelegate, NSEventModifierFlags, NSEventType, NSFont, NSFontAttributeName,
-    NSForegroundColorAttributeName, NSGridCell, NSGridCellPlacement, NSGridView, NSImage, NSLayoutAttribute,
-    NSLineBreakMode, NSMenu, NSMenuItem, NSMenuItemValidation, NSModalResponse, NSModalResponseOK,
+    NSApplicationActivationOptions, NSApplicationActivationPolicy, NSApplicationDelegate, NSApplicationTerminateReply,
+    NSAutoresizingMaskOptions, NSBackingStoreType, NSBox, NSBoxType, NSButton, NSColor, NSControl, NSControlSize,
+    NSControlStateValueOn, NSControlTextEditingDelegate, NSEventModifierFlags, NSEventType, NSFont,
+    NSFontAttributeName, NSForegroundColorAttributeName, NSGridCell, NSGridCellPlacement, NSGridView, NSImage,
+    NSLayoutAttribute, NSLineBreakMode, NSMenu, NSMenuItem, NSMenuItemValidation, NSModalResponse, NSModalResponseOK,
     NSMutableParagraphStyle, NSOpenPanel, NSParagraphStyleAttributeName, NSPopUpButton, NSRunningApplication,
     NSScrollView, NSSlider, NSStackView, NSText, NSTextAlignment, NSTextField, NSTextFieldDelegate, NSTextView,
     NSTitlebarAccessoryViewController, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask, NSWorkspace,
 };
 use objc2_foundation::{
     MainThreadMarker, NSArray, NSAttributedString, NSBundle, NSDictionary, NSNotification, NSObject, NSObjectProtocol,
-    NSPoint, NSRange, NSRect, NSSize, NSString, NSTimer, NSURL, ns_string,
+    NSPoint, NSProcessInfo, NSRange, NSRect, NSSize, NSString, NSTimer, NSURL, ns_string,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -43,6 +43,8 @@ const GIB: u64 = 1024 * 1024 * 1024;
 const D3DMETAL_PATH_VARIABLE: &str = "D3DMETAL_FRAMEWORK_PATH";
 const D3DMETAL_DOWNLOAD_URL: &str =
     "https://developer.apple.com/download/all/?q=evaluation%20environment%20for%20windows%20games";
+// Apple's 4.0 beta 3 redist links libdxccontainer.dylib built for macOS 26.4.
+const D3DMETAL_SYSTEM_REQUIREMENT: &str = "D3DMetal requires macOS 26.4 or later.";
 const DISK_PRESETS_GIB: &[u64] = &[64, 128, 256, 512, 1024];
 const FORM_WIDTH: f64 = 640.0;
 const FORM_HEIGHT: f64 = 380.0;
@@ -251,6 +253,17 @@ define_class!(
                 Err(error) => {
                     show_error(self.mtm(), "The virtual machine could not be opened.", &error);
                     false.into()
+                }
+            }
+        }
+
+        #[unsafe(method(applicationShouldTerminate:))]
+        fn should_terminate(&self, _app: &NSApplication) -> NSApplicationTerminateReply {
+            match self.stop_child() {
+                Ok(()) => NSApplicationTerminateReply::TerminateNow,
+                Err(error) => {
+                    show_error(self.mtm(), "Varmint could not stop the virtual machine.", &error);
+                    NSApplicationTerminateReply::TerminateCancel
                 }
             }
         }
@@ -814,6 +827,13 @@ impl LauncherDelegate {
 
         let graphics = NSPopUpButton::initWithFrame_pullsDown(NSPopUpButton::alloc(mtm), NSRect::ZERO, false);
         graphics.addItemsWithTitles(&NSArray::from_slice(&[ns_string!("DXMT"), ns_string!("D3DMetal")]));
+        if !host_supports_d3dmetal()
+            && let Some(item) = graphics.itemAtIndex(1)
+        {
+            graphics.setAutoenablesItems(false);
+            item.setEnabled(false);
+            item.setToolTip(Some(&NSString::from_str(D3DMETAL_SYSTEM_REQUIREMENT)));
+        }
         unsafe {
             graphics.setTarget(Some(self));
             graphics.setAction(Some(sel!(graphicsChanged:)));
@@ -1297,6 +1317,9 @@ impl LauncherDelegate {
             NeptuneBackend::Dxmt => 0,
             NeptuneBackend::D3dmetal => 1,
         });
+        controls
+            .launch
+            .setEnabled(idle && (backend != NeptuneBackend::D3dmetal || host_supports_d3dmetal()));
         set_auto_button(
             &controls.graphics_auto,
             explicit_backend.is_some(),
@@ -1464,13 +1487,40 @@ impl LauncherDelegate {
 
     fn start_vm(&self, path: &Path) -> Result<(), String> {
         // Only probes the lock; it is released before the VMM takes it.
-        VmConfigDocument::open(path).and_then(|document| lock_storage(&storage_dir(path, &document)).map(drop))?;
+        let document = VmConfigDocument::open(path)?;
+        let backend = document
+            .neptune_backend()
+            .unwrap_or_else(|| VmConfigDefaults::for_host().neptune_backend);
+        if backend == NeptuneBackend::D3dmetal && !host_supports_d3dmetal() {
+            return Err(D3DMETAL_SYSTEM_REQUIREMENT.to_owned());
+        }
+        lock_storage(&storage_dir(path, &document)).map(drop)?;
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
         let (child, log) = VmLog::spawn(&executable, path, vm_name(path)).map_err(|error| error.to_string())?;
         *self.ivars().child.borrow_mut() = Some(child);
         *self.ivars().log.borrow_mut() = Some(log);
         self.refresh_controls();
         Ok(())
+    }
+
+    /// The launcher owns the child's log pipe reader, so it cannot exit before the child does.
+    fn stop_child(&self) -> Result<(), String> {
+        let Some(mut child) = self.ivars().child.borrow_mut().take() else {
+            return Ok(());
+        };
+        let result = match child.try_wait() {
+            Ok(Some(_)) => Ok(()),
+            Ok(None) => child
+                .kill()
+                .and_then(|()| child.wait())
+                .map(|_| ())
+                .map_err(|error| error.to_string()),
+            Err(error) => Err(error.to_string()),
+        };
+        if result.is_err() {
+            *self.ivars().child.borrow_mut() = Some(child);
+        }
+        result
     }
 
     fn come_back(&self) {
@@ -1942,6 +1992,15 @@ fn backend_name(backend: NeptuneBackend) -> &'static str {
     }
 }
 
+fn supports_d3dmetal_on(major: isize, minor: isize) -> bool {
+    (major, minor) >= (26, 4)
+}
+
+fn host_supports_d3dmetal() -> bool {
+    let version = NSProcessInfo::processInfo().operatingSystemVersion();
+    supports_d3dmetal_on(version.majorVersion, version.minorVersion)
+}
+
 /// The D3DMetal framework the VMM would load, and whether it is the copy bundled with Varmint.
 /// Like the VMM, this prefers `D3DMETAL_FRAMEWORK_PATH` from the environment, then from the
 /// config's `host_environment`, then the bundle.
@@ -2017,6 +2076,9 @@ fn display_version(version: &str) -> String {
 fn graphics_hint(backend: NeptuneBackend, document: &VmConfigDocument) -> (String, bool, bool) {
     if backend == NeptuneBackend::Dxmt {
         return ("Bundled.".to_owned(), false, false);
+    }
+    if !host_supports_d3dmetal() {
+        return (D3DMETAL_SYSTEM_REQUIREMENT.to_owned(), true, false);
     }
     match d3dmetal_framework(document) {
         Some((path, bundled)) => match d3dmetal_version(&path) {
@@ -2236,5 +2298,12 @@ mod tests {
     fn displays_beta_versions() {
         assert_eq!(display_version("4.0b3"), "4.0 beta 3");
         assert_eq!(display_version("4.0"), "4.0");
+    }
+
+    #[test]
+    fn d3dmetal_requires_macos_26_4() {
+        assert!(!supports_d3dmetal_on(26, 3));
+        assert!(supports_d3dmetal_on(26, 4));
+        assert!(supports_d3dmetal_on(27, 0));
     }
 }

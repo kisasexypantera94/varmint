@@ -137,6 +137,7 @@ chroot "$MOUNT_DIR" /bin/sh -eu -c '
   test -x /usr/local/bin/varmint-steam
   test -x /usr/local/bin/varmint-display-scale
   test -f /etc/xdg/autostart/varmint-display-scale.desktop
+  test "$(grep -c "^PowerButtonAction=8$" /etc/xdg/powerdevilrc)" -eq 3
   test -x /usr/local/libexec/varmint-host-time
   test -x /usr/local/libexec/varmint-gamepad
   test -f /etc/udev/rules.d/70-varmint-gamepad.rules

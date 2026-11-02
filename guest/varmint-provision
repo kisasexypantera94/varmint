@@ -213,6 +213,20 @@ systemctl mask \
     suspend-then-hibernate.target \
     >/dev/null 2>&1 || true
 
+# The host sends a power-button event when the user quits Varmint. Plasma's
+# desktop default opens a logout dialog, but the VM must shut down without
+# requiring another interaction.
+cat > /etc/xdg/powerdevilrc <<'EOF_POWERDEVIL'
+[AC]
+PowerButtonAction=8
+
+[Battery]
+PowerButtonAction=8
+
+[LowBattery]
+PowerButtonAction=8
+EOF_POWERDEVIL
+
 systemctl enable systemd-timesyncd.service >/dev/null 2>&1 || true
 systemctl --global enable varmint-audio-watchdog.service >/dev/null 2>&1 || true
 systemctl disable sddm.service >/dev/null 2>&1 || true
