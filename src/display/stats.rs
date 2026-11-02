@@ -8,7 +8,7 @@ use std::{
 
 const UPDATE_INTERVAL: Duration = Duration::from_secs(1);
 
-pub const WIDTH: u32 = 304;
+pub const WIDTH: u32 = 322;
 pub const HEIGHT: u32 = 56;
 pub const MARGIN: usize = 8;
 
@@ -214,11 +214,11 @@ fn render(snapshot: Option<&Snapshot>) -> Vec<u32> {
     }
 
     let lines = snapshot.map_or_else(
-        || ["HOST FPS -".to_owned(), "PRES -".to_owned()],
+        || ["HOST FPS  -".to_owned(), "HOST PRES -".to_owned()],
         |snapshot| {
             [
-                format!("HOST FPS {:.1}", snapshot.host_present_fps),
-                format!("PRES {:.2} MS", snapshot.average_host_present_duration_ms),
+                format!("HOST FPS  {:.1}", snapshot.host_present_fps),
+                format!("HOST PRES {:.2} MS", snapshot.average_host_present_duration_ms),
             ]
         },
     );
