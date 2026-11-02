@@ -1,0 +1,105 @@
+diff --git a/npt_registry_overlay.json b/npt_registry_overlay.json
+index 685f585..9590191 100644
+--- a/npt_registry_overlay.json
++++ b/npt_registry_overlay.json
+@@ -374,6 +374,9 @@
+         {"name": "CreateTexture1D", "skip_default": true},
+         {"name": "CreateTexture2D", "skip_default": true},
+         {"name": "CreateTexture3D", "skip_default": true},
++        {"name": "GetPrivateData", "params": [
++          {"name": "pData", "count_output": "pDataSize"}
++        ]},
+         {"name": "GetImmediateContext", "canonical": "memo"},
+         {"name": "CheckFeatureSupport", "params": [
+           {"name": "pFeatureSupportData", "input": true}
+@@ -453,6 +456,14 @@
+         {"name": "CopyDescriptorsSimple", "staged": true}
+       ]
+     },
++    {
++      "name": "ID3D12Object",
++      "methods": [
++        {"name": "GetPrivateData", "params": [
++          {"name": "pData", "count_output": "pDataSize"}
++        ]}
++      ]
++    },
+     {
+       "name": "ID3D12Device8",
+       "methods": [
+@@ -1185,6 +1196,9 @@
+     {
+       "name": "IDXGIObject",
+       "methods": [
++        {"name": "GetPrivateData", "params": [
++          {"name": "pData", "count_output": "pDataSize"}
++        ]},
+         {"name": "GetParent", "canonical": "memo"}
+       ]
+     },
+@@ -1203,6 +1217,9 @@
+     {
+       "name": "ID3D11DeviceChild",
+       "methods": [
++        {"name": "GetPrivateData", "params": [
++          {"name": "pData", "count_output": "pDataSize"}
++        ]},
+         {"name": "GetDevice", "canonical": "memo"}
+       ]
+     },
+diff --git a/tests/test_roundtrip_manual.c b/tests/test_roundtrip_manual.c
+index 9d5d857..6d14e84 100644
+--- a/tests/test_roundtrip_manual.c
++++ b/tests/test_roundtrip_manual.c
+@@ -1214,6 +1214,42 @@ static int test_manual_get_copyable_footprints_optional_outputs(void)
+     return 0;
+ }
+ 
++static int test_manual_get_private_data_required_size(void)
++{
++    uint8_t reply[64] = {0};
++    UINT required_size = 256;
++    uint8_t original_buffer[1] = {0xa5};
++    struct npt_command_ID3D12Object_GetPrivateData args = {
++        .pDataSize = &required_size,
++        .pData = original_buffer,
++        .ret = (HRESULT)0x887a0003, /* DXGI_ERROR_MORE_DATA */
++    };
++    struct npt_cs_encoder enc = npt_test_encoder_init(reply, sizeof(reply));
++
++    npt_encode_ID3D12Object_GetPrivateData_reply(&enc, &args);
++
++    const size_t reply_size = npt_test_encoder_written(&enc, reply);
++    struct npt_cs_decoder dec = npt_test_decoder_init(
++        reply + sizeof(struct npt_reply_header),
++        reply_size - sizeof(struct npt_reply_header));
++    UINT decoded_size = 0;
++
++    if (!npt_decode_simple_pointer(&dec)) {
++        fprintf(stderr, "FAIL: GetPrivateData omitted pDataSize\n");
++        return -1;
++    }
++    npt_decode_UINT(&dec, &decoded_size);
++    const uint64_t data_size = npt_decode_array_count_unchecked(&dec);
++
++    if (dec.fatal || dec.cur != dec.end || decoded_size != required_size ||
++        data_size != 0) {
++        fprintf(stderr, "FAIL: GetPrivateData failure reply: required %u, "
++                "data count %" PRIu64 "\n", decoded_size, data_size);
++        return -1;
++    }
++    return 0;
++}
++
+ /* ================================================================== */
+ /* Dispatch table                                                     */
+ /* ================================================================== */
+@@ -1922,6 +1958,8 @@ static const struct manual_test_entry manual_tests[] = {
+       test_manual_reply_unsupported_encode_DRED },
+     { "GetCopyableFootprints optional output presence and reply layout",
+       test_manual_get_copyable_footprints_optional_outputs },
++    { "GetPrivateData reports required size without copying data",
++      test_manual_get_private_data_required_size },
+ };
+ 
+ #define MANUAL_TEST_COUNT \

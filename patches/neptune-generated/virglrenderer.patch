@@ -81,7 +81,7 @@ index 089ab709..498ce8e5 100644
          if (!args->pTypeName) return;
          memset(args->pTypeName, 0, sizeof(CHAR) * *args->pBufferLength);
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d11device.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d11device.h
-index 2fc9e83c..b0134339 100644
+index 2fc9e83c..67e75916 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_id3d11device.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d11device.h
 @@ -4785,6 +4785,9 @@ struct npt_command_ID3D11Device_CheckCounter {
@@ -170,7 +170,28 @@ index 2fc9e83c..b0134339 100644
          args->pData = npt_cs_decoder_alloc_temp(dec, *args->pDataSize);
          if (!args->pData) return;
          memset(args->pData, 0, *args->pDataSize);
-@@ -6983,6 +6987,7 @@ struct npt_command_ID3D11Device1_CreateDeviceContextState {
+@@ -5212,12 +5216,19 @@ npt_encode_ID3D11Device_GetPrivateData_reply(struct npt_cs_encoder *enc,
+     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
+     if (npt_encode_simple_pointer(enc, args->pDataSize))
+         npt_encode_UINT(enc, args->pDataSize);
+-    if (args->pData) {
++    /* pData: array sized by output count 'pDataSize'.  On
++     * failure the host may have written the required count but left the
++     * array contents unpopulated, so only encode elements on success. */
++    if ((HRESULT)args->ret >= 0) {
++        if (args->pData) {
+         npt_encode_array_count(enc, *args->pDataSize);
+         npt_encode_blob_array(enc, args->pData, *args->pDataSize);
+     } else {
+         npt_encode_array_count(enc, 0);
+     }
++    } else {
++        npt_encode_array_count(enc, 0);
++    }
+ }
+
+ static inline void
+@@ -6983,6 +6994,7 @@ struct npt_command_ID3D11Device1_CreateDeviceContextState {
      const IID * EmulatedInterface;
      D3D_FEATURE_LEVEL * pChosenFeatureLevel;
      ID3DDeviceContextState ** ppContextState;
@@ -178,7 +199,7 @@ index 2fc9e83c..b0134339 100644
      /* Shadow: the guest-allocated id for ppContextState arrives in the command
       * body (no reply round-trip).  The post-dispatch register pass reads
       * this field and inserts {_guest_id_ppContextState -> *ppContextState} in the
-@@ -7018,7 +7023,7 @@ npt_decode_ID3D11Device1_CreateDeviceContextState_args_temp(struct npt_cs_decode
+@@ -7018,7 +7030,7 @@ npt_decode_ID3D11Device1_CreateDeviceContextState_args_temp(struct npt_cs_decode
          npt_cs_decoder_set_fatal(dec); /* non-optional pointer is NULL */
          return;
      }
@@ -187,7 +208,7 @@ index 2fc9e83c..b0134339 100644
      {
          uint64_t _gid;
          npt_decode_uint64_t(dec, &_gid);
-@@ -7043,9 +7048,13 @@ npt_decode_ID3D11Device1_CreateDeviceContextState_args_temp(struct npt_cs_decode
+@@ -7043,9 +7055,13 @@ npt_decode_ID3D11Device1_CreateDeviceContextState_args_temp(struct npt_cs_decode
 
 
 
@@ -204,7 +225,7 @@ index 2fc9e83c..b0134339 100644
 
  }
 
-@@ -7806,6 +7815,9 @@ struct npt_command_ID3D11Device2_GetResourceTiling {
+@@ -7806,6 +7822,9 @@ struct npt_command_ID3D11Device2_GetResourceTiling {
      UINT * pNumSubresourceTilings;
      UINT FirstSubresourceTilingToGet;
      D3D11_SUBRESOURCE_TILING * pSubresourceTilingsForNonPackedMips;
@@ -214,7 +235,7 @@ index 2fc9e83c..b0134339 100644
  };
 
  static inline void
-@@ -7818,9 +7830,9 @@ npt_decode_ID3D11Device2_GetResourceTiling_args_temp(struct npt_cs_decoder *dec,
+@@ -7818,9 +7837,9 @@ npt_decode_ID3D11Device2_GetResourceTiling_args_temp(struct npt_cs_decoder *dec,
          npt_decode_uint64_t(dec, &_id);
          args->pTiledResource = (ID3D11Resource *)npt_object_from_id(_id);
      }
@@ -227,7 +248,7 @@ index 2fc9e83c..b0134339 100644
      if (npt_decode_simple_pointer(dec)) {
          args->pNumSubresourceTilings = npt_cs_decoder_alloc_temp(dec, sizeof(UINT));
          if (!args->pNumSubresourceTilings) return;
-@@ -7832,15 +7844,27 @@ npt_decode_ID3D11Device2_GetResourceTiling_args_temp(struct npt_cs_decoder *dec,
+@@ -7832,15 +7851,27 @@ npt_decode_ID3D11Device2_GetResourceTiling_args_temp(struct npt_cs_decoder *dec,
 
      /* Allocate temp storage for output-only parameters */
 
@@ -265,7 +286,7 @@ index 2fc9e83c..b0134339 100644
 
      if ((args->pNumSubresourceTilings ? *args->pNumSubresourceTilings : 0)) {
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d11devicechild.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d11devicechild.h
-index 9cdba35d..065265c8 100644
+index 9cdba35d..cc40382f 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_id3d11devicechild.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d11devicechild.h
 @@ -170,6 +170,7 @@ struct npt_command_ID3D11DeviceChild_GetPrivateData {
@@ -290,6 +311,27 @@ index 9cdba35d..065265c8 100644
          args->pData = npt_cs_decoder_alloc_temp(dec, *args->pDataSize);
          if (!args->pData) return;
          memset(args->pData, 0, *args->pDataSize);
+@@ -226,12 +227,19 @@ npt_encode_ID3D11DeviceChild_GetPrivateData_reply(struct npt_cs_encoder *enc,
+     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
+     if (npt_encode_simple_pointer(enc, args->pDataSize))
+         npt_encode_UINT(enc, args->pDataSize);
+-    if (args->pData) {
++    /* pData: array sized by output count 'pDataSize'.  On
++     * failure the host may have written the required count but left the
++     * array contents unpopulated, so only encode elements on success. */
++    if ((HRESULT)args->ret >= 0) {
++        if (args->pData) {
+         npt_encode_array_count(enc, *args->pDataSize);
+         npt_encode_blob_array(enc, args->pData, *args->pDataSize);
+     } else {
+         npt_encode_array_count(enc, 0);
+     }
++    } else {
++        npt_encode_array_count(enc, 0);
++    }
+ }
+
+ static inline void
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d11devicecontext.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d11devicecontext.h
 index 1dd5dd54..edc65efc 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_id3d11devicecontext.h
@@ -1340,7 +1382,7 @@ index d73741a8..97b4aaf5 100644
      return;
  }
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d12object.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d12object.h
-index 374a5576..624f22c6 100644
+index 374a5576..bf378ee9 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_id3d12object.h
 +++ b/src/neptune/neptune-protocol/npt_protocol_host_id3d12object.h
 @@ -26,6 +26,7 @@ struct npt_command_ID3D12Object_GetPrivateData {
@@ -1365,6 +1407,27 @@ index 374a5576..624f22c6 100644
          args->pData = npt_cs_decoder_alloc_temp(dec, *args->pDataSize);
          if (!args->pData) return;
          memset(args->pData, 0, *args->pDataSize);
+@@ -82,12 +83,19 @@ npt_encode_ID3D12Object_GetPrivateData_reply(struct npt_cs_encoder *enc,
+     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
+     if (npt_encode_simple_pointer(enc, args->pDataSize))
+         npt_encode_UINT(enc, args->pDataSize);
+-    if (args->pData) {
++    /* pData: array sized by output count 'pDataSize'.  On
++     * failure the host may have written the required count but left the
++     * array contents unpopulated, so only encode elements on success. */
++    if ((HRESULT)args->ret >= 0) {
++        if (args->pData) {
+         npt_encode_array_count(enc, *args->pDataSize);
+         npt_encode_blob_array(enc, args->pData, *args->pDataSize);
+     } else {
+         npt_encode_array_count(enc, 0);
+     }
++    } else {
++        npt_encode_array_count(enc, 0);
++    }
+ }
+
+ static inline void
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_id3d12resource.h b/src/neptune/neptune-protocol/npt_protocol_host_id3d12resource.h
 index c35d79c9..60463e00 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_id3d12resource.h
@@ -1520,6 +1583,31 @@ index ad04c4b5..b4a6159a 100644
          args->pDiscarded = npt_cs_decoder_alloc_temp_array(dec, sizeof(BOOL), args->NumResources);
          if (!args->pDiscarded) return;
          memset(args->pDiscarded, 0, sizeof(BOOL) * args->NumResources);
+diff --git a/src/neptune/neptune-protocol/npt_protocol_host_idxgiobject.h b/src/neptune/neptune-protocol/npt_protocol_host_idxgiobject.h
+index 276c73c8..ddb08f1e 100644
+--- a/src/neptune/neptune-protocol/npt_protocol_host_idxgiobject.h
++++ b/src/neptune/neptune-protocol/npt_protocol_host_idxgiobject.h
+@@ -377,12 +377,19 @@ npt_encode_IDXGIObject_GetPrivateData_reply(struct npt_cs_encoder *enc,
+     npt_cs_encoder_write(enc, sizeof(_reply), &_reply, sizeof(_reply));
+     if (npt_encode_simple_pointer(enc, args->pDataSize))
+         npt_encode_UINT(enc, args->pDataSize);
+-    if (args->pData) {
++    /* pData: array sized by output count 'pDataSize'.  On
++     * failure the host may have written the required count but left the
++     * array contents unpopulated, so only encode elements on success. */
++    if ((HRESULT)args->ret >= 0) {
++        if (args->pData) {
+         npt_encode_array_count(enc, *args->pDataSize);
+         npt_encode_blob_array(enc, args->pData, *args->pDataSize);
+     } else {
+         npt_encode_array_count(enc, 0);
+     }
++    } else {
++        npt_encode_array_count(enc, 0);
++    }
+ }
+
+ static inline void
 diff --git a/src/neptune/neptune-protocol/npt_protocol_host_idxgioutput.h b/src/neptune/neptune-protocol/npt_protocol_host_idxgioutput.h
 index 3f81a987..4c0716b2 100644
 --- a/src/neptune/neptune-protocol/npt_protocol_host_idxgioutput.h
