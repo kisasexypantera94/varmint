@@ -479,7 +479,7 @@ fn run_case(case: &BenchCase, implementation: Implementation, copies: usize) -> 
     }
 
     // Guest frames arrive far slower than this copy completes, so drain the GPU
-    // between copies to keep queue backpressure out of the CPU measurement.
+    // between copies to keep queue backpressure out of the duration measurement.
     let mut cpu = Vec::with_capacity(copies);
     let mut gpu = Vec::with_capacity(copies);
     for frame in WARMUP_COPIES..WARMUP_COPIES + copies {
