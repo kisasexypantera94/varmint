@@ -17,6 +17,7 @@ use winit::{
     event::{DeviceEvent, ElementState, Modifiers, MouseButton, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::PhysicalKey,
+    platform::macos::ActiveEventLoopExtMacOS,
     window::{CursorGrabMode, Fullscreen, Window, WindowId},
 };
 
@@ -382,6 +383,8 @@ impl<'a> AppState<'a> {
 
 impl<'a> ApplicationHandler<AppEvent> for AppState<'a> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        event_loop.set_allows_automatic_window_tabbing(false);
+
         let attrs = Window::default_attributes()
             .with_title("Varmint")
             .with_inner_size(LogicalSize::new(1024u32, 768u32))
