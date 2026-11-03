@@ -36,9 +36,7 @@ def copy_to_clipboard(text):
             continue
         if result.returncode == 0:
             return
-    raise VetError(
-        "clipboard_failed", "Vet could not copy the launch options to the clipboard."
-    )
+    raise VetError("clipboard_failed", "Vet could not copy the text to the clipboard.")
 
 
 def open_game_properties(appid):

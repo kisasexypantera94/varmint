@@ -1,6 +1,7 @@
 """Qt interface for Vet."""
 
 from datetime import datetime, timezone
+import math
 from pathlib import Path
 import threading
 
@@ -19,8 +20,11 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QPlainTextEdit,
     QPushButton,
     QRadioButton,
+    QScrollArea,
+    QSizePolicy,
     QStackedWidget,
     QTextBrowser,
     QVBoxLayout,
@@ -34,6 +38,7 @@ from varmint_vet import (
     current_host_backend_warning,
     display_graphics,
     display_proton,
+    split_markdown_sections,
     transform_launch_options,
 )
 from varmint_vet_actions import (
@@ -79,6 +84,15 @@ QRadioButton::indicator { width: 18px; height: 18px; }
 QCheckBox { color: #b3b7d2; spacing: 8px; padding: 4px; }
 QCheckBox::indicator { width: 18px; height: 18px; }
 QTextBrowser { background: #1c203a; border: 1px solid #40445e; border-radius: 10px; padding: 12px; }
+QTextBrowser#guideProse { background: transparent; border: none; padding: 0; }
+QScrollArea#guideScroll { background: #1c203a; border: 1px solid #40445e; border-radius: 10px; }
+QScrollArea#guideScroll > QWidget > QWidget { background: #1c203a; }
+QFrame#codeBlock { background: #171a30; border: 1px solid #40445e; border-radius: 9px; }
+QPlainTextEdit#codeText {
+    background: #171a30; border: none; color: #f1f3f5; padding: 6px;
+    font-family: monospace;
+}
+QPushButton#copyCode { padding: 5px 12px; }
 """
 
 
@@ -166,6 +180,65 @@ class DetailsDialog(QDialog):
         layout.addWidget(close, alignment=Qt.AlignmentFlag.AlignRight)
 
 
+class GuideProse(QTextBrowser):
+    def __init__(self, markdown, parent=None):
+        super().__init__(parent)
+        self.setObjectName("guideProse")
+        self.setOpenLinks(False)
+        self.setOpenExternalLinks(False)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMarkdown(markdown)
+        self.document().documentLayout().documentSizeChanged.connect(self._fit_height)
+        QTimer.singleShot(0, self._fit_height)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.document().setTextWidth(max(1, self.viewport().width()))
+        self._fit_height()
+
+    def _fit_height(self, *_):
+        height = math.ceil(self.document().size().height()) + 4
+        if self.height() != height:
+            self.setFixedHeight(height)
+
+
+class GuideCodeBlock(QFrame):
+    def __init__(self, language, code, parent=None):
+        super().__init__(parent)
+        self.code = code
+        self.setObjectName("codeBlock")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 10)
+        layout.setSpacing(4)
+        header = QHBoxLayout()
+        label = QLabel(language or "text")
+        label.setObjectName("muted")
+        self.copy_button = QPushButton("Copy")
+        self.copy_button.setObjectName("copyCode")
+        self.copy_button.clicked.connect(self._copy)
+        header.addWidget(label)
+        header.addStretch()
+        header.addWidget(self.copy_button)
+        text = QPlainTextEdit(code)
+        text.setObjectName("codeText")
+        text.setReadOnly(True)
+        text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        lines = max(1, code.count("\n") + 1)
+        text.setFixedHeight(min(lines, 12) * text.fontMetrics().lineSpacing() + 18)
+        layout.addLayout(header)
+        layout.addWidget(text)
+
+    def _copy(self):
+        try:
+            copy_to_clipboard(self.code)
+            self.copy_button.setText("Copied")
+        except VetError:
+            self.copy_button.setText("Copy failed")
+        QTimer.singleShot(2000, lambda: self.copy_button.setText("Copy"))
+
+
 class GuideDialog(QDialog):
     def __init__(self, markdown, parent=None):
         super().__init__(parent)
@@ -174,11 +247,21 @@ class GuideDialog(QDialog):
         self.setFixedSize(860, 640)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
-        browser = ScrollTextBrowser()
-        browser.setOpenLinks(False)
-        browser.setOpenExternalLinks(False)
-        browser.setMarkdown(markdown)
-        layout.addWidget(browser, 1)
+        scroll = QScrollArea()
+        scroll.setObjectName("guideScroll")
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(16, 16, 16, 16)
+        content_layout.setSpacing(12)
+        for kind, language, text in split_markdown_sections(markdown):
+            widget = (
+                GuideCodeBlock(language, text) if kind == "code" else GuideProse(text)
+            )
+            content_layout.addWidget(widget)
+        content_layout.addStretch()
+        scroll.setWidget(content)
+        layout.addWidget(scroll, 1)
         close = QPushButton("Close")
         close.clicked.connect(self.accept)
         layout.addWidget(close, alignment=Qt.AlignmentFlag.AlignRight)

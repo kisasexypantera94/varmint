@@ -790,6 +790,22 @@ def template_field(field_name, text):
     return value or None
 
 
+def split_markdown_sections(markdown):
+    sections = []
+    position = 0
+    pattern = re.compile(r"^```([^\n`]*)\n(.*?)^```[ \t]*(?:\n|$)", re.M | re.S)
+    for match in pattern.finditer(markdown):
+        prose = markdown[position : match.start()].strip()
+        if prose:
+            sections.append(("prose", "", prose))
+        sections.append(("code", match.group(1).strip(), match.group(2).rstrip("\n")))
+        position = match.end()
+    prose = markdown[position:].strip()
+    if prose:
+        sections.append(("prose", "", prose))
+    return sections
+
+
 class VarmintDocsProvider:
     REMOTE = "https://raw.githubusercontent.com/kisasexypantera94/varmint/master/guest/varmint-vet-catalog.json"
     GUIDE = "https://github.com/kisasexypantera94/varmint/blob/master/"

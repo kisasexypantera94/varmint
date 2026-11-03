@@ -593,6 +593,19 @@ class FakeHttp:
 
 
 class ResearchTests(unittest.TestCase):
+    def test_markdown_guide_is_split_into_prose_and_copyable_code(self):
+        markdown = (
+            "# Setup\n\nRun this:\n\n```bash\necho hello\necho world\n```\n\nDone."
+        )
+        self.assertEqual(
+            vet.split_markdown_sections(markdown),
+            [
+                ("prose", "", "# Setup\n\nRun this:"),
+                ("code", "bash", "echo hello\necho world"),
+                ("prose", "", "Done."),
+            ],
+        )
+
     def test_varmint_catalog_matches_exact_appid(self):
         provider = vet.VarmintDocsProvider(
             catalog_path=GUEST / "varmint-vet-catalog.json"
