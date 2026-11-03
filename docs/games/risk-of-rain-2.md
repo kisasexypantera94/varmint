@@ -9,8 +9,16 @@ This configuration is based on a user report and has not been tested directly by
 Use the following configuration:
 
 ```text
+Steam App IDs: 632360
+Profile:        default
+Recommendation: Recommended
+Evidence:       Reported
+Setup:          Automatic
+Runtime:        Proton
 Proton version: Proton 10.0
 Renderer:       Venus
+Host backend:    MoltenVK
+Launch options: Unchanged
 ```
 
 ### 1. Select Proton 10

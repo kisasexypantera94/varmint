@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Vet
+GenericName=Help with a game
+Comment=Check and apply recommended Varmint game settings
+Exec=/usr/local/bin/varmint-vet open
+Icon=/usr/local/share/icons/hicolor/512x512/apps/varmint-vet.png
+Terminal=false
+Categories=Game;Utility;

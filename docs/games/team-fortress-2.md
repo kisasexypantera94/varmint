@@ -7,8 +7,14 @@ Team Fortress 2 is playable in Varmint using the native Linux build with the Vul
 Use the following configuration:
 
 ```text
+Steam App IDs:    440
+Profile:          native-vulkan
+Recommendation:  Recommended
+Evidence:         Tested
+Setup:            Manual
 Runtime:           Native Linux
 Renderer:          Vulkan
+Host backend:    MoltenVK
 Graphics settings: Default
 ```
 

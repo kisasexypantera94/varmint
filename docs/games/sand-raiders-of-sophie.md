@@ -9,8 +9,15 @@ This configuration is based on a user report and has not been tested directly by
 Use the following configuration:
 
 ```text
+Steam App IDs: 1431300
+Profile:        default
+Recommendation: Recommended
+Evidence:       Reported
+Setup:          Automatic
+Runtime:        Proton
 Proton version: Proton Hotfix
 Renderer:       Neptune
+Host backend:    DXMT
 Launch options: varmint-graphics neptune %command%
 ```
 

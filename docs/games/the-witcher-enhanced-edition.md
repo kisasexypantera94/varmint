@@ -7,7 +7,16 @@ The Witcher: Enhanced Edition is playable in Varmint using Proton 9.
 Use the following configuration:
 
 ```text
+Steam App IDs: 20900
+Profile:        default
+Recommendation: Recommended
+Evidence:       Tested
+Setup:          Automatic
+Runtime:        Proton
 Proton version: Proton 9.0
+Renderer:       Venus
+Host backend:    MoltenVK
+Launch options: Unchanged
 ```
 
 ### 1. Select Proton 9

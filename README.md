@@ -44,6 +44,8 @@ The games below have been tested. Click a game name for its tested configuration
 | Game                                                                                    | Status | Setup Difficulty |
 | --------------------------------------------------------------------------------------- | -----: | ---------------: |
 | [The Witcher 3: Wild Hunt](docs/games/the-witcher-3.md)                                 |      ✅ |               🟢 |
+| [Stellar Blade Demo](docs/games/stellar-blade-demo.md)                                 |      ✅ |               🟡 |
+| [Black Myth: Wukong Benchmark Tool](docs/games/black-myth-wukong-benchmark.md)          |      ✅ |               🟡 |
 | [The Witcher: Enhanced Edition](docs/games/the-witcher-enhanced-edition.md)             |      ✅ |               🟢 |
 | [Dragon's Dogma: Dark Arisen](docs/games/dragons-dogma-dark-arisen.md)                  |      ✅ |               🟡 |
 | [Fallout: New Vegas](docs/games/fallout-new-vegas.md)                                   |      ✅ |               🟢 |

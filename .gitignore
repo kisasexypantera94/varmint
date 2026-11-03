@@ -15,3 +15,6 @@ _dxmt.log
 system-image-id
 vm.lock
 vmm-update*.log
+patches/gamescope*
+__pycache__/
+*.py[cod]

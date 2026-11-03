@@ -7,8 +7,15 @@ DARK SOULS II: Scholar of the First Sin is playable in Varmint using Neptune.
 Use the following configuration:
 
 ```text
+Steam App IDs: 335300
+Profile:        default
+Recommendation: Recommended
+Evidence:       Tested
+Setup:          Assisted
+Runtime:        Proton
 Proton version: Proton Experimental
 Renderer:       Neptune
+Host backend:    DXMT
 Launch options: varmint-graphics neptune %command%
 ```
 

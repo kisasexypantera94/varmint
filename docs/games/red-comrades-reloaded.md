@@ -10,7 +10,16 @@ The following games are playable in Varmint using Proton 10:
 Use the following configuration:
 
 ```text
+Steam App IDs: 415610, 443360
+Profile:        default
+Recommendation: Recommended
+Evidence:       Tested
+Setup:          Automatic
+Runtime:        Proton
 Proton version: Proton 10.0
+Renderer:       Venus
+Host backend:    MoltenVK
+Launch options: Unchanged
 ```
 
 ## Select Proton 10

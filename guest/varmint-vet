@@ -1,0 +1,148 @@
+#!/usr/bin/python3
+"""Vet launcher and install monitor."""
+
+import argparse
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+libraries = (
+    Path.home() / ".local/opt/pyqt6/usr/lib/python3/dist-packages",
+    Path.home() / ".local/lib/varmint",
+    Path("/usr/local/lib/varmint"),
+)
+for library in reversed(libraries):
+    if library.is_dir():
+        sys.path.insert(0, str(library))
+
+from varmint_vet import InstallMonitor, Preferences, Steam, VetService  # noqa: E402
+from varmint_vet_actions import NOTIFICATION_TIMEOUT_MS, notification_icon, notify  # noqa: E402
+
+
+def notification(arguments):
+    result = subprocess.run(
+        arguments,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.stdout.strip(), result.returncode
+
+
+def notify_recommendation(service, game):
+    if not Preferences().suggestions_enabled():
+        return
+    try:
+        _, _, _, recommendation, plan = service.prepare(game["appid"], game["name"])
+    except Exception as exception:
+        print(f"Vet research failed for {game['appid']}: {exception}", file=sys.stderr)
+        return
+    if not (recommendation.graphics_mode or recommendation.proton):
+        return
+    if not any(plan["changes"].values()) and not plan.get("host_warning"):
+        return
+    message = (
+        plan.get("host_warning") or f"Vet found a recommended setup for {game['name']}."
+    )
+    output, status = notification(
+        [
+            "notify-send",
+            "--app-name=Vet",
+            "--urgency=normal",
+            "--wait",
+            "--icon",
+            notification_icon(),
+            f"--expire-time={NOTIFICATION_TIMEOUT_MS}",
+            "--action=view=View",
+            "--action=dismiss=Dismiss",
+            "Vet",
+            message,
+        ]
+    )
+    if status == 0 and output == "view":
+        from varmint_vet_qt import run
+
+        run(service, game["appid"])
+
+
+def notify_completed_diagnostics(service):
+    for diagnostic in service.diagnostics.completed_unnotified():
+        request = diagnostic["request"]
+        output, status = notification(
+            [
+                "notify-send",
+                "--app-name=Vet",
+                "--urgency=normal",
+                "--wait",
+                "--icon",
+                notification_icon(),
+                f"--expire-time={NOTIFICATION_TIMEOUT_MS}",
+                "--action=view=View report",
+                "--action=dismiss=Dismiss",
+                "Diagnostic captured",
+                f"Vet prepared a report for {request['game']}.",
+            ]
+        )
+        if status == 0:
+            service.diagnostics.mark_notified(request["run_id"])
+        if status == 0 and output == "view":
+            from varmint_vet_qt import run
+
+            run(service, request["appid"], request["run_id"])
+
+
+def monitor_once(steam, service, monitor_state):
+    if steam.any_game_running():
+        return
+    notify_completed_diagnostics(service)
+    for game in monitor_state.poll():
+        if steam.any_game_running():
+            break
+        notify_recommendation(service, game)
+
+
+def monitor(interval):
+    steam = Steam()
+    service = VetService(steam=steam)
+    monitor_state = InstallMonitor(steam)
+    while True:
+        try:
+            monitor_once(steam, service, monitor_state)
+        except Exception as exception:
+            print(f"Vet monitor: {exception}", file=sys.stderr)
+        time.sleep(interval)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    monitor_parser = subparsers.add_parser("monitor")
+    monitor_parser.add_argument("--interval", type=float, default=15.0)
+    open_parser = subparsers.add_parser("open")
+    open_parser.add_argument("--appid", type=int)
+    open_parser.add_argument("--diagnostic-run")
+    arguments = parser.parse_args()
+    try:
+        if arguments.command == "monitor":
+            monitor(max(arguments.interval, 1.0))
+        else:
+            from varmint_vet_qt import run
+
+            raise SystemExit(
+                run(
+                    selected_appid=arguments.appid,
+                    diagnostic_run_id=arguments.diagnostic_run,
+                )
+            )
+    except SystemExit:
+        raise
+    except Exception as exception:
+        print(f"Vet failed: {exception}", file=sys.stderr)
+        notify("Vet could not complete the operation", str(exception))
+        raise SystemExit(1) from exception
+
+
+if __name__ == "__main__":
+    main()

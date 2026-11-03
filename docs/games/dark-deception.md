@@ -7,8 +7,15 @@ Dark Deception is playable in Varmint using Neptune.
 Use the following configuration:
 
 ```text
+Steam App IDs: 332950
+Profile:        default
+Recommendation: Recommended
+Evidence:       Tested
+Setup:          Automatic
+Runtime:        Proton
 Proton version: Proton Experimental
 Renderer:       Neptune
+Host backend:    DXMT
 Launch options: varmint-graphics neptune %command%
 ```
 

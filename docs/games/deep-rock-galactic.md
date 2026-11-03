@@ -7,8 +7,15 @@ Deep Rock Galactic is playable in Varmint using Neptune.
 Use the following configuration:
 
 ```text
+Steam App IDs: 548430
+Profile:        default
+Recommendation: Recommended
+Evidence:       Tested
+Setup:          Automatic
+Runtime:        Proton
 Proton version: Proton Experimental
 Renderer:       Neptune
+Host backend:    DXMT
 Launch options: varmint-graphics neptune %command%
 ```
 
@@ -26,7 +33,25 @@ No additional configuration is required.
 
 When launching the game from Steam, select the **DirectX 11** option.
 
-Do not use the DirectX 12 version.
+DirectX 11 through DXMT remains the recommended path.
+
+## DirectX 12 alternative
+
+DirectX 12 also works through D3DMetal:
+
+```text
+Profile:        dx12
+Recommendation: Alternative
+Evidence:       Tested
+Setup:          Automatic
+Runtime:        Proton
+Proton version: Proton Experimental
+Renderer:       Neptune DX12
+Host backend:    D3DMetal
+Launch options: varmint-graphics neptune-dx12 %command% -dx12
+```
+
+Select **D3DMetal** in the Varmint launcher before starting the VM, then use the launch options above.
 
 ## Known issues
 
@@ -45,4 +70,5 @@ Deep Rock Galactic
 Proton Experimental
 DirectX 11
 Neptune
+DXMT
 ```

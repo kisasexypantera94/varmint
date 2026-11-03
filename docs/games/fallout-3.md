@@ -7,7 +7,16 @@ Fallout 3 is playable in Varmint using Proton 10.
 Use the following configuration:
 
 ```text
+Steam App IDs: 22300, 22370
+Profile:        default
+Recommendation: Recommended
+Evidence:       Tested
+Setup:          Automatic
+Runtime:        Proton
 Proton version: Proton 10
+Renderer:       Venus
+Host backend:    MoltenVK
+Launch options: Unchanged
 ```
 
 ### 1. Select Proton 10

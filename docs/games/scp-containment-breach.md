@@ -7,7 +7,16 @@ SCP – Containment Breach is playable in Varmint using Proton 10.
 Use the following configuration:
 
 ```text
+Steam App IDs: 2178380
+Profile:        default
+Recommendation: Recommended
+Evidence:       Tested
+Setup:          Automatic
+Runtime:        Proton
 Proton version: Proton 10.0
+Renderer:       Venus
+Host backend:    MoltenVK
+Launch options: Unchanged
 ```
 
 ### 1. Select Proton 10

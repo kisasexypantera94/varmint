@@ -7,8 +7,15 @@ The Dark Pictures Anthology: The Devil in Me Demo is playable in Varmint using N
 Use the following configuration:
 
 ```text
+Steam App IDs: 1959910
+Profile:        demo
+Recommendation: Recommended
+Evidence:       Tested
+Setup:          Automatic
+Runtime:        Proton
 Proton version: Proton Experimental
 Renderer:       Neptune
+Host backend:    DXMT
 Launch options: varmint-graphics neptune %command%
 ```
 

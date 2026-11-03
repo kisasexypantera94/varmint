@@ -7,7 +7,15 @@ Dishonored is playable in Varmint using Proton 10 with the default game settings
 Use the following configuration:
 
 ```text
+Steam App IDs: 205100
+Profile:        default
+Recommendation: Recommended
+Evidence:       Tested
+Setup:          Automatic
+Runtime:        Proton
 Proton version:    Proton 10
+Renderer:          Venus
+Host backend:    MoltenVK
 Graphics settings: Default
 Launch options:    None
 ```

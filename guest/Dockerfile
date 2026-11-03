@@ -164,6 +164,16 @@ RUN install -Dm0755 /opt/varmint/source/build-image-container.sh /usr/local/bin/
     install -Dm0755 /opt/varmint/source/varmint-display-scale /opt/varmint/rootfs/usr/local/share/varmint/varmint-display-scale && \
     install -Dm0755 /opt/varmint/source/neptune/build.sh /opt/varmint/rootfs/usr/local/bin/varmint-neptune-build && \
     install -Dm0755 /opt/varmint/source/neptune/graphics.py /opt/varmint/rootfs/usr/local/bin/varmint-graphics && \
+    install -Dm0755 /opt/varmint/source/varmint-vet /opt/varmint/rootfs/usr/local/bin/varmint-vet && \
+    install -Dm0644 /opt/varmint/source/varmint_vet.py /opt/varmint/rootfs/usr/local/lib/varmint/varmint_vet.py && \
+    install -Dm0644 /opt/varmint/source/varmint_vet_catalog.py /opt/varmint/rootfs/usr/local/lib/varmint/varmint_vet_catalog.py && \
+    install -Dm0644 /opt/varmint/source/varmint_vet_diagnostics.py /opt/varmint/rootfs/usr/local/lib/varmint/varmint_vet_diagnostics.py && \
+    install -Dm0644 /opt/varmint/source/varmint_vet_actions.py /opt/varmint/rootfs/usr/local/lib/varmint/varmint_vet_actions.py && \
+    install -Dm0644 /opt/varmint/source/varmint_vet_qt.py /opt/varmint/rootfs/usr/local/lib/varmint/varmint_vet_qt.py && \
+    install -Dm0644 /opt/varmint/source/varmint_vdf.py /opt/varmint/rootfs/usr/local/lib/varmint/varmint_vdf.py && \
+    install -Dm0644 /opt/varmint/source/varmint-vet.png /opt/varmint/rootfs/usr/local/share/icons/hicolor/512x512/apps/varmint-vet.png && \
+    install -Dm0644 /opt/varmint/source/VarmintVet.colors /opt/varmint/rootfs/usr/local/share/color-schemes/VarmintVet.colors && \
+    install -Dm0644 /opt/varmint/source/varmint-vet-catalog.json /opt/varmint/rootfs/usr/local/share/varmint/vet/catalog.json && \
     install -Dm0755 /opt/varmint/source/neptune/dev-setup.sh /opt/varmint/rootfs/usr/local/bin/varmint-neptune-dev-setup && \
     install -Dm0755 /opt/varmint/source/varmint-clipboard-agent /opt/varmint/rootfs/usr/local/libexec/varmint-clipboard-agent && \
     install -Dm0755 /opt/varmint/source/varmint-gamepad /opt/varmint/rootfs/usr/local/libexec/varmint-gamepad && \
@@ -177,6 +187,7 @@ RUN install -Dm0755 /opt/varmint/source/build-image-container.sh /usr/local/bin/
     install -Dm0755 /opt/varmint/source/varmint-initramfs-fsck-hook /opt/varmint/rootfs/etc/initramfs-tools/hooks/varmint-fsck && \
     install -Dm0644 /opt/varmint/source/varmint-host-time.service /opt/varmint/rootfs/etc/systemd/system/varmint-host-time.service && \
     install -Dm0644 /opt/varmint/source/varmint-audio-watchdog.service /opt/varmint/rootfs/etc/systemd/user/varmint-audio-watchdog.service && \
+    install -Dm0644 /opt/varmint/source/varmint-vet.service /opt/varmint/rootfs/etc/systemd/user/varmint-vet.service && \
     install -Dm0644 /opt/varmint/source/varmint-firstboot.service /opt/varmint/rootfs/etc/systemd/system/varmint-firstboot.service && \
     install -Dm0644 /opt/varmint/source/varmint-home.service /opt/varmint/rootfs/etc/systemd/system/varmint-home.service && \
     install -Dm0644 /opt/varmint/source/varmint-home-sddm.conf /opt/varmint/rootfs/etc/systemd/system/sddm.service.d/10-varmint-home.conf && \
@@ -188,6 +199,7 @@ RUN install -Dm0755 /opt/varmint/source/build-image-container.sh /usr/local/bin/
     install -Dm0644 /opt/varmint/source/steam-edge-resize.desktop /opt/varmint/rootfs/etc/xdg/autostart/steam-edge-resize.desktop && \
     install -Dm0644 /opt/varmint/source/varmint-display-scale.desktop /opt/varmint/rootfs/usr/local/share/varmint/varmint-display-scale.desktop && \
     install -Dm0644 /opt/varmint/source/steam.desktop /opt/varmint/rootfs/usr/local/share/applications/steam.desktop && \
+    install -Dm0644 /opt/varmint/source/vet.desktop /opt/varmint/rootfs/usr/local/share/applications/vet.desktop && \
     rm -rf /opt/varmint/source
 
 ENTRYPOINT ["/usr/local/bin/build-varmint-guest"]

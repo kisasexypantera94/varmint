@@ -9,8 +9,15 @@ The Source engine's default audio buffering also causes noticeable audio latency
 Use the following configuration:
 
 ```text
+Steam App IDs: 2600
+Profile:        unofficial-patch
+Recommendation: Recommended
+Evidence:       Tested
+Setup:          Manual
+Runtime:        Proton
 Proton version: Proton 10.0
 Renderer:       Venus
+Host backend:    MoltenVK
 Patch:          Unofficial Patch (Basic)
 Launch options: -game Unofficial_Patch
 snd_mixahead:   0.05

@@ -13,8 +13,15 @@ The launcher is also surprisingly memory-hungry. If possible, allocate more than
 Use the following configuration:
 
 ```text
+Steam App IDs: 110800
+Profile:        launcher-workaround
+Recommendation: Recommended
+Evidence:       Tested
+Setup:          Manual
+Runtime:        Proton
 Proton version: Proton 10.0
 Renderer:       Venus
+Host backend:    MoltenVK
 RAM:            24 GB recommended
 Launch options: bash -c 'DLL="$HOME/.local/share/Steam/steamapps/compatdata/110800/pfx/drive_c/Program Files/Rockstar Games/Social Club/libcef.dll"; sleep 10; [[ -f "$DLL" ]] && touch "$DLL"; sleep 3; exec "$@"' -- %command%
 ```

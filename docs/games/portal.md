@@ -7,8 +7,14 @@ Portal and Portal 2 are playable in Varmint using their native Linux builds with
 Use the following configuration:
 
 ```text
+Steam App IDs:    400, 620
+Profile:          native-vulkan
+Recommendation:  Recommended
+Evidence:         Tested
+Setup:            Manual
 Runtime:           Native Linux
 Renderer:          Vulkan
+Host backend:    MoltenVK
 Graphics settings: Default
 Launch options:    -vulkan
 ```

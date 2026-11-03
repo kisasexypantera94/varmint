@@ -9,8 +9,15 @@ Neptune is recommended. Venus also works, but requires limiting the DirectX 11 f
 Use the following configuration:
 
 ```text
+Steam App IDs: 264710
+Profile:        neptune
+Recommendation: Recommended
+Evidence:       Tested
+Setup:          Automatic
+Runtime:        Proton
 Proton version: Proton 10.0
 Renderer:       Neptune
+Host backend:    DXMT
 Launch options: varmint-graphics neptune %command%
 ```
 
@@ -41,6 +48,18 @@ For a substantial FPS improvement, reduce or disable **Reflections**. Other sett
 ## Using Venus instead
 
 Venus also works, but requires limiting the DirectX 11 feature level exposed by DXVK.
+
+```text
+Profile:        venus-feature-level-10-1
+Recommendation: Alternative
+Evidence:       Tested
+Setup:          Manual
+Runtime:        Proton
+Proton version: Proton 10.0
+Renderer:       Venus
+Host backend:    MoltenVK
+Launch options: DXVK_CONFIG_FILE="$HOME/dxvk.conf" %command%
+```
 
 Create `$HOME/dxvk.conf` with:
 

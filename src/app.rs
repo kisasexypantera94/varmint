@@ -6,6 +6,7 @@ use crate::{
     virtio::input::keys::*,
 };
 use std::{
+    collections::BTreeSet,
     sync::{Mutex, mpsc::Sender},
     time::{Duration, Instant},
 };
@@ -165,6 +166,7 @@ struct AppState<'a> {
     last_mouse_pos: Option<(f64, f64)>,
     mouse_captured: bool,
     capture_chord_held: bool,
+    pressed_keys: BTreeSet<u16>,
     rel_mouse_frac_dx: f64,
     rel_mouse_frac_dy: f64,
 
@@ -197,6 +199,7 @@ impl<'a> AppState<'a> {
             last_mouse_pos: None,
             mouse_captured: false,
             capture_chord_held: false,
+            pressed_keys: BTreeSet::new(),
             rel_mouse_frac_dx: 0.0,
             rel_mouse_frac_dy: 0.0,
             stats_visible: false,
@@ -349,6 +352,7 @@ impl<'a> AppState<'a> {
 
         eprintln!("vm: requesting guest shutdown");
         self.shutdown_requested = true;
+        self.release_pressed_keys();
         self.set_mouse_capture(false);
         for pressed in [true, false] {
             let _ = self.host_tx.send(RuntimeEvent::Input(RuntimeInputEvent::Key {
@@ -364,9 +368,31 @@ impl<'a> AppState<'a> {
         let state = modifiers.state();
         let held = state.control_key() && state.super_key();
         if held && !self.capture_chord_held {
+            self.release_pressed_keys();
             self.set_mouse_capture(!self.mouse_captured);
         }
         self.capture_chord_held = held;
+    }
+
+    fn update_key(&mut self, code: u16, pressed: bool) {
+        let changed = if pressed {
+            self.pressed_keys.insert(code)
+        } else {
+            self.pressed_keys.remove(&code)
+        };
+        if changed {
+            let _ = self
+                .host_tx
+                .send(RuntimeEvent::Input(RuntimeInputEvent::Key { code, pressed }));
+        }
+    }
+
+    fn release_pressed_keys(&mut self) {
+        for code in std::mem::take(&mut self.pressed_keys) {
+            let _ = self
+                .host_tx
+                .send(RuntimeEvent::Input(RuntimeInputEvent::Key { code, pressed: false }));
+        }
     }
 
     fn take_relative_mouse_delta(accum: &mut f64, delta: f64) -> i32 {
@@ -464,6 +490,7 @@ impl<'a> ApplicationHandler<AppEvent> for AppState<'a> {
             }
 
             WindowEvent::Focused(false) => {
+                self.release_pressed_keys();
                 self.set_mouse_capture(false);
                 self.capture_chord_held = false;
             }
@@ -476,10 +503,10 @@ impl<'a> ApplicationHandler<AppEvent> for AppState<'a> {
                 let pressed = event.state == ElementState::Pressed;
                 if let PhysicalKey::Code(code) = event.physical_key {
                     if let Some(linux_code) = winit_to_linux_key(code) {
-                        let _ = self.host_tx.send(RuntimeEvent::Input(RuntimeInputEvent::Key {
-                            code: linux_code,
-                            pressed,
-                        }));
+                        if self.capture_chord_held && matches!(linux_code, KEY_LEFTCTRL | KEY_RIGHTCTRL) {
+                            return;
+                        }
+                        self.update_key(linux_code, pressed);
                     }
                 }
             }
@@ -638,4 +665,37 @@ pub fn run<'a>(
     let mut app = AppState::new(display, host_tx, Box::new(on_exit));
     event_loop.run_app(&mut app).unwrap();
     app.restart
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc::{Receiver, channel};
+
+    fn receive_key(receiver: &Receiver<RuntimeEvent>) -> (u16, bool) {
+        match receiver.recv().unwrap() {
+            RuntimeEvent::Input(RuntimeInputEvent::Key { code, pressed }) => (code, pressed),
+            _ => panic!("expected keyboard event"),
+        }
+    }
+
+    #[test]
+    fn releasing_pressed_keys_clears_modifiers_and_suppresses_late_releases() {
+        let display = Mutex::new(DisplayBuffer::new());
+        let (sender, receiver) = channel();
+        let mut app = AppState::new(&display, sender, Box::new(|| {}));
+
+        app.update_key(KEY_LEFTCTRL, true);
+        app.update_key(KEY_LEFTCTRL, true);
+        app.update_key(KEY_LEFTSHIFT, true);
+        app.release_pressed_keys();
+        app.update_key(KEY_LEFTCTRL, false);
+        app.update_key(KEY_LEFTSHIFT, false);
+
+        assert_eq!(receive_key(&receiver), (KEY_LEFTCTRL, true));
+        assert_eq!(receive_key(&receiver), (KEY_LEFTSHIFT, true));
+        assert_eq!(receive_key(&receiver), (KEY_LEFTCTRL, false));
+        assert_eq!(receive_key(&receiver), (KEY_LEFTSHIFT, false));
+        assert!(receiver.try_recv().is_err());
+    }
 }

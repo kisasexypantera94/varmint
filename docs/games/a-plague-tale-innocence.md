@@ -7,8 +7,15 @@ A Plague Tale: Innocence is playable in Varmint using Neptune.
 Use the following configuration:
 
 ```text
+Steam App IDs: 752590
+Profile:        default
+Recommendation: Recommended
+Evidence:       Tested
+Setup:          Automatic
+Runtime:        Proton
 Proton version: Proton Experimental
 Renderer:       Neptune
+Host backend:    DXMT
 Launch options: varmint-graphics neptune %command%
 ```
 

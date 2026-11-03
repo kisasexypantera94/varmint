@@ -1,10 +1,8 @@
 # Running The Witcher 3 in Varmint
 
-The Witcher 3 is playable in Varmint using either Neptune or Venus.
+The Witcher 3 is playable in Varmint using Neptune. The Classic version also works through Venus.
 
-**Neptune is the recommended renderer.** It supports the **next-gen** and **Classic** versions of the game.
-
-The new **Remastered** version is not currently supported because it requires DirectX 12.
+**Neptune is the recommended renderer.** Remastered uses DirectX 12 through D3DMetal. The next-gen and Classic versions use the DirectX 11 path through DXMT.
 
 Venus remains available as an alternative, but currently only works with the Classic version.
 
@@ -16,14 +14,46 @@ For both Neptune and Venus, start from the **Medium** preset and enable higher-q
 
 Keep NVIDIA-specific features disabled, including **HairWorks**.
 
-## Recommended setup: Neptune
+## Recommended setup: Remastered
+
+The default Remastered branch uses DirectX 12:
+
+```text
+Steam App IDs: 292030
+Profile:        remastered-dx12
+Recommendation: Recommended
+Evidence:       Tested
+Setup:          Automatic
+Runtime:        Proton
+Game version:   public
+Proton version: Proton Experimental
+Renderer:       Neptune DX12
+Host backend:    D3DMetal
+Launch options: varmint-graphics neptune-dx12 %command%
+```
+
+Before starting the VM, select **D3DMetal** in the Varmint launcher. In Steam, select **Proton Experimental** and use:
+
+```text
+varmint-graphics neptune-dx12 %command%
+```
+
+## Recommended setup: next-gen and Classic
+
+These versions use DirectX 11 through DXMT.
 
 Use the following configuration:
 
 ```text
+Profile:        next-gen-neptune
+Recommendation: Recommended
+Evidence:       Tested
+Setup:          Assisted
+Runtime:        Proton
 Game version:   next-gen
 Proton version: Proton 10.0
 Renderer:       Neptune
+Host backend:    DXMT
 Launch options: FEX_X87REDUCEDPRECISION=0 varmint-graphics neptune %command%
 ```
 
@@ -38,8 +68,6 @@ In Steam:
 ### 2. Select the next-gen version
 
 Open **Properties → Game Versions & Betas** and select **next-gen**.
-
-The new Remastered version is not currently supported because it requires DirectX 12.
 
 ### 3. Enable Neptune
 
@@ -56,6 +84,19 @@ In REDlauncher, select the **DirectX 11** version of the game.
 ### Optional: use the Classic version
 
 Neptune also supports the Classic version of The Witcher 3.
+
+```text
+Profile:        classic-neptune
+Recommendation: Recommended
+Evidence:       Tested
+Setup:          Assisted
+Runtime:        Proton
+Game version:   Classic
+Proton version: Proton 10.0
+Renderer:       Neptune
+Host backend:    DXMT
+Launch options: FEX_X87REDUCEDPRECISION=0 varmint-graphics neptune %command%
+```
 
 The Classic version is slightly faster, but uses the older and simpler graphics.
 
@@ -78,9 +119,15 @@ Venus is the default backend and requires no additional setup.
 Use the following configuration:
 
 ```text
+Profile:        classic-venus
+Recommendation: Alternative
+Evidence:       Tested
+Setup:          Assisted
+Runtime:        Proton
 Game version:   Classic
 Proton version: Proton 10.0
 Renderer:       Venus
+Host backend:    MoltenVK
 Launch options: FEX_X87REDUCEDPRECISION=0 %command%
 ```
 
@@ -96,7 +143,7 @@ Varmint enables reduced x87 precision by default for compatibility with some old
 
 This breaks the 32-bit REDlauncher installer and can cause it to fail with a `Path not found` error.
 
-For The Witcher 3, always use:
+For the next-gen and Classic DirectX 11 paths, use:
 
 ```text
 FEX_X87REDUCEDPRECISION=0
@@ -104,28 +151,41 @@ FEX_X87REDUCEDPRECISION=0
 
 ## Tested configurations
 
-### Neptune
+### Remastered
+
+```text
+The Witcher 3: Wild Hunt — Remastered
+Public branch
+Proton Experimental
+DirectX 12
+Neptune DX12
+D3DMetal
+NVIDIA HairWorks disabled
+```
+
+### Next-gen and Classic through Neptune
 
 ```text
 The Witcher 3: Wild Hunt
 next-gen or Classic
-Remastered not supported
 Proton 10.0
 DirectX 11
 Neptune
+DXMT
 FEX_X87REDUCEDPRECISION=0
 NVIDIA HairWorks disabled
 ```
 
-### Venus
+### Classic through Venus
 
 ```text
 The Witcher 3: Wild Hunt
 Classic branch only
-next-gen and Remastered not supported
+next-gen and Remastered not supported through Venus
 Proton 10.0
 DirectX 11
 Venus
+MoltenVK
 FEX_X87REDUCEDPRECISION=0
 DXVK caches enabled
 NVIDIA HairWorks disabled

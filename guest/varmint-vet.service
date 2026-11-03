@@ -1,0 +1,12 @@
+[Unit]
+Description=Varmint Vet game setup assistant
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=/usr/local/bin/varmint-vet monitor
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

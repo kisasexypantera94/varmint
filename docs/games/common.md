@@ -11,6 +11,10 @@ Varmint has two main graphics backends:
 - Venus - the default backend.
 - Neptune - the preferred backend for supported 64-bit DirectX 11 games.
 
+Venus and native Vulkan use MoltenVK on the host. Neptune DirectX 11 can use
+either DXMT or D3DMetal; DXMT is the default recommendation. Neptune DX12
+requires D3DMetal.
+
 Use the backend recommended on the game's documentation page.
 
 ### Venus

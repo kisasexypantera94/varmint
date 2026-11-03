@@ -182,6 +182,9 @@ pub fn run(config_path: &Path) -> Result<()> {
         Err(std::env::VarError::NotPresent) => config.neptune_backend,
         Err(error) => panic!("invalid NPT_BACKEND: {error}"),
     };
+    config
+        .kernel_args
+        .push_str(&format!(" varmint.neptune_backend={}", neptune_backend.as_env()));
 
     unsafe {
         std::env::set_var("NPT_BACKEND", neptune_backend.as_env());

@@ -9,8 +9,16 @@ The original WMV movies prevent the game from progressing past the title screen.
 Use the following configuration:
 
 ```text
+Steam App IDs: 367500
+Profile:        default
+Recommendation: Recommended
+Evidence:       Tested
+Setup:          Assisted
+Runtime:        Proton
 Proton version: Proton 10.0
 Renderer:       Venus
+Host backend:    MoltenVK
+Launch options: Unchanged
 ```
 
 ### 1. Select Proton 10

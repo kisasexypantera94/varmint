@@ -7,8 +7,15 @@ The Elder Scrolls V: Skyrim Special Edition is playable in Varmint using Neptune
 Use the following configuration:
 
 ```text
+Steam App IDs: 489830
+Profile:        default
+Recommendation: Recommended
+Evidence:       Tested
+Setup:          Automatic
+Runtime:        Proton
 Proton version: Proton 10.0
 Renderer:       Neptune
+Host backend:    DXMT
 Launch options: varmint-graphics neptune %command%
 ```
 

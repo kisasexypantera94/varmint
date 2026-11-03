@@ -13,6 +13,18 @@ Add the following to your VM's `.varmint` configuration file:
 MVK_CONFIG_FAST_MATH_ENABLED = "0"
 ```
 
+```text
+Steam App IDs: 730
+Profile:        native-vulkan
+Recommendation: Recommended
+Evidence:       Tested
+Setup:          Manual
+Runtime:        Native Linux
+Renderer:       Vulkan
+Host backend:    MoltenVK
+Launch options: Unchanged
+```
+
 ### 1. Use the native Linux version
 
 Use the native Linux version; do not select Proton.

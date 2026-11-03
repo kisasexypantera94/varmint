@@ -9,7 +9,16 @@ The Rockstar Games Launcher is currently unreliable in Varmint. The recommended 
 ## Quick setup
 
 ```text
+Steam App IDs: 12210
+Profile:        default
+Recommendation: Recommended
+Evidence:       Tested
+Setup:          Assisted
+Runtime:        Proton
 Proton version: Proton 10.0
+Renderer:       Venus
+Host backend:    MoltenVK
+Launch options: Unchanged
 ```
 
 ### 1. Select Proton 10

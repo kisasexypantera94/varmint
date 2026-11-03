@@ -118,7 +118,7 @@ chroot "$MOUNT_DIR" /usr/bin/env DEBIAN_FRONTEND=noninteractive \
 echo '=== Validate and sanitize ==='
 chroot "$MOUNT_DIR" /bin/sh -eu -c '
   missing=""
-  for cmd in curl e2fsck fsck growpart resize2fs sgdisk sudo glxinfo pactl pulseaudio python3 update-initramfs vulkaninfo xclip; do
+  for cmd in curl e2fsck fsck growpart resize2fs sgdisk sudo glxinfo notify-send pactl pulseaudio python3 update-initramfs vulkaninfo xclip; do
     command -v "$cmd" >/dev/null 2>&1 || missing="$missing $cmd"
   done
   [ -z "$missing" ] || { echo "missing guest commands:$missing" >&2; exit 1; }
@@ -135,6 +135,21 @@ chroot "$MOUNT_DIR" /bin/sh -eu -c '
   grep -Fx publicbeta /usr/local/share/varmint/steam-bootstrap/package/beta
   test -x /usr/local/bin/steam-edge-resize
   test -x /usr/local/bin/varmint-steam
+  test -x /usr/local/bin/varmint-vet
+  test -f /usr/local/lib/varmint/varmint_vet.py
+  test -f /usr/local/lib/varmint/varmint_vet_catalog.py
+  test -f /usr/local/lib/varmint/varmint_vet_diagnostics.py
+  test -f /usr/local/lib/varmint/varmint_vet_actions.py
+  test -f /usr/local/lib/varmint/varmint_vet_qt.py
+  test -f /usr/local/lib/varmint/varmint_vdf.py
+  test -f /usr/local/share/icons/hicolor/512x512/apps/varmint-vet.png
+  test -f /usr/local/share/color-schemes/VarmintVet.colors
+  test -f /usr/local/share/varmint/vet/catalog.json
+  python3 -c "import PyQt6.QtWidgets"
+  test -f /etc/systemd/user/varmint-vet.service
+  test -f /usr/local/share/applications/vet.desktop
+  test ! -e /usr/local/bin/varmint-launch
+  test ! -e /etc/udev/rules.d/70-varmint-control.rules
   test -x /usr/local/bin/varmint-display-scale
   test -f /etc/xdg/autostart/varmint-display-scale.desktop
   test "$(grep -c "^PowerButtonAction=8$" /etc/xdg/powerdevilrc)" -eq 3

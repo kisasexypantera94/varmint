@@ -1,0 +1,1034 @@
+{
+  "games": [
+    {
+      "appids": [
+        752590
+      ],
+      "guide": "docs/games/a-plague-tale-innocence.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune",
+          "host_backend": "DXMT",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_experimental",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "A Plague Tale: Innocence"
+    },
+    {
+      "appids": [
+        33230
+      ],
+      "guide": "docs/games/assassins-creed-2.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "venus",
+          "host_backend": "MoltenVK",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_9",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Assassin's Creed II"
+    },
+    {
+      "appids": [
+        812140
+      ],
+      "guide": "docs/games/assassins-creed-odyssey.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune",
+          "host_backend": "DXMT",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Assassin's Creed Odyssey"
+    },
+    {
+      "appids": [
+        35140
+      ],
+      "guide": "docs/games/batman-arkham-asylum.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "venus",
+          "host_backend": "MoltenVK",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Batman: Arkham Asylum"
+    },
+    {
+      "appids": [
+        3132990
+      ],
+      "guide": "docs/games/black-myth-wukong-benchmark.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune-dx12",
+          "host_backend": "D3DMetal",
+          "id": "dx12",
+          "launch_args": [],
+          "proton": "proton-experimental-arm64",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Black Myth: Wukong Benchmark Tool"
+    },
+    {
+      "appids": [
+        3844970
+      ],
+      "guide": "docs/games/burglin-gnomes.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune",
+          "host_backend": "DXMT",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_experimental",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Burglin' Gnomes"
+    },
+    {
+      "appids": [
+        730
+      ],
+      "guide": "docs/games/counter-strike-2.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": null,
+          "host_backend": "MoltenVK",
+          "id": "native-vulkan",
+          "launch_args": [],
+          "proton": null,
+          "recommendation": "recommended",
+          "runtime": "native linux",
+          "setup": "manual"
+        }
+      ],
+      "title": "Counter-Strike 2"
+    },
+    {
+      "appids": [
+        332950
+      ],
+      "guide": "docs/games/dark-deception.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune",
+          "host_backend": "DXMT",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_experimental",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Dark Deception"
+    },
+    {
+      "appids": [
+        335300
+      ],
+      "guide": "docs/games/dark-souls-2-sotfs.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune",
+          "host_backend": "DXMT",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_experimental",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "assisted"
+        }
+      ],
+      "title": "DARK SOULS II: Scholar of the First Sin"
+    },
+    {
+      "appids": [
+        548430
+      ],
+      "guide": "docs/games/deep-rock-galactic.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune",
+          "host_backend": "DXMT",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_experimental",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        },
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune-dx12",
+          "host_backend": "D3DMetal",
+          "id": "dx12",
+          "launch_args": [
+            "-dx12"
+          ],
+          "proton": "proton_experimental",
+          "recommendation": "alternative",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Deep Rock Galactic"
+    },
+    {
+      "appids": [
+        238010
+      ],
+      "guide": "docs/games/deus-ex-human-revolution.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "venus",
+          "host_backend": "MoltenVK",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_9",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Deus Ex: Human Revolution"
+    },
+    {
+      "appids": [
+        205100
+      ],
+      "guide": "docs/games/dishonored.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "venus",
+          "host_backend": "MoltenVK",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Dishonored"
+    },
+    {
+      "appids": [
+        367500
+      ],
+      "guide": "docs/games/dragons-dogma-dark-arisen.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "venus",
+          "host_backend": "MoltenVK",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "assisted"
+        }
+      ],
+      "title": "Dragon’s Dogma: Dark Arisen"
+    },
+    {
+      "appids": [
+        22300,
+        22370
+      ],
+      "guide": "docs/games/fallout-3.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "venus",
+          "host_backend": "MoltenVK",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Fallout 3"
+    },
+    {
+      "appids": [
+        22380,
+        22490
+      ],
+      "guide": "docs/games/fallout-new-vegas.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "venus",
+          "host_backend": "MoltenVK",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Fallout: New Vegas"
+    },
+    {
+      "appids": [
+        671210
+      ],
+      "guide": "docs/games/final-fantasy-xv-demo.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune",
+          "host_backend": "DXMT",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_experimental",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "FINAL FANTASY XV WINDOWS EDITION PLAYABLE DEMO"
+    },
+    {
+      "appids": [
+        4000
+      ],
+      "guide": "docs/games/garrys-mod.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "venus",
+          "host_backend": "MoltenVK",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Garry's Mod"
+    },
+    {
+      "appids": [
+        1249200
+      ],
+      "guide": "docs/games/ghostrunner-demo.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune-dx12",
+          "host_backend": "D3DMetal",
+          "id": "dx12",
+          "launch_args": [
+            "-dx12"
+          ],
+          "proton": "proton_experimental",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        },
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune",
+          "host_backend": "DXMT",
+          "id": "dx11",
+          "launch_args": [
+            "-dx11"
+          ],
+          "proton": "proton_experimental",
+          "recommendation": "alternative",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Ghostrunner Demo"
+    },
+    {
+      "appids": [
+        12210
+      ],
+      "guide": "docs/games/grand-theft-auto-iv.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "venus",
+          "host_backend": "MoltenVK",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "assisted"
+        }
+      ],
+      "title": "Grand Theft Auto IV"
+    },
+    {
+      "appids": [
+        962130
+      ],
+      "guide": "docs/games/grounded.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune",
+          "host_backend": "DXMT",
+          "id": "default",
+          "launch_args": [
+            "-dx11"
+          ],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        },
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune-dx12",
+          "host_backend": "D3DMetal",
+          "id": "dx12",
+          "launch_args": [
+            "-dx12"
+          ],
+          "proton": "proton_10",
+          "recommendation": "alternative",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Grounded"
+    },
+    {
+      "appids": [
+        1284210
+      ],
+      "guide": "docs/games/guild-wars-2.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune",
+          "host_backend": "DXMT",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Guild Wars 2"
+    },
+    {
+      "appids": [
+        220
+      ],
+      "guide": "docs/games/half-life-2.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": null,
+          "host_backend": "MoltenVK",
+          "id": "native-vulkan",
+          "launch_args": [],
+          "proton": null,
+          "recommendation": "recommended",
+          "runtime": "native linux",
+          "setup": "manual"
+        }
+      ],
+      "title": "Half-Life 2"
+    },
+    {
+      "appids": [
+        110800
+      ],
+      "guide": "docs/games/la-noire.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "venus",
+          "host_backend": "MoltenVK",
+          "id": "launcher-workaround",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "manual"
+        }
+      ],
+      "title": "L.A. Noire"
+    },
+    {
+      "appids": [
+        1625450
+      ],
+      "guide": "docs/games/muck.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune",
+          "host_backend": "DXMT",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Muck"
+    },
+    {
+      "appids": [
+        400,
+        620
+      ],
+      "guide": "docs/games/portal.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": null,
+          "host_backend": "MoltenVK",
+          "id": "native-vulkan",
+          "launch_args": [],
+          "proton": null,
+          "recommendation": "recommended",
+          "runtime": "native linux",
+          "setup": "manual"
+        }
+      ],
+      "title": "Portal 1-2"
+    },
+    {
+      "appids": [
+        415610,
+        443360
+      ],
+      "guide": "docs/games/red-comrades-reloaded.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "venus",
+          "host_backend": "MoltenVK",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Red Comrades Reloaded games"
+    },
+    {
+      "appids": [
+        1168280
+      ],
+      "guide": "docs/games/resident-evil-2-rpd-demo.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune",
+          "host_backend": "DXMT",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_experimental",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        },
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune-dx12",
+          "host_backend": "D3DMetal",
+          "id": "dx12",
+          "launch_args": [
+            "-dx12"
+          ],
+          "proton": "proton_experimental",
+          "recommendation": "alternative",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Resident Evil 2 \"R.P.D. Demo\""
+    },
+    {
+      "appids": [
+        632360
+      ],
+      "guide": "docs/games/risk-of-rain-2.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "reported",
+          "game_version": null,
+          "graphics_mode": "venus",
+          "host_backend": "MoltenVK",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Risk of Rain 2"
+    },
+    {
+      "appids": [
+        1431300
+      ],
+      "guide": "docs/games/sand-raiders-of-sophie.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "reported",
+          "game_version": null,
+          "graphics_mode": "neptune",
+          "host_backend": "DXMT",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_hotfix",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "SAND: Raiders of Sophie"
+    },
+    {
+      "appids": [
+        2178380
+      ],
+      "guide": "docs/games/scp-containment-breach.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "venus",
+          "host_backend": "MoltenVK",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "SCP – Containment Breach"
+    },
+    {
+      "appids": [
+        489830
+      ],
+      "guide": "docs/games/skyrim-special-edition.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune",
+          "host_backend": "DXMT",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Skyrim Special Edition"
+    },
+    {
+      "appids": [
+        1465360
+      ],
+      "guide": "docs/games/snowrunner.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "reported",
+          "game_version": null,
+          "graphics_mode": "neptune",
+          "host_backend": "DXMT",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "SnowRunner"
+    },
+    {
+      "appids": [
+        3564860
+      ],
+      "guide": "docs/games/stellar-blade-demo.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune-dx12",
+          "host_backend": "D3DMetal",
+          "id": "dx12",
+          "launch_args": [],
+          "proton": "proton-experimental-arm64",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Stellar Blade Demo"
+    },
+    {
+      "appids": [
+        625960
+      ],
+      "guide": "docs/games/stoneshard.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "venus",
+          "host_backend": "MoltenVK",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Stoneshard"
+    },
+    {
+      "appids": [
+        264710
+      ],
+      "guide": "docs/games/subnautica.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune",
+          "host_backend": "DXMT",
+          "id": "neptune",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        },
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "venus",
+          "host_backend": "MoltenVK",
+          "id": "venus-feature-level-10-1",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "alternative",
+          "runtime": "proton",
+          "setup": "manual"
+        }
+      ],
+      "title": "Subnautica"
+    },
+    {
+      "appids": [
+        440
+      ],
+      "guide": "docs/games/team-fortress-2.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": null,
+          "host_backend": "MoltenVK",
+          "id": "native-vulkan",
+          "launch_args": [],
+          "proton": null,
+          "recommendation": "recommended",
+          "runtime": "native linux",
+          "setup": "manual"
+        }
+      ],
+      "title": "Team Fortress 2"
+    },
+    {
+      "appids": [
+        1959910
+      ],
+      "guide": "docs/games/the-dark-pictures-the-devil-in-me-demo.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune",
+          "host_backend": "DXMT",
+          "id": "demo",
+          "launch_args": [],
+          "proton": "proton_experimental",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "The Dark Pictures Anthology: The Devil in Me Demo"
+    },
+    {
+      "appids": [
+        292030
+      ],
+      "guide": "docs/games/the-witcher-3.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": "public",
+          "graphics_mode": "neptune-dx12",
+          "host_backend": "D3DMetal",
+          "id": "remastered-dx12",
+          "launch_args": [],
+          "proton": "proton_experimental",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        },
+        {
+          "environment": {
+            "FEX_X87REDUCEDPRECISION": "0"
+          },
+          "evidence": "tested",
+          "game_version": "next-gen",
+          "graphics_mode": "neptune",
+          "host_backend": "DXMT",
+          "id": "next-gen-neptune",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "assisted"
+        },
+        {
+          "environment": {
+            "FEX_X87REDUCEDPRECISION": "0"
+          },
+          "evidence": "tested",
+          "game_version": "Classic",
+          "graphics_mode": "neptune",
+          "host_backend": "DXMT",
+          "id": "classic-neptune",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "assisted"
+        },
+        {
+          "environment": {
+            "FEX_X87REDUCEDPRECISION": "0"
+          },
+          "evidence": "tested",
+          "game_version": "Classic",
+          "graphics_mode": "venus",
+          "host_backend": "MoltenVK",
+          "id": "classic-venus",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "alternative",
+          "runtime": "proton",
+          "setup": "assisted"
+        }
+      ],
+      "title": "The Witcher 3"
+    },
+    {
+      "appids": [
+        20900
+      ],
+      "guide": "docs/games/the-witcher-enhanced-edition.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "venus",
+          "host_backend": "MoltenVK",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_9",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "The Witcher: Enhanced Edition"
+    },
+    {
+      "appids": [
+        2600
+      ],
+      "guide": "docs/games/vampire-the-masquerade-bloodlines.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "venus",
+          "host_backend": "MoltenVK",
+          "id": "unofficial-patch",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "manual"
+        }
+      ],
+      "title": "Vampire: The Masquerade – Bloodlines"
+    },
+    {
+      "appids": [
+        230410
+      ],
+      "guide": "docs/games/warframe.md",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune",
+          "host_backend": "DXMT",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_experimental",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Warframe"
+    }
+  ],
+  "minimum_vet_version": 1,
+  "schema_version": 1
+}

@@ -14,6 +14,18 @@ import sys
 import tempfile
 from pathlib import Path
 
+for library in (
+    Path.home() / ".local/lib/varmint",
+    Path("/usr/local/lib/varmint"),
+):
+    if library.is_dir():
+        sys.path.insert(0, str(library))
+
+try:
+    from varmint_vet_diagnostics import claim_from_environment
+except ImportError:
+    claim_from_environment = None
+
 SCHEMA = "shadow-v9"
 DEFAULT_NEPTUNE = Path("/usr/local/lib/varmint/neptune")
 DEFAULT_CACHE = Path.home() / ".cache/varmint/proton-graphics"
@@ -684,6 +696,54 @@ def run_child(command, env, mode_dir, use_lock):
         cleanup_after_run(mode_dir, use_lock)
 
 
+def run_plain_child(command, env):
+    child = subprocess.Popen(command, env=env)
+
+    def forward(signum, _frame):
+        if child.poll() is None:
+            try:
+                child.send_signal(signum)
+            except ProcessLookupError:
+                pass
+
+    old_handlers = {}
+    for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        old_handlers[signum] = signal.signal(signum, forward)
+    try:
+        return child.wait()
+    finally:
+        for signum, handler in old_handlers.items():
+            signal.signal(signum, handler)
+
+
+def claim_diagnostic():
+    if claim_from_environment is None:
+        return None
+    try:
+        return claim_from_environment()
+    except Exception as error:
+        print(f"varmint-graphics: could not start diagnostic capture: {error}", file=sys.stderr)
+        return None
+
+
+def complete_diagnostic(diagnostic, **result):
+    try:
+        diagnostic.complete(**result)
+    except Exception as error:
+        print(f"varmint-graphics: could not finish diagnostic capture: {error}", file=sys.stderr)
+
+
+def run_with_diagnostics(command, env, runner, diagnostic):
+    env.update(diagnostic.environment())
+    try:
+        status = runner(command, env)
+    except BaseException as error:
+        complete_diagnostic(diagnostic, error=f"{type(error).__name__}: {error}")
+        raise
+    complete_diagnostic(diagnostic, exit_code=status)
+    return status
+
+
 def main():
     if len(sys.argv) < 3:
         fail("usage: varmint-graphics <venus|neptune|neptune-dx12> <command> [args...]")
@@ -692,6 +752,14 @@ def main():
     command = sys.argv[2:]
 
     if mode == "venus":
+        diagnostic = claim_diagnostic()
+        if diagnostic:
+            raise SystemExit(run_with_diagnostics(
+                command,
+                os.environ.copy(),
+                run_plain_child,
+                diagnostic,
+            ))
         os.execvpe(command[0], command, os.environ.copy())
 
     if mode not in ("neptune", "neptune-dx12"):
@@ -739,6 +807,14 @@ def main():
     # Both modes provide D3D11; an app-specific Proton workaround may
     # otherwise disable it.
     env["PROTON_NO_D3D11"] = "0"
+    diagnostic = claim_diagnostic()
+    if diagnostic:
+        raise SystemExit(run_with_diagnostics(
+            command,
+            env,
+            lambda child, child_env: run_child(child, child_env, mode_dir, use_lock),
+            diagnostic,
+        ))
     raise SystemExit(run_child(command, env, mode_dir, use_lock))
 
 

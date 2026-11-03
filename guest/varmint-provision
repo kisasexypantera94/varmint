@@ -67,6 +67,7 @@ apt-get install -y --no-install-recommends \
     pulseaudio \
     pulseaudio-utils \
     python3 \
+    python3-pyqt6 \
     rtkit \
     squashfs-tools \
     sudo \
@@ -229,6 +230,7 @@ EOF_POWERDEVIL
 
 systemctl enable systemd-timesyncd.service >/dev/null 2>&1 || true
 systemctl --global enable varmint-audio-watchdog.service >/dev/null 2>&1 || true
+systemctl --global enable varmint-vet.service >/dev/null 2>&1 || true
 systemctl disable sddm.service >/dev/null 2>&1 || true
 systemctl set-default multi-user.target
 

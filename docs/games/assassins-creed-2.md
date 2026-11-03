@@ -9,7 +9,16 @@ Proton 10 currently fails during startup in the Ubisoft launcher, so Proton 9 sh
 Use the following configuration:
 
 ```text
+Steam App IDs: 33230
+Profile:        default
+Recommendation: Recommended
+Evidence:       Tested
+Setup:          Automatic
+Runtime:        Proton
 Proton version: Proton 9.0
+Renderer:       Venus
+Host backend:    MoltenVK
+Launch options: Unchanged
 ```
 
 ### 1. Select Proton 9

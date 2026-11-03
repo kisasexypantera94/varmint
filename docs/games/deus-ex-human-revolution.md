@@ -7,8 +7,15 @@ Deus Ex: Human Revolution is playable in Varmint using Proton 9 with the DirectX
 Use the following configuration:
 
 ```text
+Steam App IDs: 238010
+Profile:        default
+Recommendation: Recommended
+Evidence:       Tested
+Setup:          Automatic
+Runtime:        Proton
 Proton version:    Proton 9.0
 Renderer:          Venus
+Host backend:    MoltenVK
 Graphics settings: Default
 Launch options:    None
 ```

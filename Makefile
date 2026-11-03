@@ -8,7 +8,7 @@ INITRD ?= $(GUEST_DIR)/initrd
 BASE_IMAGE ?= $(GUEST_DIR)/varmint-debian.raw.zst
 CONFIG ?= $(CURDIR)/fresh.varmint
 
-.PHONY: app bundle dependencies guest-image run clean test
+.PHONY: app bundle dependencies guest-image run clean test vet-catalog vet-catalog-check
 
 app: guest-image
 	./scripts/build-app.sh --kernel "$(KERNEL)" --initrd "$(INITRD)" --base-image "$(BASE_IMAGE)"
@@ -37,6 +37,12 @@ test:
 		DYLD_LIBRARY_PATH="$(PREFIX)/lib:$${DYLD_LIBRARY_PATH:-}" \
 		cargo test
 	python3 -m unittest discover -s tests/guest
+
+vet-catalog:
+	./scripts/generate-vet-catalog.py
+
+vet-catalog-check:
+	./scripts/generate-vet-catalog.py --check
 
 .PHONY: neptune-sync neptune-sync-force neptune-build
 
