@@ -169,6 +169,17 @@ class LaunchOptionsTests(unittest.TestCase):
             "varmint-graphics neptune %command% -novid -d3d11",
         )
 
+    def test_adds_approved_game_argument_without_treating_it_as_graphics_state(self):
+        self.assertEqual(
+            vet.transform_launch_options(
+                "MANGOHUD=1 FOO=bar %command% -novid",
+                "neptune-dx12",
+                append_args=["--launcher-skip"],
+            ),
+            "MANGOHUD=1 FOO=bar varmint-graphics neptune-dx12 "
+            "%command% -novid --launcher-skip",
+        )
+
     def test_rejects_ambiguous_or_unsafe_options(self):
         values = (
             "%command% %command%",
@@ -606,6 +617,31 @@ class ResearchTests(unittest.TestCase):
             ],
         )
 
+    def test_setup_profile_metadata_is_not_presented_as_copyable_code(self):
+        profile = """Profile: remastered-dx12
+Recommendation: Recommended
+Evidence: Tested
+Setup: Assisted
+Launch options: varmint-graphics neptune-dx12 %command% --launcher-skip"""
+        self.assertTrue(vet.is_setup_profile_block(profile))
+        self.assertFalse(vet.is_copyable_guide_code("text", profile))
+
+    def test_commands_remain_copyable(self):
+        self.assertTrue(
+            vet.is_copyable_guide_code(
+                "text", "varmint-graphics neptune-dx12 %command% --launcher-skip"
+            )
+        )
+        self.assertTrue(vet.is_copyable_guide_code("bash", "echo hello"))
+
+    def test_launch_requirements_use_only_structured_profile_values(self):
+        self.assertEqual(
+            vet.format_launch_requirements(
+                ["--launcher-skip"], {"FEX_X87REDUCEDPRECISION": "0"}
+            ),
+            ("--launcher-skip", "FEX_X87REDUCEDPRECISION=0"),
+        )
+
     def test_varmint_catalog_matches_exact_appid(self):
         provider = vet.VarmintDocsProvider(
             catalog_path=GUEST / "varmint-vet-catalog.json"
@@ -629,6 +665,9 @@ class ResearchTests(unittest.TestCase):
         self.assertEqual(remastered.facts.recommendation, "recommended")
         self.assertEqual(remastered.facts.graphics_mode, "neptune-dx12")
         self.assertEqual(remastered.facts.host_backend, "D3DMetal")
+        self.assertEqual(remastered.facts.proton, "proton_experimental")
+        self.assertEqual(remastered.facts.environment, {})
+        self.assertEqual(remastered.facts.launch_args, ["--launcher-skip"])
 
     def test_varmint_catalog_does_not_guess_an_unknown_game_branch(self):
         provider = vet.VarmintDocsProvider(

@@ -21,6 +21,7 @@ RENDERERS = {
     "vulkan": None,
 }
 GRAPHICS_ARGUMENTS = {"-dx11", "-d3d11", "-dx12", "-d3d12"}
+ALLOWED_LAUNCH_ARGUMENTS = {*GRAPHICS_ARGUMENTS, "--launcher-skip"}
 ALLOWED_ENVIRONMENT = {"FEX_X87REDUCEDPRECISION"}
 PROFILE_FIELDS = {
     "Steam App IDs",
@@ -137,7 +138,7 @@ def _launch_options(value, renderer, setup, source):
         environment[name] = value
     arguments = tokens[command[0] + 1 :] if command else []
     unsupported = [
-        argument for argument in arguments if argument not in GRAPHICS_ARGUMENTS
+        argument for argument in arguments if argument not in ALLOWED_LAUNCH_ARGUMENTS
     ]
     if unsupported:
         raise CatalogError(
@@ -321,7 +322,7 @@ def validate_catalog(value):
                 or host_backend not in {*HOST_BACKENDS, None}
                 or not isinstance(profile.get("launch_args", []), list)
                 or any(
-                    value not in GRAPHICS_ARGUMENTS
+                    value not in ALLOWED_LAUNCH_ARGUMENTS
                     for value in profile.get("launch_args", [])
                 )
                 or not isinstance(profile.get("environment", {}), dict)

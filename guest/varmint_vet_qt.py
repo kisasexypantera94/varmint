@@ -6,7 +6,7 @@ from pathlib import Path
 import threading
 
 from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QGuiApplication, QIcon
+from PyQt6.QtGui import QGuiApplication, QIcon, QTextBlockFormat, QTextCursor
 from PyQt6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -20,7 +20,6 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QPlainTextEdit,
     QPushButton,
     QRadioButton,
     QScrollArea,
@@ -38,6 +37,9 @@ from varmint_vet import (
     current_host_backend_warning,
     display_graphics,
     display_proton,
+    format_launch_requirements,
+    is_copyable_guide_code,
+    is_setup_profile_block,
     split_markdown_sections,
     transform_launch_options,
 )
@@ -55,6 +57,11 @@ QLabel#gameTitle { font-size: 22px; font-weight: 700; }
 QLabel#muted { color: #a3a6bc; }
 QLabel#section { color: #b3b7d2; font-size: 12px; font-weight: 700; }
 QLabel#warning { color: #e2bd6f; font-weight: 600; }
+QLabel#requirements {
+    background: #171a30; border: 1px solid #40445e; border-radius: 8px;
+    color: #f1f3f5; font-family: monospace; padding: 7px 9px;
+}
+QLabel#requirementLabel { color: #a3a6bc; font-size: 12px; font-weight: 600; }
 QLabel#warningBanner {
     background: #393342; border: 1px solid #806b42; border-radius: 9px;
     color: #e2bd6f; font-weight: 600; padding: 10px 12px;
@@ -84,11 +91,11 @@ QRadioButton::indicator { width: 18px; height: 18px; }
 QCheckBox { color: #b3b7d2; spacing: 8px; padding: 4px; }
 QCheckBox::indicator { width: 18px; height: 18px; }
 QTextBrowser { background: #1c203a; border: 1px solid #40445e; border-radius: 10px; padding: 12px; }
-QTextBrowser#guideProse { background: transparent; border: none; padding: 0; }
+QTextBrowser#guideProse { background: transparent; border: none; padding: 0; font-size: 13px; }
 QScrollArea#guideScroll { background: #1c203a; border: 1px solid #40445e; border-radius: 10px; }
 QScrollArea#guideScroll > QWidget > QWidget { background: #1c203a; }
 QFrame#codeBlock { background: #171a30; border: 1px solid #40445e; border-radius: 9px; }
-QPlainTextEdit#codeText {
+QLabel#codeText {
     background: #171a30; border: none; color: #f1f3f5; padding: 6px;
     font-family: monospace;
 }
@@ -189,9 +196,40 @@ class GuideProse(QTextBrowser):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.document().setDefaultStyleSheet(
+            "body { color: #f1f3f5; font-size: 13px; line-height: 135%; }"
+            "h1 { font-size: 22px; }"
+            "h2 { font-size: 17px; }"
+            "h3 { font-size: 14px; }"
+            "ul, ol { margin-left: 20px; }"
+        )
         self.setMarkdown(markdown)
+        self._space_blocks()
         self.document().documentLayout().documentSizeChanged.connect(self._fit_height)
         QTimer.singleShot(0, self._fit_height)
+
+    def _space_blocks(self):
+        block = self.document().begin()
+        while block.isValid():
+            formatting = block.blockFormat()
+            heading = formatting.headingLevel()
+            formatting.setLineHeight(
+                135, QTextBlockFormat.LineHeightTypes.ProportionalHeight.value
+            )
+            if heading == 1:
+                formatting.setTopMargin(0)
+                formatting.setBottomMargin(28)
+            elif heading == 2:
+                formatting.setTopMargin(30)
+                formatting.setBottomMargin(18)
+            elif heading == 3:
+                formatting.setTopMargin(24)
+                formatting.setBottomMargin(14)
+            else:
+                formatting.setBottomMargin(22)
+            cursor = QTextCursor(block)
+            cursor.setBlockFormat(formatting)
+            block = block.next()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -205,29 +243,26 @@ class GuideProse(QTextBrowser):
 
 
 class GuideCodeBlock(QFrame):
-    def __init__(self, language, code, parent=None):
+    def __init__(self, code, copyable, parent=None):
         super().__init__(parent)
         self.code = code
         self.setObjectName("codeBlock")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 8, 10, 10)
         layout.setSpacing(4)
-        header = QHBoxLayout()
-        label = QLabel(language or "text")
-        label.setObjectName("muted")
-        self.copy_button = QPushButton("Copy")
-        self.copy_button.setObjectName("copyCode")
-        self.copy_button.clicked.connect(self._copy)
-        header.addWidget(label)
-        header.addStretch()
-        header.addWidget(self.copy_button)
-        text = QPlainTextEdit(code)
+        self.copy_button = None
+        if copyable:
+            header = QHBoxLayout()
+            header.addStretch()
+            self.copy_button = QPushButton("Copy")
+            self.copy_button.setObjectName("copyCode")
+            self.copy_button.clicked.connect(self._copy)
+            header.addWidget(self.copy_button)
+            layout.addLayout(header)
+        text = QLabel(code)
         text.setObjectName("codeText")
-        text.setReadOnly(True)
-        text.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        lines = max(1, code.count("\n") + 1)
-        text.setFixedHeight(min(lines, 12) * text.fontMetrics().lineSpacing() + 18)
-        layout.addLayout(header)
+        text.setWordWrap(True)
+        text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(text)
 
     def _copy(self):
@@ -252,12 +287,14 @@ class GuideDialog(QDialog):
         scroll.setWidgetResizable(True)
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(16, 16, 16, 16)
+        content_layout.setContentsMargins(14, 14, 14, 14)
         content_layout.setSpacing(12)
         for kind, language, text in split_markdown_sections(markdown):
-            widget = (
-                GuideCodeBlock(language, text) if kind == "code" else GuideProse(text)
-            )
+            if kind == "code" and is_setup_profile_block(text):
+                continue
+            widget = GuideCodeBlock(
+                text, is_copyable_guide_code(language, text)
+            ) if kind == "code" else GuideProse(text)
             content_layout.addWidget(widget)
         content_layout.addStretch()
         scroll.setWidget(content)
@@ -617,6 +654,16 @@ class VetWindow(QDialog):
         self.recommend_text = QLabel("")
         self.recommend_text.setWordWrap(True)
         self.recommend_text.setObjectName("muted")
+        self.recommend_arguments_label = QLabel("Launch arguments")
+        self.recommend_arguments_label.setObjectName("requirementLabel")
+        self.recommend_arguments = QLabel("")
+        self.recommend_arguments.setWordWrap(True)
+        self.recommend_arguments.setObjectName("requirements")
+        self.recommend_environment_label = QLabel("Environment")
+        self.recommend_environment_label.setObjectName("requirementLabel")
+        self.recommend_environment = QLabel("")
+        self.recommend_environment.setWordWrap(True)
+        self.recommend_environment.setObjectName("requirements")
         self.recommend_warning = QLabel("")
         self.recommend_warning.setWordWrap(True)
         self.recommend_warning.setObjectName("warning")
@@ -634,6 +681,10 @@ class VetWindow(QDialog):
         actions.addWidget(self.details_button, 1)
         layout.addWidget(self.recommend_title)
         layout.addWidget(self.recommend_text)
+        layout.addWidget(self.recommend_arguments_label)
+        layout.addWidget(self.recommend_arguments)
+        layout.addWidget(self.recommend_environment_label)
+        layout.addWidget(self.recommend_environment)
         layout.addWidget(self.recommend_warning)
         layout.addStretch()
         layout.addLayout(actions)
@@ -1008,13 +1059,24 @@ class VetWindow(QDialog):
             title = "Recommended setup" if actionable else "No verified setup"
         self.recommend_title.setText(title)
         self.recommend_text.setText(text)
+        arguments, environment = format_launch_requirements(
+            recommendation.append_args, recommendation.environment
+        )
+        self.recommend_arguments.setText(arguments)
+        self.recommend_arguments.setVisible(bool(arguments))
+        self.recommend_arguments_label.setVisible(bool(arguments))
+        self.recommend_environment.setText(environment)
+        self.recommend_environment.setVisible(bool(environment))
+        self.recommend_environment_label.setVisible(bool(environment))
         warning = (
             None if current_host_backend_warning(state) else plan.get("host_warning")
         )
         self.recommend_warning.setText(f"⚠ {warning}" if warning else "")
         self.recommend_warning.setVisible(bool(warning))
-        guide_only = recommendation.setup == "manual" or (
-            recommendation.setup == "assisted" and not has_changes
+        facts = research.varmint_doc.facts
+        has_guide = bool(facts and facts.guide_markdown)
+        guide_only = has_guide and (
+            recommendation.setup == "manual" or not has_changes
         )
         self.manual_button.setVisible((actionable and has_changes) or guide_only)
         if guide_only:
@@ -1077,12 +1139,11 @@ class VetWindow(QDialog):
         research = self.prepared[2]
         recommendation = self.prepared[3]
         plan = self.prepared[4]
-        if recommendation.setup == "manual" or (
-            recommendation.setup == "assisted" and not any(plan["changes"].values())
+        facts = research.varmint_doc.facts
+        if facts and facts.guide_markdown and (
+            recommendation.setup == "manual" or not any(plan["changes"].values())
         ):
-            facts = research.varmint_doc.facts
-            if facts and facts.guide_markdown:
-                GuideDialog(facts.guide_markdown, self).exec()
+            GuideDialog(facts.guide_markdown, self).exec()
             return
         if configure_manually(
             plan, copy_launch_options=bool(recommendation.graphics_mode)

@@ -29,14 +29,24 @@ Game version:   public
 Proton version: Proton Experimental
 Renderer:       Neptune DX12
 Host backend:    D3DMetal
-Launch options: varmint-graphics neptune-dx12 %command%
+Launch options: varmint-graphics neptune-dx12 %command% --launcher-skip
 ```
 
 Before starting the VM, select **D3DMetal** in the Varmint launcher. In Steam, select **Proton Experimental** and use:
 
 ```text
+varmint-graphics neptune-dx12 %command% --launcher-skip
+```
+
+### Optional: use REDlauncher
+
+If you want to use REDlauncher, select **Proton 10.0** and omit `--launcher-skip`:
+
+```text
 varmint-graphics neptune-dx12 %command%
 ```
+
+The current Remastered launcher no longer needs the `FEX_X87REDUCEDPRECISION=0` workaround.
 
 ## Recommended setup: next-gen and Classic
 

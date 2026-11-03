@@ -26,6 +26,7 @@ GRAPHICS_MODES = {"venus", "neptune", "neptune-dx12"}
 # mapping overrides it for a game.
 STEAM_DEFAULT_PROTON = "proton_experimental"
 GRAPHICS_ARGUMENTS = {"-dx11", "-d3d11", "-dx12", "-d3d12"}
+ALLOWED_LAUNCH_ARGUMENTS = {*GRAPHICS_ARGUMENTS, "--launcher-skip"}
 ALLOWED_ENVIRONMENT = {"FEX_X87REDUCEDPRECISION"}
 UNCHANGED = object()
 STATE_ROOT = Path(
@@ -241,9 +242,11 @@ def transform_launch_options(
     remove_args = list(remove_args)
     append_args = list(append_args)
     environment = dict(environment or {})
-    if any(value not in GRAPHICS_ARGUMENTS for value in remove_args + append_args):
+    if any(value not in GRAPHICS_ARGUMENTS for value in remove_args) or any(
+        value not in ALLOWED_LAUNCH_ARGUMENTS for value in append_args
+    ):
         raise VetError(
-            "unsafe_arguments", "Vet may only change known graphics-selection arguments"
+            "unsafe_arguments", "Vet may only change approved launch arguments"
         )
     if any(
         name not in ALLOWED_ENVIRONMENT or not isinstance(value, str) or "\0" in value
@@ -804,6 +807,34 @@ def split_markdown_sections(markdown):
     if prose:
         sections.append(("prose", "", prose))
     return sections
+
+
+def is_setup_profile_block(code):
+    fields = {
+        match.group(1).casefold()
+        for match in re.finditer(r"(?m)^([A-Za-z][A-Za-z ]+):", code)
+    }
+    return {"profile", "recommendation", "evidence", "setup"} <= fields
+
+
+def is_copyable_guide_code(language, code):
+    if is_setup_profile_block(code):
+        return False
+    if language.casefold() in {"bash", "sh", "shell", "console"}:
+        return True
+    return any(
+        "%command%" in line or line.startswith("FEX_")
+        for line in (value.strip() for value in code.splitlines())
+    )
+
+
+def format_launch_requirements(arguments, environment):
+    return (
+        " ".join(arguments),
+        " ".join(
+            f"{name}={shlex.quote(value)}" for name, value in sorted(environment.items())
+        ),
+    )
 
 
 class VarmintDocsProvider:
