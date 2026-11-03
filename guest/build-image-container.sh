@@ -148,6 +148,8 @@ chroot "$MOUNT_DIR" /bin/sh -eu -c '
   python3 -c "import PyQt6.QtWidgets"
   test -f /etc/systemd/user/varmint-vet.service
   test -f /usr/local/share/applications/vet.desktop
+  grep -F "<default>preferred://filemanager,applications:steam.desktop,applications:vet.desktop</default>" \
+    /usr/share/plasma/plasmoids/org.kde.plasma.taskmanager/contents/config/main.xml >/dev/null
   test ! -e /usr/local/bin/varmint-launch
   test ! -e /etc/udev/rules.d/70-varmint-control.rules
   test -x /usr/local/bin/varmint-display-scale

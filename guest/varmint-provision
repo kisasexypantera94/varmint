@@ -158,7 +158,7 @@ p = Path("/usr/share/plasma/plasmoids/org.kde.plasma.taskmanager/contents/config
 s = p.read_text()
 
 old = "<default>applications:systemsettings.desktop,applications:org.kde.discover.desktop,preferred://filemanager,preferred://browser</default>"
-new = "<default>preferred://filemanager,applications:steam.desktop</default>"
+new = "<default>preferred://filemanager,applications:steam.desktop,applications:vet.desktop</default>"
 
 if old not in s:
     raise SystemExit("Plasma task manager default launcher list not found")
