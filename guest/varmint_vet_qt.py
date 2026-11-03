@@ -4,8 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 import threading
 
-from PyQt6.QtCore import QObject, Qt, QTimer, QUrl, pyqtSignal
-from PyQt6.QtGui import QDesktopServices, QGuiApplication, QIcon
+from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QGuiApplication, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -36,7 +36,12 @@ from varmint_vet import (
     display_proton,
     transform_launch_options,
 )
-from varmint_vet_actions import configure_manually, copy_to_clipboard, override_plan
+from varmint_vet_actions import (
+    configure_manually,
+    copy_to_clipboard,
+    open_setup_guide,
+    override_plan,
+)
 
 
 STYLE = """
@@ -983,8 +988,8 @@ class VetWindow(QDialog):
                 None,
             )
             if source:
-                QDesktopServices.openUrl(QUrl(source.url))
-                self._show_status("Setup guide opened.")
+                open_setup_guide(source.url)
+                self._show_status("Opening the setup guide in Steam.")
             return
         if configure_manually(
             plan, copy_launch_options=bool(recommendation.graphics_mode)

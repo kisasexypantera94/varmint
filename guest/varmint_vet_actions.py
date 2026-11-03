@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import subprocess
+from urllib.parse import urlparse
 
 from varmint_vet import VetError, display_proton
 
@@ -53,6 +54,26 @@ def open_game_properties(appid):
     except OSError as exception:
         raise VetError(
             "steam_open_failed", "Vet could not open the game's Steam properties."
+        ) from exception
+
+
+def open_setup_guide(url):
+    parsed = urlparse(url)
+    if parsed.scheme != "https" or parsed.hostname != "github.com":
+        raise VetError(
+            "invalid_guide_url", "Vet refused an unexpected setup guide URL."
+        )
+    try:
+        subprocess.Popen(
+            ["steam", f"steam://openurl/{url}"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError as exception:
+        raise VetError(
+            "guide_open_failed", "Vet could not open the setup guide in Steam."
         ) from exception
 
 
