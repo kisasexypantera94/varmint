@@ -7,8 +7,9 @@ import re
 import shlex
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 VET_VERSION = 1
+MAX_GUIDE_BYTES = 128 * 1024
 RECOMMENDATIONS = {"recommended", "alternative", "unsupported"}
 EVIDENCE = {"tested", "reported"}
 RUNTIMES = {"proton", "native linux"}
@@ -237,6 +238,7 @@ def compile_guide(path):
         "title": title_match.group(1),
         "appids": appids,
         "guide": f"docs/games/{path.name}",
+        "guide_markdown": text,
         "profiles": profiles,
     }
 
@@ -282,6 +284,9 @@ def validate_catalog(value):
             not isinstance(game, dict)
             or not isinstance(game.get("title"), str)
             or not re.fullmatch(r"docs/games/[a-z0-9-]+\.md", game.get("guide", ""))
+            or not isinstance(game.get("guide_markdown"), str)
+            or not game["guide_markdown"].strip()
+            or len(game["guide_markdown"].encode("utf-8")) > MAX_GUIDE_BYTES
             or not isinstance(appids, list)
             or not appids
             or not isinstance(profiles, list)

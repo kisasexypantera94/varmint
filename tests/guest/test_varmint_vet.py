@@ -575,16 +575,6 @@ class UiFlowTests(unittest.TestCase):
         self.assertIn("--expire-time=10000", run.call_args.args[0])
         self.assertIn("/icon.svg", run.call_args.args[0])
 
-    def test_setup_guide_opens_in_steam(self):
-        url = "https://github.com/example/project/blob/main/guide.md"
-        with mock.patch.object(actions.subprocess, "Popen") as popen:
-            actions.open_setup_guide(url)
-        self.assertEqual(popen.call_args.args[0], ["steam", f"steam://openurl/{url}"])
-
-    def test_setup_guide_rejects_an_unexpected_url(self):
-        with self.assertRaisesRegex(vet.VetError, "unexpected setup guide URL"):
-            actions.open_setup_guide("https://example.com/guide.md")
-
     def test_override_plan_keeps_unselected_fields(self):
         state = {"appid": 123, "launch_options": "%command%", "proton": None}
         plan = actions.override_plan(state, proton="proton_10")
@@ -612,6 +602,7 @@ class ResearchTests(unittest.TestCase):
         self.assertEqual(match.facts.graphics_mode, "neptune")
         self.assertEqual(match.facts.proton, "proton_experimental")
         self.assertEqual(match.facts.launch_args, [])
+        self.assertIn("# Running Deep Rock Galactic", match.facts.guide_markdown)
 
     def test_varmint_catalog_selects_witcher_profile_by_branch(self):
         provider = vet.VarmintDocsProvider(

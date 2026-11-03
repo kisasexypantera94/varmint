@@ -5,6 +5,7 @@
         752590
       ],
       "guide": "docs/games/a-plague-tale-innocence.md",
+      "guide_markdown": "# Running A Plague Tale: Innocence in Varmint\n\nA Plague Tale: Innocence is playable in Varmint using Neptune.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 752590\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton Experimental\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: varmint-graphics neptune %command%\n```\n\n### 1. Enable Neptune\n\nSet the following Steam launch options:\n\n```text\nvarmint-graphics neptune %command%\n```\n\nNo additional configuration is required.\n\n## Black screen on startup\n\nThe game may initially open to a black screen and appear to be stuck.\n\nIf this happens, simply press **Space** or **Enter**. The game should then continue loading normally.\n\n## Enable fullscreen\n\nThe game may start in windowed mode by default.\n\nOnce in the game, open the graphics settings and switch the display mode to **Fullscreen**.\n\nFullscreen also provides better performance in the tested setup.\n\n## Tested configuration\n\n```text\nA Plague Tale: Innocence\nProton Experimental\nDirectX 11\nNeptune\nFullscreen\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -27,6 +28,7 @@
         33230
       ],
       "guide": "docs/games/assassins-creed-2.md",
+      "guide_markdown": "# Running Assassin's Creed II in Varmint\n\nAssassin's Creed II is playable in Varmint using Proton 9.\n\nProton 10 currently fails during startup in the Ubisoft launcher, so Proton 9 should be selected explicitly.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 33230\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton 9.0\nRenderer:       Venus\nHost backend:    MoltenVK\nLaunch options: Unchanged\n```\n\n### 1. Select Proton 9\n\nIn Steam:\n\n1. Open **Properties** for Assassin's Creed II.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 9.0**.\n\n### 2. Start the game\n\nLaunch Assassin's Creed II normally from Steam.\n\nThe Ubisoft launcher can be unreliable on startup. If it shows an error such as `Failed to...`, click **Try Again** a few times. It usually starts successfully after that.\n\nIf the launcher says it could not verify the game, click **Stop**, then start the game again from Steam.\n\nNo additional launch options or configuration is required for the tested setup.\n\n## Known issues\n\n### White screen after startup\n\nIf the game gets stuck on a white screen after startup, verify the installed game files in Steam:\n\n1. Open **Properties** for Assassin's Creed II.\n2. Open **Installed Files**.\n3. Click **Verify integrity of game files**.\n\nA corrupted or incomplete game installation can cause this symptom and may look like a graphics or compatibility issue.\n\n",
       "profiles": [
         {
           "environment": {},
@@ -49,6 +51,7 @@
         812140
       ],
       "guide": "docs/games/assassins-creed-odyssey.md",
+      "guide_markdown": "# Running Assassin's Creed Odyssey in Varmint\n\nAssassin's Creed Odyssey is playable in Varmint using Neptune.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 812140\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton 10.0\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: varmint-graphics neptune %command%\n```\n\n### 1. Select Proton 10\n\nIn Steam:\n\n1. Open **Properties** for Assassin's Creed Odyssey.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 10.0**.\n\n### 2. Enable Neptune\n\nSet the following Steam launch options:\n\n```text\nvarmint-graphics neptune %command%\n```\n\nNo additional configuration is required.\n\n## Tested configuration\n\n```text\nAssassin's Creed Odyssey\nProton 10.0\nDirectX 11\nNeptune\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -71,6 +74,7 @@
         35140
       ],
       "guide": "docs/games/batman-arkham-asylum.md",
+      "guide_markdown": "# Running Batman: Arkham Asylum in Varmint\n\nBatman: Arkham Asylum is playable in Varmint using Venus.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 35140\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton 10.0\nRenderer:       Venus\nHost backend:    MoltenVK\nLaunch options: Unchanged\n```\n\n### 1. Select Proton 10\n\nIn Steam:\n\n1. Open **Properties** for Batman: Arkham Asylum.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 10.0**.\n\nNo additional launch options are required.\n\n## Tested configuration\n\n```text\nBatman: Arkham Asylum\nProton 10.0\nVenus\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -93,6 +97,7 @@
         3132990
       ],
       "guide": "docs/games/black-myth-wukong-benchmark.md",
+      "guide_markdown": "# Running Black Myth: Wukong Benchmark Tool in Varmint\n\nThe benchmark is playable through Neptune's DirectX 12 mode using D3DMetal.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 3132990\nProfile:        dx12\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton Experimental (ARM64)\nRenderer:       Neptune DX12\nHost backend:    D3DMetal\nLaunch options: varmint-graphics neptune-dx12 %command%\n```\n\n### 1. Select D3DMetal on the host\n\nIn the Varmint launcher, select **D3DMetal** before starting the VM.\n\n### 2. Select Proton Experimental (ARM64)\n\nOpen the benchmark's Steam properties and select **Proton Experimental (ARM64)** under **Compatibility**.\n\n### 3. Enable Neptune DX12\n\nSet the following Steam launch options:\n\n```text\nvarmint-graphics neptune-dx12 %command%\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -115,6 +120,7 @@
         3844970
       ],
       "guide": "docs/games/burglin-gnomes.md",
+      "guide_markdown": "# Running Burglin' Gnomes in Varmint\n\nBurglin' Gnomes is playable in Varmint using Neptune.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 3844970\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton Experimental\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: varmint-graphics neptune %command%\n```\n\n### 1. Enable Neptune\n\nSet the following Steam launch options:\n\n```text\nvarmint-graphics neptune %command%\n```\n\nNo additional configuration is required.\n\n## Known issues\n\n### Performance may drop after changing graphics settings\n\nChanging graphics settings while the game is running may cause a significant FPS drop.\n\nIf this happens, restart the game. Performance should return to normal afterwards.\n\n## Tested configuration\n\n```text\nBurglin' Gnomes\nProton Experimental\nDirectX 11\nNeptune\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -137,6 +143,7 @@
         730
       ],
       "guide": "docs/games/counter-strike-2.md",
+      "guide_markdown": "# Running Counter-Strike 2 in Varmint\n\nCounter-Strike 2 is playable in Varmint using the native Linux version.\n\nThe Windows version also works through Proton with both Venus and Neptune, but VAC does not work with Proton.\n\n## Quick setup\n\nAdd the following to your VM's `.varmint` configuration file:\n\n```toml\n[host_environment]\nMVK_CONFIG_FAST_MATH_ENABLED = \"0\"\n```\n\n```text\nSteam App IDs: 730\nProfile:        native-vulkan\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Manual\nRuntime:        Native Linux\nRenderer:       Vulkan\nHost backend:    MoltenVK\nLaunch options: Unchanged\n```\n\n### 1. Use the native Linux version\n\nUse the native Linux version; do not select Proton.\n\n### 2. Start the game\n\nLaunch Counter-Strike 2 normally from Steam.\n\nNo additional launch options are required for the tested setup.\n\n## Tested configuration\n\n```text\nCounter-Strike 2\nNative Linux version\nVulkan through Venus\n```\n\n`MVK_CONFIG_FAST_MATH_ENABLED=0` is required to avoid rendering artifacts.\n",
       "profiles": [
         {
           "environment": {},
@@ -159,6 +166,7 @@
         332950
       ],
       "guide": "docs/games/dark-deception.md",
+      "guide_markdown": "# Running Dark Deception in Varmint\n\nDark Deception is playable in Varmint using Neptune.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 332950\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton Experimental\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: varmint-graphics neptune %command%\n```\n\n### 1. Enable Neptune\n\nSet the Steam launch options to:\n\n```text\nvarmint-graphics neptune %command%\n```\n\nNo additional setup is required.\n\n## Tested configuration\n\n```text\nDark Deception\nProton Experimental\nDirectX 11\nNeptune\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -181,6 +189,7 @@
         335300
       ],
       "guide": "docs/games/dark-souls-2-sotfs.md",
+      "guide_markdown": "# Running DARK SOULS II: Scholar of the First Sin in Varmint\n\nDARK SOULS II: Scholar of the First Sin is playable in Varmint using Neptune.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 335300\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Assisted\nRuntime:        Proton\nProton version: Proton Experimental\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: varmint-graphics neptune %command%\n```\n\n### 1. Enable Neptune\n\nSet the Steam launch options to:\n\n```text\nvarmint-graphics neptune %command%\n```\n\n### 2. Switch Steam to Offline Mode\n\nBefore starting the game, switch Steam to **Offline Mode**.\n\nWhen Steam is online, the game runs significantly slower, typically around 20-30 FPS in the tested setup.\n\nWith Steam in Offline Mode, normal performance is restored.\n\nThe same behavior has also been observed when running the game through CrossOver.\n\nThe exact cause is currently unknown.\n\n## Tested configuration\n\n```text\nDARK SOULS II: Scholar of the First Sin\nProton Experimental\nDirectX 11\nNeptune\nSteam Offline Mode\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -203,6 +212,7 @@
         548430
       ],
       "guide": "docs/games/deep-rock-galactic.md",
+      "guide_markdown": "# Running Deep Rock Galactic in Varmint\n\nDeep Rock Galactic is playable in Varmint using Neptune.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 548430\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton Experimental\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: varmint-graphics neptune %command%\n```\n\n### 1. Enable Neptune\n\nSet the following Steam launch options:\n\n```text\nvarmint-graphics neptune %command%\n```\n\nNo additional configuration is required.\n\n### 2. Select DirectX 11\n\nWhen launching the game from Steam, select the **DirectX 11** option.\n\nDirectX 11 through DXMT remains the recommended path.\n\n## DirectX 12 alternative\n\nDirectX 12 also works through D3DMetal:\n\n```text\nProfile:        dx12\nRecommendation: Alternative\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton Experimental\nRenderer:       Neptune DX12\nHost backend:    D3DMetal\nLaunch options: varmint-graphics neptune-dx12 %command% -dx12\n```\n\nSelect **D3DMetal** in the Varmint launcher before starting the VM, then use the launch options above.\n\n## Known issues\n\n### FPS drops in some Space Rig scenes\n\nPerformance can drop sharply in the Space Rig when looking at certain scenes.\n\nThis has been investigated and is caused by a storm of occlusion queries in those scenes.\n\nThe issue appears to be specific to particular areas and viewing angles in the Space Rig. Similar performance drops were not observed during missions in testing.\n\n## Tested configuration\n\n```text\nDeep Rock Galactic\nProton Experimental\nDirectX 11\nNeptune\nDXMT\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -240,6 +250,7 @@
         238010
       ],
       "guide": "docs/games/deus-ex-human-revolution.md",
+      "guide_markdown": "# Running Deus Ex: Human Revolution in Varmint\n\nDeus Ex: Human Revolution is playable in Varmint using Proton 9 with the DirectX 11 renderer and default game settings.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 238010\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version:    Proton 9.0\nRenderer:          Venus\nHost backend:    MoltenVK\nGraphics settings: Default\nLaunch options:    None\n```\n\n### 1. Select Proton 9\n\nIn Steam:\n\n1. Open **Properties** for Deus Ex: Human Revolution.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 9.0**.\n\n### 2. Start the game\n\nLaunch the game normally with the default graphics settings.\n\nNo additional setup is required.\n\n## Tested configuration\n\n```text\nDeus Ex: Human Revolution\nProton 9.0\nDirectX 11\nVenus\nDefault graphics settings\nNo launch options\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -262,6 +273,7 @@
         205100
       ],
       "guide": "docs/games/dishonored.md",
+      "guide_markdown": "# Running Dishonored in Varmint\n\nDishonored is playable in Varmint using Proton 10 with the default game settings.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 205100\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version:    Proton 10\nRenderer:          Venus\nHost backend:    MoltenVK\nGraphics settings: Default\nLaunch options:    None\n```\n\n### 1. Select Proton 10\n\nIn Steam:\n\n1. Open **Properties** for Dishonored.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 10**.\n\n### 2. Start the game\n\nLaunch Dishonored normally from Steam and keep the default graphics settings.\n\nNo additional setup is required.\n\n## Tested configuration\n\n```text\nDishonored\nProton 10\nDefault graphics settings\nNo launch options\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -284,6 +296,7 @@
         367500
       ],
       "guide": "docs/games/dragons-dogma-dark-arisen.md",
+      "guide_markdown": "# Running Dragon’s Dogma: Dark Arisen in Varmint\n\nDragon’s Dogma: Dark Arisen is playable in Varmint using Proton 10.\n\nThe original WMV movies prevent the game from progressing past the title screen. Converting six movie files to AVI/MJPEG fixes the issue.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 367500\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Assisted\nRuntime:        Proton\nProton version: Proton 10.0\nRenderer:       Venus\nHost backend:    MoltenVK\nLaunch options: Unchanged\n```\n\n### 1. Select Proton 10\n\nIn Steam:\n\n1. Open **Properties** for Dragon’s Dogma: Dark Arisen.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 10.0**.\n\n### 2. Convert the movie files\n\nMake sure the game is installed and closed.\n\nOpen a terminal inside Varmint, paste the entire script below and press Enter:\n\n```bash\nset -euo pipefail\n\nGAME=\"$HOME/.local/share/Steam/steamapps/common/DDDA\"\nMOVIES=\"$GAME/nativePC/movie\"\n\nsudo apt-get update\nsudo apt-get install -y ffmpeg\n\nfiles=(\n    \"event/st100ev00.wmv\"\n    \"event/st230ev00.wmv\"\n    \"event/st610ev21.wmv\"\n    \"event/st240ev05.wmv\"\n    \"title/title_A.wmv\"\n    \"title/title_B.wmv\"\n)\n\nfor rel in \"${files[@]}\"; do\n    dst=\"$MOVIES/$rel\"\n    backup=\"$dst.varmint-original\"\n    tmp=\"$dst.varmint-tmp.avi\"\n\n    if [[ ! -f \"$dst\" ]]; then\n        echo \"Missing file: $dst\" >&2\n        exit 1\n    fi\n\n    if [[ ! -f \"$backup\" ]]; then\n        echo \"Backing up: $rel\"\n        cp -- \"$dst\" \"$backup\"\n    else\n        echo \"Using existing backup: $rel\"\n    fi\n\n    echo \"Converting: $rel\"\n    rm -f -- \"$tmp\"\n\n    ffmpeg \\\n        -hide_banner \\\n        -loglevel warning \\\n        -y \\\n        -i \"$backup\" \\\n        -map 0:v:0 \\\n        -map '0:a:0?' \\\n        -c:v mjpeg \\\n        -q:v 3 \\\n        -pix_fmt yuvj420p \\\n        -c:a pcm_s16le \\\n        -f avi \\\n        \"$tmp\"\n\n    mv -f -- \"$tmp\" \"$dst\"\ndone\n\necho \"Dragon's Dogma movie conversion complete.\"\n```\n\nThe script installs FFmpeg, keeps a backup of every original movie and replaces each game file only after successful conversion.\n\n### 3. Start the game\n\nLaunch the game normally from Steam.\n\nAfter pressing a key at the title screen, the game should continue to the main menu instead of remaining on a black screen.\n\n## Known issue\n\nWithout the movie conversion, the game reaches the **“Press any key”** screen but does not progress further.\n\nAfter pressing a key, the title graphic fades out and the screen remains black while the music continues. The game process remains alive, but it never reaches the main menu.\n\n## Steam verification and updates\n\nSteam’s **Verify integrity of game files** feature may restore the original WMV files. A game update or reinstall may do the same.\n\nIf the black screen returns, close the game and run the conversion script again.\n\nThe script keeps the original files as `*.varmint-original` and reuses those backups as conversion sources.\n\n## Why the workaround is needed\n\nThe affected movies use WMV3 video inside ASF containers. The current Proton media path can open them but does not successfully deliver decoded frames to the game.\n\nAVI files with MJPEG video work through the same path. The script converts the contents while preserving the original `.wmv` filenames expected by the game.\n\n## Verify the conversion\n\nRun:\n\n```bash\nffprobe \\\n    -v error \\\n    -show_entries format=format_name:stream=codec_name,codec_type \\\n    -of default=noprint_wrappers=1 \\\n    \"$HOME/.local/share/Steam/steamapps/common/DDDA/nativePC/movie/title/title_B.wmv\"\n```\n\nThe output should include:\n\n```text\ncodec_name=mjpeg\ncodec_type=video\nformat_name=avi\n```\n\n## Restore the original movies\n\nRun:\n\n```bash\nset -euo pipefail\n\nMOVIES=\"$HOME/.local/share/Steam/steamapps/common/DDDA/nativePC/movie\"\n\nfind \"$MOVIES\" \\\n    -type f \\\n    -name '*.wmv.varmint-original' \\\n    -print0 |\nwhile IFS= read -r -d '' backup; do\n    original=\"${backup%.varmint-original}\"\n    echo \"Restoring: $original\"\n    cp -f -- \"$backup\" \"$original\"\ndone\n```\n\n## Tested configuration\n\n```text\nDragon’s Dogma: Dark Arisen\nSteam App ID 367500\nProton 10.0\nDirectX 9\nVenus\nAVI/MJPEG movie conversion applied\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -307,6 +320,7 @@
         22370
       ],
       "guide": "docs/games/fallout-3.md",
+      "guide_markdown": "# Running Fallout 3 in Varmint\n\nFallout 3 is playable in Varmint using Proton 10.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 22300, 22370\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton 10\nRenderer:       Venus\nHost backend:    MoltenVK\nLaunch options: Unchanged\n```\n\n### 1. Select Proton 10\n\nIn Steam:\n\n1. Open **Properties** for Fallout 3.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 10**.\n\n### 2. Start the game\n\nLaunch Fallout 3 normally from Steam.\n\nNo additional setup is required.\n\n## Tested configuration\n\n```text\nFallout 3\nProton 10\nDirectX 9\nVenus\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -330,6 +344,7 @@
         22490
       ],
       "guide": "docs/games/fallout-new-vegas.md",
+      "guide_markdown": "# Running Fallout: New Vegas in Varmint\n\nFallout: New Vegas is playable in Varmint using Proton 10.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 22380, 22490\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton 10\nRenderer:       Venus\nHost backend:    MoltenVK\nLaunch options: Unchanged\n```\n\n### 1. Select Proton 10\n\nIn Steam:\n\n1. Open **Properties** for Fallout: New Vegas.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 10**.\n\n### 2. Start the game\n\nLaunch Fallout: New Vegas normally from Steam.\n\nNo additional setup is required.\n\n## Tested configuration\n\n```text\nFallout: New Vegas\nProton 10\nDirectX 9\nVenus\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -352,6 +367,7 @@
         671210
       ],
       "guide": "docs/games/final-fantasy-xv-demo.md",
+      "guide_markdown": "# Running FINAL FANTASY XV WINDOWS EDITION PLAYABLE DEMO in Varmint\n\nFINAL FANTASY XV WINDOWS EDITION PLAYABLE DEMO is playable in Varmint using Neptune.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 671210\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton Experimental\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: varmint-graphics neptune %command%\n```\n\n### 1. Enable Neptune\n\nSet the Steam launch options to:\n\n```text\nvarmint-graphics neptune %command%\n```\n\nNo additional setup is required.\n\n## Tested configuration\n\n```text\nFINAL FANTASY XV WINDOWS EDITION PLAYABLE DEMO\nProton Experimental\nDirectX 11\nNeptune\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -374,6 +390,7 @@
         4000
       ],
       "guide": "docs/games/garrys-mod.md",
+      "guide_markdown": "# Running Garry's Mod in Varmint\n\nGarry's Mod is playable in Varmint using Proton 10.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 4000\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton 10.0\nRenderer:       Venus\nHost backend:    MoltenVK\nLaunch options: Unchanged\n```\n\n### 1. Select Proton 10\n\nIn Steam:\n\n1. Open **Properties** for Garry's Mod.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 10.0**.\n\n### 2. Start the game\n\nLaunch Garry's Mod normally from Steam.\n\nNo additional setup is required.\n\n## Tested configuration\n\n```text\nGarry's Mod\nProton 10.0\nDirectX 9\nVenus\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -396,6 +413,7 @@
         1249200
       ],
       "guide": "docs/games/ghostrunner-demo.md",
+      "guide_markdown": "# Running Ghostrunner Demo in Varmint\n\nGhostrunner Demo is playable through Neptune's DirectX 12 mode using D3DMetal.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 1249200\nProfile:        dx12\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton Experimental\nRenderer:       Neptune DX12\nHost backend:    D3DMetal\nLaunch options: varmint-graphics neptune-dx12 %command% -dx12\n```\n\n### 1. Select D3DMetal on the host\n\nIn the Varmint launcher, select **D3DMetal** before starting the VM.\n\n### 2. Enable Neptune DX12\n\nSet the Steam launch options to:\n\n```text\nvarmint-graphics neptune-dx12 %command% -dx12\n```\n\n## DirectX 11 alternative\n\nThe previous DirectX 11 path through DXMT remains available:\n\n```text\nProfile:        dx11\nRecommendation: Alternative\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton Experimental\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: varmint-graphics neptune %command% -dx11\n```\n\n## Tested configuration\n\n```text\nGhostrunner Demo\nProton Experimental\nDirectX 12\nNeptune DX12\nD3DMetal\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -435,6 +453,7 @@
         12210
       ],
       "guide": "docs/games/grand-theft-auto-iv.md",
+      "guide_markdown": "# Running Grand Theft Auto IV in Varmint\n\nGrand Theft Auto IV: The Complete Edition works well in Varmint using Proton 10.\n\nThe Rockstar Games Launcher is currently unreliable in Varmint. The recommended workaround is to install RGLess, which removes the launcher from the game's startup path.\n\n**Thanks to `dr_strangekebab` for pointing out the RGLess workaround.**\n\n## Quick setup\n\n```text\nSteam App IDs: 12210\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Assisted\nRuntime:        Proton\nProton version: Proton 10.0\nRenderer:       Venus\nHost backend:    MoltenVK\nLaunch options: Unchanged\n```\n\n### 1. Select Proton 10\n\nIn Steam:\n\n1. Open **Properties** for Grand Theft Auto IV.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 10.0**.\n\n### 2. Install RGLess\n\nInstall `unzip` first:\n\n```bash\nsudo apt-get update\nsudo apt-get install -y unzip\n```\n\nThen install RGLess:\n\n```bash\nGAME=\"$HOME/.local/share/Steam/steamapps/common/Grand Theft Auto IV/GTAIV\"\nZIP=\"/tmp/RGLessIV.zip\"\nTMP=\"/tmp/rgless-install\"\n\ncd \"$GAME\"\n\nmv GTAIV.exe GTAIVbak.exe\nmv PlayGTAIV.exe PlayGTAIVbak.exe\nmv binkw32.dll binkw32bak.dll\n\ncurl -fL \\\n  \"https://archive.org/download/rgless-iv/RGLessIV.zip\" \\\n  -o \"$ZIP\"\n\nrm -rf \"$TMP\"\nmkdir -p \"$TMP\"\n\nunzip -q \"$ZIP\" -d \"$TMP\"\ncp -av \"$TMP\"/. \"$GAME\"/\n```\n\nRGLess replaces `GTAIV.exe`, `PlayGTAIV.exe`, and `binkw32.dll`. The original files are kept as `GTAIVbak.exe`, `PlayGTAIVbak.exe`, and `binkw32bak.dll`.\n\n### 3. Start the game\n\nLaunch Grand Theft Auto IV normally from Steam.\n\nNo additional launch options are required. This setup skips the Rockstar Games Launcher.\n\n## Save files\n\nRGLess uses a local save directory instead of the normal Rockstar Games Launcher location:\n\n```text\n~/.local/share/Steam/steamapps/common/Grand Theft Auto IV/GTAIV/save/GTA IV\n```\n\nExisting saves may need to be copied there manually.\n\nRockstar cloud saves are not available when using RGLess.\n\n## Known issues\n\n### Shader warmup\n\nThe game may stutter heavily or appear to hang while shaders are being compiled.\n\nIf possible, leave it running and let shader compilation finish. If it becomes completely stuck, restart the game or the VM and try again.\n\n## Tested configuration\n\n```text\nGrand Theft Auto IV: The Complete Edition\nSteam App ID 12210\nProton 10.0\nRGLess\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -457,6 +476,7 @@
         962130
       ],
       "guide": "docs/games/grounded.md",
+      "guide_markdown": "# Running Grounded in Varmint\n\nGrounded is playable in Varmint using Neptune.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 962130\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton 10.0\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: varmint-graphics neptune %command% -dx11\n```\n\n### 1. Select Proton 10\n\nIn Steam:\n\n1. Open **Properties** for Grounded.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 10.0**.\n\n### 2. Enable Neptune\n\nSet the following Steam launch options:\n\n```text\nvarmint-graphics neptune %command% -dx11\n```\n\nNo additional configuration is required.\n\n## DirectX 12 alternative\n\nDirectX 12 also works through D3DMetal, while DirectX 11 through DXMT remains recommended:\n\n```text\nProfile:        dx12\nRecommendation: Alternative\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton 10.0\nRenderer:       Neptune DX12\nHost backend:    D3DMetal\nLaunch options: varmint-graphics neptune-dx12 %command% -dx12\n```\n\nSelect **D3DMetal** in the Varmint launcher before starting the VM, then use the launch options above.\n\n## Known issues\n\n### Black pixel and line artifacts\n\nSome surfaces may show small black pixel artifacts or short horizontal black lines, especially when using the **Low** graphics preset.\n\nThe artifacts are most visible on the ground and may change as the camera moves. They are significantly less noticeable at higher graphics quality settings, but may still occasionally appear.\n\nUsing the **Medium** preset or higher is recommended if the artifacts are distracting.\n\nThis appears to be a rendering issue in the Neptune/DXMT path.\n\n## Tested configuration\n\n```text\nGrounded\nProton 10.0\nDirectX 11\nNeptune\nDXMT\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -496,6 +516,7 @@
         1284210
       ],
       "guide": "docs/games/guild-wars-2.md",
+      "guide_markdown": "# Running Guild Wars 2 in Varmint\n\nGuild Wars 2 is playable in Varmint using Neptune.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 1284210\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton 10.0\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: varmint-graphics neptune %command%\n```\n\n### 1. Select Proton 10\n\nIn Steam:\n\n1. Open **Properties** for Guild Wars 2.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 10.0**.\n\n### 2. Enable Neptune\n\nSet the Steam launch options to:\n\n```text\nvarmint-graphics neptune %command%\n```\n\nNo additional setup is required.\n\n## Tested configuration\n\n```text\nGuild Wars 2\nProton 10.0\nDirectX 11\nNeptune\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -518,6 +539,7 @@
         220
       ],
       "guide": "docs/games/half-life-2.md",
+      "guide_markdown": "# Running Half-Life 2 in Varmint\n\nHalf-Life 2 is playable in Varmint using the native Linux build with the Vulkan renderer.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs:    220\nProfile:          native-vulkan\nRecommendation:  Recommended\nEvidence:         Tested\nSetup:            Manual\nRuntime:           Native Linux\nRenderer:          Vulkan\nHost backend:    MoltenVK\nGraphics settings: Default\nLaunch options:    -vulkan\n```\n\n### 1. Use the native Linux version\n\nUse the native Linux version; do not select Proton.\n\n### 2. Launch the Vulkan version\n\nIn the game properties, enter the following as a single line under **Launch Options**:\n\n```text\n-vulkan\n```\n\nStart Half-Life 2 from Steam.\n\nNo additional launch options are required.\n\n### 3. Keep the default settings\n\nThe default in-game graphics settings work without additional configuration.\n\n## Tested configuration\n\n```text\nHalf-Life 2\nNative Linux\nVulkan\nDefault graphics settings\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -540,6 +562,7 @@
         110800
       ],
       "guide": "docs/games/la-noire.md",
+      "guide_markdown": "# Running L.A. Noire in Varmint\n\nL.A. Noire is playable in Varmint using Proton 10.\n\nThe Rockstar Games Launcher is extremely flaky under Wine and needs a somewhat magical workaround to start more or less reliably.\n\nIf the launcher gets stuck, restarting the VM usually helps. If it still refuses to start, recreating the game's Proton prefix is the most reliable fix.\n\nThe launcher is also surprisingly memory-hungry. If possible, allocate more than 16 GB of RAM to the VM. **24 GB is sufficient.**\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 110800\nProfile:        launcher-workaround\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Manual\nRuntime:        Proton\nProton version: Proton 10.0\nRenderer:       Venus\nHost backend:    MoltenVK\nRAM:            24 GB recommended\nLaunch options: bash -c 'DLL=\"$HOME/.local/share/Steam/steamapps/compatdata/110800/pfx/drive_c/Program Files/Rockstar Games/Social Club/libcef.dll\"; sleep 10; [[ -f \"$DLL\" ]] && touch \"$DLL\"; sleep 3; exec \"$@\"' -- %command%\n```\n\n### 1. Select Proton 10\n\nIn Steam:\n\n1. Open **Properties** for L.A. Noire.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 10.0**.\n\n### 2. Add the launch option\n\nSet the following Steam launch option:\n\n```text\nbash -c 'DLL=\"$HOME/.local/share/Steam/steamapps/compatdata/110800/pfx/drive_c/Program Files/Rockstar Games/Social Club/libcef.dll\"; sleep 10; [[ -f \"$DLL\" ]] && touch \"$DLL\"; sleep 3; exec \"$@\"' -- %command%\n```\n\nThe Rockstar Games Launcher sometimes gets stuck during startup and never launches the game.\n\nThis workaround waits briefly, updates the timestamp of Rockstar Social Club's `libcef.dll`, waits again, and then starts the game normally.\n\nThe command is safe to use before the first launch. If `libcef.dll` has not been installed yet, the `touch` step is simply skipped.\n\n### 3. Start the game\n\nLaunch L.A. Noire normally from Steam.\n\nOn the first run, Rockstar Games Launcher and Social Club may need to install and initialize.\n\n## Known issues\n\n### Rockstar Games Launcher\n\nThe Rockstar Games Launcher is unreliable under Wine and may occasionally get stuck even with the workaround above.\n\nIf that happens, stop the game in Steam and restart the VM before trying again.\n\nIf the launcher still refuses to start, recreate the game's Proton prefix:\n\n```bash\ncd \"$HOME/.local/share/Steam/steamapps/compatdata\" &&\nmv 110800 \"110800.bak-$(date +%Y%m%d-%H%M%S)\"\n```\n\nThen launch the game again from Steam.\n\nProton will recreate the prefix and the Rockstar Games Launcher / Social Club components will be installed and initialized again.\n\nThis is the most reliable way to recover from a completely stuck launcher.\n\n### Memory usage\n\nThe Rockstar launcher and its CEF processes can use several gigabytes of RAM by themselves.\n\n16 GB can be tight, especially after several launch attempts.\n\nIf your host has enough memory, allocate more than 16 GB to the VM.\n\n```text\nRecommended: 24 GB\n```\n\n24 GB has been sufficient in testing.\n\n## Tested configuration\n\n```text\nL.A. Noire\nSteam App ID 110800\nProton 10.0\nDirectX 11\nVenus\n24 GB RAM\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -562,6 +585,7 @@
         1625450
       ],
       "guide": "docs/games/muck.md",
+      "guide_markdown": "# Running Muck in Varmint\n\nMuck is playable in Varmint using Neptune.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 1625450\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton 10.0\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: varmint-graphics neptune %command%\n```\n\n### 1. Select Proton 10\n\nIn Steam:\n\n1. Open **Properties** for Muck.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 10.0**.\n\n### 2. Enable Neptune\n\nSet the Steam launch options to:\n\n```text\nvarmint-graphics neptune %command%\n```\n\nNo additional setup is required.\n\n## Tested configuration\n\n```text\nMuck\nProton 10.0\nDirectX 11\nNeptune\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -585,6 +609,7 @@
         620
       ],
       "guide": "docs/games/portal.md",
+      "guide_markdown": "# Running Portal 1-2 in Varmint\n\nPortal and Portal 2 are playable in Varmint using their native Linux builds with the Vulkan renderer.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs:    400, 620\nProfile:          native-vulkan\nRecommendation:  Recommended\nEvidence:         Tested\nSetup:            Manual\nRuntime:           Native Linux\nRenderer:          Vulkan\nHost backend:    MoltenVK\nGraphics settings: Default\nLaunch options:    -vulkan\n```\n\n### 1. Use the native Linux version\n\nUse the native Linux version; do not select Proton.\n\n### 2. Launch the Vulkan version\n\nIn the game properties, enter the following as a single line under **Launch Options**:\n\n```text\n-vulkan\n```\n\nNo additional launch options are required.\n\n### 3. Keep the default settings\n\nThe default in-game graphics settings work without additional configuration.\n\n## Tested configuration\n\n```text\nPortal / Portal 2\nNative Linux\nVulkan\nDefault graphics settings\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -608,6 +633,7 @@
         443360
       ],
       "guide": "docs/games/red-comrades-reloaded.md",
+      "guide_markdown": "# Running Red Comrades Reloaded games in Varmint\n\nThe following games are playable in Varmint using Proton 10:\n\n- Red Comrades 2: For the Great Justice. Reloaded\n- Red Comrades Save the Galaxy: Reloaded\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 415610, 443360\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton 10.0\nRenderer:       Venus\nHost backend:    MoltenVK\nLaunch options: Unchanged\n```\n\n## Select Proton 10\n\nIn Steam:\n\n1. Open **Properties** for the game.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 10.0**.\n\nLaunch the game normally from Steam.\n\nNo additional launch options or configuration are required.\n",
       "profiles": [
         {
           "environment": {},
@@ -630,6 +656,7 @@
         1168280
       ],
       "guide": "docs/games/resident-evil-2-rpd-demo.md",
+      "guide_markdown": "# Running Resident Evil 2 \"R.P.D. Demo\" in Varmint\n\nResident Evil 2 \"R.P.D. Demo\" is playable in Varmint using Neptune.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 1168280\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton Experimental\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: varmint-graphics neptune %command%\n```\n\n### 1. Enable Neptune\n\nSet the Steam launch options to:\n\n```text\nvarmint-graphics neptune %command%\n```\n\nNo additional setup is required.\n\n## DirectX 12 alternative\n\nDirectX 12 also works through D3DMetal, while DirectX 11 through DXMT remains recommended:\n\n```text\nProfile:        dx12\nRecommendation: Alternative\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton Experimental\nRenderer:       Neptune DX12\nHost backend:    D3DMetal\nLaunch options: varmint-graphics neptune-dx12 %command% -dx12\n```\n\nSelect **D3DMetal** in the Varmint launcher before starting the VM, then use the launch options above.\n\n## Tested configuration\n\n```text\nResident Evil 2 \"R.P.D. Demo\"\nProton Experimental\nDirectX 11\nNeptune\nDXMT\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -667,6 +694,7 @@
         632360
       ],
       "guide": "docs/games/risk-of-rain-2.md",
+      "guide_markdown": "# Running Risk of Rain 2 in Varmint\n\nRisk of Rain 2 is playable in Varmint using Venus.\n\nThis configuration is based on a user report and has not been tested directly by the project.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 632360\nProfile:        default\nRecommendation: Recommended\nEvidence:       Reported\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton 10.0\nRenderer:       Venus\nHost backend:    MoltenVK\nLaunch options: Unchanged\n```\n\n### 1. Select Proton 10\n\nIn Steam:\n\n1. Open **Properties** for Risk of Rain 2.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 10.0**.\n\nNo additional launch options are required.\n\n## Reported configuration\n\n```text\nRisk of Rain 2\nProton 10.0\nVenus\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -689,6 +717,7 @@
         1431300
       ],
       "guide": "docs/games/sand-raiders-of-sophie.md",
+      "guide_markdown": "# Running SAND: Raiders of Sophie in Varmint\n\nSAND: Raiders of Sophie has been reported working in Varmint using Neptune.\n\nThis configuration is based on a user report and has not been tested directly by the project.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 1431300\nProfile:        default\nRecommendation: Recommended\nEvidence:       Reported\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton Hotfix\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: varmint-graphics neptune %command%\n```\n\n### 1. Select Proton Hotfix\n\nIn Steam:\n\n1. Open **Properties** for SAND: Raiders of Sophie.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton Hotfix**.\n\n### 2. Enable Neptune\n\nSet the Steam launch options to:\n\n```text\nvarmint-graphics neptune %command%\n```\n\nNo additional setup is required.\n\n## Reported configuration\n\n```text\nSAND: Raiders of Sophie\nProton Hotfix\nDirectX 11\nNeptune\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -711,6 +740,7 @@
         2178380
       ],
       "guide": "docs/games/scp-containment-breach.md",
+      "guide_markdown": "# Running SCP – Containment Breach in Varmint\n\nSCP – Containment Breach is playable in Varmint using Proton 10.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 2178380\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton 10.0\nRenderer:       Venus\nHost backend:    MoltenVK\nLaunch options: Unchanged\n```\n\n### 1. Select Proton 10\n\nIn Steam:\n\n1. Open **Properties** for SCP – Containment Breach.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 10.0**.\n\n### 2. Start the game\n\nLaunch SCP – Containment Breach normally from Steam.\n\nNo additional launch options or configuration is required for the tested setup.\n\n## Tested configuration\n\n```text\nSCP – Containment Breach\nProton 10.0\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -733,6 +763,7 @@
         489830
       ],
       "guide": "docs/games/skyrim-special-edition.md",
+      "guide_markdown": "# Running Skyrim Special Edition in Varmint\n\nThe Elder Scrolls V: Skyrim Special Edition is playable in Varmint using Neptune.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 489830\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton 10.0\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: varmint-graphics neptune %command%\n```\n\n### 1. Select Proton 10\n\nIn Steam:\n\n1. Open **Properties** for Skyrim Special Edition.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 10.0**.\n\n### 2. Enable Neptune\n\nSet the Steam launch options to:\n\n```text\nvarmint-graphics neptune %command%\n```\n\nThe Skyrim launcher can be used normally to configure graphics settings before starting the game.\n\nNo additional setup is required.\n\n## Tested configuration\n\n```text\nThe Elder Scrolls V: Skyrim Special Edition\nProton 10.0\nDirectX 11\nNeptune\n```\n\n## Known issues\n\n### Fullscreen resolutions missing in the launcher\n\nOn displays with non-standard aspect ratios, the Skyrim launcher may only offer the native resolution in fullscreen mode.\n\nTo force 1920×1200 fullscreen, run this in the VM terminal:\n\n```bash\nPREFS=\"$HOME/.local/share/Steam/steamapps/compatdata/489830/pfx/drive_c/users/steamuser/Documents/My Games/Skyrim Special Edition/SkyrimPrefs.ini\"\n\ncp \"$PREFS\" \"$PREFS.bak\"\n\nsed -i \\\n  -e 's/^bFull Screen=.*/bFull Screen=1/' \\\n  -e 's/^bBorderless=.*/bBorderless=0/' \\\n  -e 's/^iSize W=.*/iSize W=1920/' \\\n  -e 's/^iSize H=.*/iSize H=1200/' \\\n  \"$PREFS\"\n```\n\nLaunch Skyrim without reopening the launcher's graphics options, as they may overwrite these settings.\n",
       "profiles": [
         {
           "environment": {},
@@ -755,6 +786,7 @@
         1465360
       ],
       "guide": "docs/games/snowrunner.md",
+      "guide_markdown": "# Running SnowRunner in Varmint\n\nSnowRunner has been reported working in Varmint using Neptune.\n\nThis configuration is based on a user report and has not been tested directly by the project.\n\n**Steering wheels are not currently supported in Varmint.**\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 1465360\nProfile:        default\nRecommendation: Recommended\nEvidence:       Reported\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton 10.0\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: varmint-graphics neptune %command%\n```\n\n### 1. Select Proton 10\n\nIn Steam:\n\n1. Open **Properties** for SnowRunner.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 10.0**.\n\n### 2. Enable Neptune\n\nSet the following Steam launch options:\n\n```text\nvarmint-graphics neptune %command%\n```\n\nNo additional configuration is required.\n\n## Reported configuration\n\n```text\nSnowRunner\nProton 10.0\nDirectX 11\nNeptune\nMedium settings\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -777,6 +809,7 @@
         3564860
       ],
       "guide": "docs/games/stellar-blade-demo.md",
+      "guide_markdown": "# Running Stellar Blade Demo in Varmint\n\nStellar Blade Demo is playable through Neptune's DirectX 12 mode using D3DMetal.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 3564860\nProfile:        dx12\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton Experimental (ARM64)\nRenderer:       Neptune DX12\nHost backend:    D3DMetal\nLaunch options: varmint-graphics neptune-dx12 %command%\n```\n\n### 1. Select D3DMetal on the host\n\nIn the Varmint launcher, select **D3DMetal** before starting the VM.\n\n### 2. Select Proton Experimental (ARM64)\n\nOpen the game's Steam properties and select **Proton Experimental (ARM64)** under **Compatibility**.\n\n### 3. Enable Neptune DX12\n\nSet the following Steam launch options:\n\n```text\nvarmint-graphics neptune-dx12 %command%\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -799,6 +832,7 @@
         625960
       ],
       "guide": "docs/games/stoneshard.md",
+      "guide_markdown": "# Running Stoneshard in Varmint\n\nStoneshard is playable in Varmint using Proton 10.\n\n**Note: Stoneshard was tested using the demo version. The full version may behave differently.**\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 625960\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton 10.0\nRenderer:       Venus\nHost backend:    MoltenVK\nLaunch options: Unchanged\n```\n\n### 1. Select Proton 10\n\nIn Steam:\n\n1. Open **Properties** for Stoneshard.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 10.0**.\n\n### 2. Start the game\n\nLaunch Stoneshard normally from Steam.\n\nNo additional launch options or configuration is required for the tested setup.\n\n## Tested configuration\n\n```text\nStoneshard Demo\nProton 10.0\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -821,6 +855,7 @@
         264710
       ],
       "guide": "docs/games/subnautica.md",
+      "guide_markdown": "# Running Subnautica in Varmint\n\nSubnautica is playable in Varmint using either Neptune or Venus.\n\nNeptune is recommended. Venus also works, but requires limiting the DirectX 11 feature level.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 264710\nProfile:        neptune\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton 10.0\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: varmint-graphics neptune %command%\n```\n\n### 1. Select Proton 10\n\nIn Steam:\n\n1. Open **Properties** for Subnautica.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 10.0**.\n\n### 2. Enable Neptune\n\nSet the Steam launch options to:\n\n```text\nvarmint-graphics neptune %command%\n```\n\nNo additional setup is required.\n\n## Graphics settings\n\nReflections have a large performance cost in Subnautica while making relatively little visual difference.\n\nFor a substantial FPS improvement, reduce or disable **Reflections**. Other settings can generally remain high depending on the desired resolution and frame rate.\n\n## Using Venus instead\n\nVenus also works, but requires limiting the DirectX 11 feature level exposed by DXVK.\n\n```text\nProfile:        venus-feature-level-10-1\nRecommendation: Alternative\nEvidence:       Tested\nSetup:          Manual\nRuntime:        Proton\nProton version: Proton 10.0\nRenderer:       Venus\nHost backend:    MoltenVK\nLaunch options: DXVK_CONFIG_FILE=\"$HOME/dxvk.conf\" %command%\n```\n\nCreate `$HOME/dxvk.conf` with:\n\n```bash\nprintf '%s\\n' 'd3d11.maxFeatureLevel = 10_1' > \"$HOME/dxvk.conf\"\n```\n\nThen use:\n\n```text\nDXVK_CONFIG_FILE=\"$HOME/dxvk.conf\" %command%\n```\n\n## Tested configurations\n\n### Neptune\n\n```text\nSubnautica\nProton 10.0\nDirectX 11\nNeptune\n```\n\n### Venus\n\n```text\nSubnautica\nProton 10.0\nDirectX 11\nVenus\nDXVK feature level: 10_1\nLaunch options: DXVK_CONFIG_FILE=\"$HOME/dxvk.conf\" %command%\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -856,6 +891,7 @@
         440
       ],
       "guide": "docs/games/team-fortress-2.md",
+      "guide_markdown": "# Running Team Fortress 2 in Varmint\n\nTeam Fortress 2 is playable in Varmint using the native Linux build with the Vulkan renderer.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs:    440\nProfile:          native-vulkan\nRecommendation:  Recommended\nEvidence:         Tested\nSetup:            Manual\nRuntime:           Native Linux\nRenderer:          Vulkan\nHost backend:    MoltenVK\nGraphics settings: Default\n```\n\n### 1. Use the native Linux version\n\nUse the native Linux version; do not select Proton.\n\n### 2. Use Vulkan\n\nLaunch Team Fortress 2 normally from Steam. The native Linux version uses Vulkan by default.\n\nDo not select the legacy OpenGL renderer.\n\n### 3. Keep the default settings\n\nThe default in-game graphics settings work without additional configuration.\n\n## Tested configuration\n\n```text\nTeam Fortress 2\nNative Linux\nVulkan\nDefault graphics settings\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -878,6 +914,7 @@
         1959910
       ],
       "guide": "docs/games/the-dark-pictures-the-devil-in-me-demo.md",
+      "guide_markdown": "# Running The Dark Pictures Anthology: The Devil in Me Demo in Varmint\n\nThe Dark Pictures Anthology: The Devil in Me Demo is playable in Varmint using Neptune.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 1959910\nProfile:        demo\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton Experimental\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: varmint-graphics neptune %command%\n```\n\n### 1. Enable Neptune\n\nSet the Steam launch options to:\n\n```text\nvarmint-graphics neptune %command%\n```\n\nNo additional setup is required.\n\n## Tested configuration\n\n```text\nThe Dark Pictures Anthology: The Devil in Me Demo\nProton Experimental\nDirectX 11\nNeptune\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -900,6 +937,7 @@
         292030
       ],
       "guide": "docs/games/the-witcher-3.md",
+      "guide_markdown": "# Running The Witcher 3 in Varmint\n\nThe Witcher 3 is playable in Varmint using Neptune. The Classic version also works through Venus.\n\n**Neptune is the recommended renderer.** Remastered uses DirectX 12 through D3DMetal. The next-gen and Classic versions use the DirectX 11 path through DXMT.\n\nVenus remains available as an alternative, but currently only works with the Classic version.\n\n## Important graphics settings\n\nFor both Neptune and Venus, start from the **Medium** preset and enable higher-quality options manually.\n\n**Do not use the unmodified High preset.** It enables features that are not supported by the current virtual GPU and may crash the game.\n\nKeep NVIDIA-specific features disabled, including **HairWorks**.\n\n## Recommended setup: Remastered\n\nThe default Remastered branch uses DirectX 12:\n\n```text\nSteam App IDs: 292030\nProfile:        remastered-dx12\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nGame version:   public\nProton version: Proton Experimental\nRenderer:       Neptune DX12\nHost backend:    D3DMetal\nLaunch options: varmint-graphics neptune-dx12 %command%\n```\n\nBefore starting the VM, select **D3DMetal** in the Varmint launcher. In Steam, select **Proton Experimental** and use:\n\n```text\nvarmint-graphics neptune-dx12 %command%\n```\n\n## Recommended setup: next-gen and Classic\n\nThese versions use DirectX 11 through DXMT.\n\nUse the following configuration:\n\n```text\nProfile:        next-gen-neptune\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Assisted\nRuntime:        Proton\nGame version:   next-gen\nProton version: Proton 10.0\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: FEX_X87REDUCEDPRECISION=0 varmint-graphics neptune %command%\n```\n\n### 1. Select Proton 10\n\nIn Steam:\n\n1. Open **Properties** for The Witcher 3.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 10.0**.\n\n### 2. Select the next-gen version\n\nOpen **Properties → Game Versions & Betas** and select **next-gen**.\n\n### 3. Enable Neptune\n\nSet the following Steam launch options:\n\n```text\nFEX_X87REDUCEDPRECISION=0 varmint-graphics neptune %command%\n```\n\n### 4. Use DirectX 11\n\nIn REDlauncher, select the **DirectX 11** version of the game.\n\n### Optional: use the Classic version\n\nNeptune also supports the Classic version of The Witcher 3.\n\n```text\nProfile:        classic-neptune\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Assisted\nRuntime:        Proton\nGame version:   Classic\nProton version: Proton 10.0\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: FEX_X87REDUCEDPRECISION=0 varmint-graphics neptune %command%\n```\n\nThe Classic version is slightly faster, but uses the older and simpler graphics.\n\nTo switch to it:\n\n1. Open **Properties** for The Witcher 3.\n2. Open **Game Versions & Betas**.\n3. Select the **Classic** version.\n\nThe same Proton, Neptune and launch-option configuration can be used.\n\n## Alternative setup: Venus\n\nVenus can still be used instead of Neptune, but currently only with the Classic version of The Witcher 3.\n\nFirst select the **Classic** version under **Properties → Game Versions & Betas**.\n\nVenus is the default backend and requires no additional setup.\n\nUse the following configuration:\n\n```text\nProfile:        classic-venus\nRecommendation: Alternative\nEvidence:       Tested\nSetup:          Assisted\nRuntime:        Proton\nGame version:   Classic\nProton version: Proton 10.0\nRenderer:       Venus\nHost backend:    MoltenVK\nLaunch options: FEX_X87REDUCEDPRECISION=0 %command%\n```\n\nThe next-gen and Remastered versions do not currently work through Venus.\n\nThe Venus path may require a few warm-up runs before becoming stable because of DXVK pipeline/cache behavior.\n\nDo not disable or clear the DXVK caches.\n\n## Why reduced x87 precision is disabled\n\nVarmint enables reduced x87 precision by default for compatibility with some older games.\n\nThis breaks the 32-bit REDlauncher installer and can cause it to fail with a `Path not found` error.\n\nFor the next-gen and Classic DirectX 11 paths, use:\n\n```text\nFEX_X87REDUCEDPRECISION=0\n```\n\n## Tested configurations\n\n### Remastered\n\n```text\nThe Witcher 3: Wild Hunt — Remastered\nPublic branch\nProton Experimental\nDirectX 12\nNeptune DX12\nD3DMetal\nNVIDIA HairWorks disabled\n```\n\n### Next-gen and Classic through Neptune\n\n```text\nThe Witcher 3: Wild Hunt\nnext-gen or Classic\nProton 10.0\nDirectX 11\nNeptune\nDXMT\nFEX_X87REDUCEDPRECISION=0\nNVIDIA HairWorks disabled\n```\n\n### Classic through Venus\n\n```text\nThe Witcher 3: Wild Hunt\nClassic branch only\nnext-gen and Remastered not supported through Venus\nProton 10.0\nDirectX 11\nVenus\nMoltenVK\nFEX_X87REDUCEDPRECISION=0\nDXVK caches enabled\nNVIDIA HairWorks disabled\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -967,6 +1005,7 @@
         20900
       ],
       "guide": "docs/games/the-witcher-enhanced-edition.md",
+      "guide_markdown": "# Running The Witcher: Enhanced Edition in Varmint\n\nThe Witcher: Enhanced Edition is playable in Varmint using Proton 9.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 20900\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton 9.0\nRenderer:       Venus\nHost backend:    MoltenVK\nLaunch options: Unchanged\n```\n\n### 1. Select Proton 9\n\nIn Steam:\n\n1. Open **Properties** for The Witcher: Enhanced Edition.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 9.0**.\n\n### 2. Start the game\n\nLaunch The Witcher: Enhanced Edition normally from Steam.\n\nNo additional setup is required.\n\n## Tested configuration\n\n```text\nThe Witcher: Enhanced Edition\nSteam App ID 20900\nProton 9.0\nDirectX 9\nVenus\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -989,6 +1028,7 @@
         2600
       ],
       "guide": "docs/games/vampire-the-masquerade-bloodlines.md",
+      "guide_markdown": "# Running Vampire: The Masquerade – Bloodlines in Varmint\n\nVampire: The Masquerade – Bloodlines is playable in Varmint using Proton 10 and the Unofficial Patch.\n\nThe Source engine's default audio buffering also causes noticeable audio latency. Reducing `snd_mixahead` significantly improves synchronization.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 2600\nProfile:        unofficial-patch\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Manual\nRuntime:        Proton\nProton version: Proton 10.0\nRenderer:       Venus\nHost backend:    MoltenVK\nPatch:          Unofficial Patch (Basic)\nLaunch options: -game Unofficial_Patch\nsnd_mixahead:   0.05\n```\n\n### 1. Select Proton 10\n\nIn Steam:\n\n1. Open **Properties** for Vampire: The Masquerade – Bloodlines.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 10.0**.\n\nLaunch the game once. It is expected to exit with an out-of-memory error at this point, this is normal and is the reason we need a patch.\n\nThis creates the Proton prefix required by the patch installer.\n\n### 2. Install Firefox ESR\n\nVarmint does not include a browser by default.\n\nOpen a terminal and run:\n\n```bash\nsudo apt-get update\nsudo apt-get install -y firefox-esr\n```\n\n### 3. Download the Unofficial Patch\n\nOpen the Unofficial Patch page:\n\n```bash\nfirefox-esr 'https://www.moddb.com/mods/vtmb-unofficial-patch/downloads'\n```\n\nDownload the Windows installer to your `Downloads` directory.\n\nThe default **Basic Patch** is sufficient for Varmint.\n\n### 4. Install the patch\n\nMake sure the game is closed.\n\nOpen a terminal, paste the entire script below and press Enter:\n\n```bash\nset -euo pipefail\n\nSTEAM=\"$HOME/.local/share/Steam\"\nGAME=\"$STEAM/steamapps/common/Vampire The Masquerade - Bloodlines\"\nCOMPAT=\"$STEAM/steamapps/compatdata/2600\"\nPREFIX=\"$COMPAT/pfx\"\nPROTON=\"$STEAM/steamapps/common/Proton 10.0/proton\"\n\nINSTALLER=\"$(\n    find \"$HOME/Downloads\" \\\n        -maxdepth 1 \\\n        -type f \\\n        -iname 'VTMBup*.exe' \\\n        -print |\n    sort -V |\n    tail -n 1\n)\"\n\nif [[ ! -f \"$GAME/vampire.exe\" ]]; then\n    echo \"Vampire: The Masquerade - Bloodlines is not installed.\" >&2\n    exit 1\nfi\n\nif [[ ! -d \"$PREFIX\" ]]; then\n    echo \"Proton prefix not found.\" >&2\n    echo \"Launch the game once from Steam, close it, then run this script again.\" >&2\n    exit 1\nfi\n\nif [[ -z \"$INSTALLER\" || ! -f \"$INSTALLER\" ]]; then\n    echo \"Unofficial Patch installer not found in ~/Downloads.\" >&2\n    exit 1\nfi\n\nWIN_STEAM=\"$PREFIX/drive_c/Program Files (x86)/Steam\"\nWIN_GAME=\"$WIN_STEAM/steamapps/common/Vampire The Masquerade - Bloodlines\"\n\nmkdir -p \"$(dirname \"$WIN_GAME\")\"\n\nif [[ ! -e \"$WIN_GAME\" && ! -L \"$WIN_GAME\" ]]; then\n    ln -s \"$GAME\" \"$WIN_GAME\"\nfi\n\necho \"Installer: $INSTALLER\"\n\nSTEAM_COMPAT_CLIENT_INSTALL_PATH=\"$STEAM\" \\\nSTEAM_COMPAT_DATA_PATH=\"$COMPAT\" \\\n\"$PROTON\" run \"$INSTALLER\"\n```\n\nThe installer should detect the game automatically at:\n\n```text\nC:\\Program Files (x86)\\Steam\\steamapps\\common\\Vampire The Masquerade - Bloodlines\n```\n\nKeep the default **Basic Patch** selected and finish the installation normally.\n\n### 5. Set launch options\n\nOpen the game's **Properties** in Steam and set:\n\n```text\n-game Unofficial_Patch\n```\n\n### 6. Reduce audio latency\n\nOpen a terminal and run:\n\n```bash\nset -euo pipefail\n\nCFG=\"$HOME/.local/share/Steam/steamapps/common/Vampire The Masquerade - Bloodlines/Unofficial_Patch/cfg/autoexec.cfg\"\n\nmkdir -p \"$(dirname \"$CFG\")\"\n\nif grep -qE '^[[:space:]]*snd_mixahead' \"$CFG\" 2>/dev/null; then\n    sed -i -E \\\n        's/^[[:space:]]*snd_mixahead.*/snd_mixahead \"0.05\"/' \\\n        \"$CFG\"\nelse\n    printf '\\nsnd_mixahead \"0.05\"\\n' >> \"$CFG\"\nfi\n\ngrep -n 'snd_mixahead' \"$CFG\"\n```\n\nThis sets:\n\n```text\nsnd_mixahead \"0.05\"\n```\n\nThe default Source engine audio buffer can introduce several hundred milliseconds of delay. A value of `0.05` reduces the buffer to approximately 50 ms and significantly improves dialogue synchronization.\n\nLower values may cause audio underruns or crackling.\n\n### 7. Start the game\n\nLaunch Vampire: The Masquerade – Bloodlines normally from Steam.\n\n## Known issues\n\n### Audio delay\n\nWithout the `snd_mixahead` adjustment, dialogue audio can noticeably lag behind character animations.\n\nUse:\n\n```text\nsnd_mixahead \"0.05\"\n```\n\n### Reinstalling the game or patch\n\nSteam's **Verify integrity of game files** normally leaves the separate `Unofficial_Patch` directory intact.\n\nHowever, reinstalling the game, recreating the Proton prefix, or reinstalling the patch may require repeating the relevant setup steps.\n\nThe audio setting is stored in:\n\n```text\nUnofficial_Patch/cfg/autoexec.cfg\n```\n\nand may need to be reapplied after updating or reinstalling the patch.\n\n## Tested configuration\n\n```text\nVampire: The Masquerade – Bloodlines\nSteam App ID 2600\nProton 10.0\nDirectX 9\nVenus\nUnofficial Patch (Basic)\nLaunch options: -game Unofficial_Patch\nsnd_mixahead 0.05\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -1011,6 +1051,7 @@
         230410
       ],
       "guide": "docs/games/warframe.md",
+      "guide_markdown": "# Running Warframe in Varmint\n\nWarframe is playable in Varmint using Neptune.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 230410\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton Experimental\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: varmint-graphics neptune %command%\n```\n\nSteam's default Proton Experimental works, so no compatibility override is required.\n\n### Enable Neptune\n\nSet the Steam launch options to:\n\n```text\nvarmint-graphics neptune %command%\n```\n\n## Fullscreen and borderless\n\nBorderless is the simpler option for window management and focus.\n\nFullscreen is useful when you want to select a lower output resolution and use the game's upscaling options.\n\nIf fullscreen starts with incorrect scaling or keyboard focus, use the Plasma taskbar to **Minimize** Warframe once.\n\n## Tested configuration\n\n```text\nWarframe\nProton Experimental\nDirectX 11\nNeptune\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -1030,5 +1071,5 @@
     }
   ],
   "minimum_vet_version": 1,
-  "schema_version": 1
+  "schema_version": 2
 }

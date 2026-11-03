@@ -668,6 +668,7 @@ class GuideFacts:
     setup: str = "automatic"
     game_version: str | None = None
     host_backend: str | None = None
+    guide_markdown: str = ""
 
 
 @dataclass
@@ -880,6 +881,7 @@ class VarmintDocsProvider:
             setup=profile["setup"],
             game_version=profile.get("game_version"),
             host_backend=profile.get("host_backend"),
+            guide_markdown=game["guide_markdown"],
         )
         return GuideMatch("exact", game["guide"], facts), list(self._load_warnings)
 

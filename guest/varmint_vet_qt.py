@@ -39,7 +39,6 @@ from varmint_vet import (
 from varmint_vet_actions import (
     configure_manually,
     copy_to_clipboard,
-    open_setup_guide,
     override_plan,
 )
 
@@ -162,6 +161,24 @@ class DetailsDialog(QDialog):
         browser = ScrollTextBrowser()
         browser.setPlainText(text)
         layout.addWidget(browser)
+        close = QPushButton("Close")
+        close.clicked.connect(self.accept)
+        layout.addWidget(close, alignment=Qt.AlignmentFlag.AlignRight)
+
+
+class GuideDialog(QDialog):
+    def __init__(self, markdown, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Setup guide")
+        self.setWindowFlag(Qt.WindowType.Dialog, True)
+        self.setFixedSize(860, 640)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 20)
+        browser = ScrollTextBrowser()
+        browser.setOpenLinks(False)
+        browser.setOpenExternalLinks(False)
+        browser.setMarkdown(markdown)
+        layout.addWidget(browser, 1)
         close = QPushButton("Close")
         close.clicked.connect(self.accept)
         layout.addWidget(close, alignment=Qt.AlignmentFlag.AlignRight)
@@ -974,22 +991,15 @@ class VetWindow(QDialog):
         self._show_confirmation(plan, self.proton_panel)
 
     def _manual_recommendation(self):
+        research = self.prepared[2]
         recommendation = self.prepared[3]
         plan = self.prepared[4]
         if recommendation.setup == "manual" or (
             recommendation.setup == "assisted" and not any(plan["changes"].values())
         ):
-            source = next(
-                (
-                    source
-                    for source in recommendation.sources
-                    if source.kind == "varmint_guide"
-                ),
-                None,
-            )
-            if source:
-                open_setup_guide(source.url)
-                self._show_status("Opening the setup guide in Steam.")
+            facts = research.varmint_doc.facts
+            if facts and facts.guide_markdown:
+                GuideDialog(facts.guide_markdown, self).exec()
             return
         if configure_manually(
             plan, copy_launch_options=bool(recommendation.graphics_mode)
