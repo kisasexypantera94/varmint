@@ -23,6 +23,8 @@ Varmint supports Vulkan and Direct3D games through two graphics paths, Venus and
 
 5. Open Steam, wait for it to finish setting up, then sign in and install a game.
 
+6. Open Vet or check the [game guides](#games) for recommended settings, then launch the game from Steam.
+
 See [Using Varmint](docs/using-varmint.md) for keyboard shortcuts, clipboard sharing and other VM basics.
 
 ## Controllers
