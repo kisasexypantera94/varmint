@@ -869,7 +869,7 @@ impl LauncherDelegate {
 
         let memory_slider = slider(
             4.0,
-            (defaults.host_memory_mib / 1024).saturating_sub(4).max(4) as f64,
+            (defaults.host_memory_mib / 1024).max(4) as f64,
             self,
             sel!(memorySliderChanged:),
             mtm,
@@ -2146,7 +2146,7 @@ fn memory_hint(memory_mib: u64, host_memory_gib: u64) -> Option<(String, bool)> 
         return Some((format!("More than this Mac's {host_memory_gib} GB."), true));
     }
     if memory_mib > host_memory_gib.saturating_sub(4) * 1024 {
-        return Some(("Leaves less than 4 GB for macOS.".to_owned(), false));
+        return Some(("macOS may use memory compression or swap.".to_owned(), false));
     }
     if memory_mib < 4 * 1024 {
         return Some(("Below the 4 GB slider range.".to_owned(), false));
@@ -2305,7 +2305,7 @@ mod tests {
         );
         assert_eq!(
             memory_hint(34 * 1024, 36),
-            Some(("Leaves less than 4 GB for macOS.".to_owned(), false))
+            Some(("macOS may use memory compression or swap.".to_owned(), false))
         );
         assert_eq!(cpu_hint(13, 12), Some(("This Mac has 12 CPUs.".to_owned(), true)));
         assert_eq!(
