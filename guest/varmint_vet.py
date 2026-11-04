@@ -1299,7 +1299,10 @@ class DeterministicRecommendationProvider:
             "high",
             message,
             research.external.sources,
-            [],
+            [
+                "Vet could not verify launcher compatibility. "
+                "If a legacy launcher does not open, try Proton 10."
+            ],
         )
 
     def _recommendation(

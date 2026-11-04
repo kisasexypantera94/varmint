@@ -1009,6 +1009,16 @@ class PolicyTests(unittest.TestCase):
                     (backend, setup),
                 )
 
+    def test_generic_policy_notes_unverified_launcher_compatibility(self):
+        recommendation = self.provider.recommend(
+            self.game, self.state, external([11], "x64")
+        )
+        self.assertEqual(
+            recommendation.details,
+            "Vet could not verify launcher compatibility. "
+            "If a legacy launcher does not open, try Proton 10.",
+        )
+
     def test_explicit_source_argument_is_preserved(self):
         selection = [{"api": "d3d11", "kind": "argument", "value": "-dx11"}]
         recommendation = self.provider.recommend(
@@ -1107,6 +1117,7 @@ class MonitorFlowTests(unittest.TestCase):
     def test_actionable_change_shows_notification(self):
         notification = self.call_notification(self.recommendation())
         notification.assert_called_once()
+        self.assertIn("--expire-time=0", notification.call_args.args[0])
 
     def test_paused_suggestions_skip_research_and_notification(self):
         service = self.recommendation()
@@ -1156,18 +1167,23 @@ class MonitorFlowTests(unittest.TestCase):
             }
         ]
         function = self.launcher["notify_completed_diagnostics"]
+        notification = mock.Mock(return_value=("view", 0))
         with (
             mock.patch.dict(sys.modules, {"varmint_vet_qt": module}),
             mock.patch.dict(
                 function.__globals__,
                 {
-                    "notification": mock.Mock(return_value=("view", 0)),
+                    "notification": notification,
                 },
             ),
         ):
             function(service)
         service.diagnostics.mark_notified.assert_called_once_with("run-id")
         run.assert_called_once_with(service, 123, "run-id")
+        self.assertIn(
+            "--expire-time=10000",
+            notification.call_args.args[0],
+        )
 
 
 class DiagnosticTests(unittest.TestCase):

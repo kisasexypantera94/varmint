@@ -51,6 +51,7 @@ from varmint_vet_actions import (
 
 
 STYLE = """
+QWidget { color: #f1f3f5; }
 QDialog { background: #232543; color: #f1f3f5; font-size: 14px; }
 QLabel#appTitle { font-size: 24px; font-weight: 700; }
 QLabel#gameTitle { font-size: 22px; font-weight: 700; }
@@ -90,7 +91,10 @@ QRadioButton { color: #f1f3f5; font-weight: 600; spacing: 8px; padding: 4px; }
 QRadioButton::indicator { width: 18px; height: 18px; }
 QCheckBox { color: #b3b7d2; spacing: 8px; padding: 4px; }
 QCheckBox::indicator { width: 18px; height: 18px; }
-QTextBrowser { background: #1c203a; border: 1px solid #40445e; border-radius: 10px; padding: 12px; }
+QTextBrowser {
+    background: #1c203a; border: 1px solid #40445e; border-radius: 10px;
+    color: #f1f3f5; padding: 12px;
+}
 QTextBrowser#guideProse { background: transparent; border: none; padding: 0; font-size: 13px; }
 QScrollArea#guideScroll { background: #1c203a; border: 1px solid #40445e; border-radius: 10px; }
 QScrollArea#guideScroll > QWidget > QWidget { background: #1c203a; }

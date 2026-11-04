@@ -20,6 +20,9 @@ from varmint_vet import InstallMonitor, Preferences, Steam, VetService  # noqa: 
 from varmint_vet_actions import NOTIFICATION_TIMEOUT_MS, notification_icon, notify  # noqa: E402
 
 
+INSTALL_NOTIFICATION_TIMEOUT_MS = 0
+
+
 def notification(arguments):
     result = subprocess.run(
         arguments,
@@ -54,7 +57,7 @@ def notify_recommendation(service, game):
             "--wait",
             "--icon",
             notification_icon(),
-            f"--expire-time={NOTIFICATION_TIMEOUT_MS}",
+            f"--expire-time={INSTALL_NOTIFICATION_TIMEOUT_MS}",
             "--action=view=View",
             "--action=dismiss=Dismiss",
             "Vet",
