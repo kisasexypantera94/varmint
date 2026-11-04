@@ -30,7 +30,7 @@ use objc2_foundation::{
 use std::{
     cell::{Cell, RefCell},
     path::{Path, PathBuf},
-    process::Child,
+    process::{Child, Command, Stdio},
 };
 use vm_log::VmLog;
 use vms::{
@@ -45,6 +45,7 @@ const D3DMETAL_DOWNLOAD_URL: &str =
     "https://developer.apple.com/download/all/?q=evaluation%20environment%20for%20windows%20games";
 // Apple's 4.0 beta 3 redist links libdxccontainer.dylib built for macOS 26.4.
 const D3DMETAL_SYSTEM_REQUIREMENT: &str = "D3DMetal requires macOS 26.4 or later.";
+const D3DMETAL_ROSETTA_REQUIREMENT: &str = "D3DMetal requires Rosetta 2.";
 const DISK_PRESETS_GIB: &[u64] = &[64, 128, 256, 512, 1024];
 const FORM_WIDTH: f64 = 640.0;
 const FORM_HEIGHT: f64 = 380.0;
@@ -1494,6 +1495,11 @@ impl LauncherDelegate {
         if backend == NeptuneBackend::D3dmetal && !host_supports_d3dmetal() {
             return Err(D3DMETAL_SYSTEM_REQUIREMENT.to_owned());
         }
+        if backend == NeptuneBackend::D3dmetal && !rosetta_is_available() {
+            return Err(format!(
+                "{D3DMETAL_ROSETTA_REQUIREMENT}\n\nOpen Terminal and run:\nsoftwareupdate --install-rosetta"
+            ));
+        }
         lock_storage(&storage_dir(path, &document)).map(drop)?;
         let executable = std::env::current_exe().map_err(|error| error.to_string())?;
         let (child, log) = VmLog::spawn(&executable, path, vm_name(path)).map_err(|error| error.to_string())?;
@@ -2001,6 +2007,20 @@ fn host_supports_d3dmetal() -> bool {
     supports_d3dmetal_on(version.majorVersion, version.minorVersion)
 }
 
+fn rosetta_probe_command() -> Command {
+    let mut command = Command::new("/usr/bin/arch");
+    command
+        .args(["-x86_64", "/usr/bin/true"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command
+}
+
+fn rosetta_is_available() -> bool {
+    rosetta_probe_command().status().is_ok_and(|status| status.success())
+}
+
 /// The D3DMetal framework the VMM would load, and whether it is the copy bundled with Varmint.
 /// Like the VMM, this prefers `D3DMETAL_FRAMEWORK_PATH` from the environment, then from the
 /// config's `host_environment`, then the bundle.
@@ -2079,6 +2099,13 @@ fn graphics_hint(backend: NeptuneBackend, document: &VmConfigDocument) -> (Strin
     }
     if !host_supports_d3dmetal() {
         return (D3DMETAL_SYSTEM_REQUIREMENT.to_owned(), true, false);
+    }
+    if !rosetta_is_available() {
+        return (
+            format!("{D3DMETAL_ROSETTA_REQUIREMENT} Install it before starting the VM."),
+            true,
+            false,
+        );
     }
     match d3dmetal_framework(document) {
         Some((path, bundled)) => match d3dmetal_version(&path) {
@@ -2305,5 +2332,12 @@ mod tests {
         assert!(!supports_d3dmetal_on(26, 3));
         assert!(supports_d3dmetal_on(26, 4));
         assert!(supports_d3dmetal_on(27, 0));
+    }
+
+    #[test]
+    fn rosetta_probe_runs_an_x86_64_process() {
+        let command = rosetta_probe_command();
+        assert_eq!(command.get_program(), "/usr/bin/arch");
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["-x86_64", "/usr/bin/true"]);
     }
 }
