@@ -35,6 +35,8 @@ from varmint_vet import (
     VetError,
     VetService,
     current_host_backend_warning,
+    current_setup_warning,
+    diagnostics_wrapper_required,
     display_graphics,
     display_proton,
     format_launch_requirements,
@@ -47,6 +49,7 @@ from varmint_vet_actions import (
     configure_manually,
     copy_to_clipboard,
     override_plan,
+    switch_backend_plan,
 )
 
 
@@ -426,7 +429,7 @@ class VetWindow(QDialog):
         root.addWidget(sidebar_widget)
 
         content = QVBoxLayout()
-        content.setSpacing(14)
+        content.setSpacing(12)
         self.game_title = QLabel("Select a game")
         self.game_title.setObjectName("gameTitle")
         self.game_subtitle = QLabel(
@@ -520,6 +523,8 @@ class VetWindow(QDialog):
         self.status = QLabel("")
         self.status.setObjectName("muted")
         self.status.setWordWrap(True)
+        self.status.setContentsMargins(0, 4, 0, 4)
+        self.status.setMinimumHeight(self.status.fontMetrics().lineSpacing() + 8)
         content.addWidget(self.status)
         content.addStretch()
         content_widget = QWidget()
@@ -678,10 +683,13 @@ class VetWindow(QDialog):
         self.manual_button.clicked.connect(self._manual_recommendation)
         self.auto_button = QPushButton("Apply automatically")
         self.auto_button.clicked.connect(self._confirm_recommendation)
+        self.guide_button = QPushButton("Open setup guide")
+        self.guide_button.clicked.connect(self._open_setup_guide)
         self.details_button = QPushButton("Details")
         self.details_button.clicked.connect(self._details)
         actions.addWidget(self.manual_button, 2)
         actions.addWidget(self.auto_button, 2)
+        actions.addWidget(self.guide_button, 2)
         actions.addWidget(self.details_button, 1)
         layout.addWidget(self.recommend_title)
         layout.addWidget(self.recommend_text)
@@ -803,7 +811,7 @@ class VetWindow(QDialog):
         self.values["Host backend"].setVisible(bool(host_backend))
         if host_backend:
             self.values["Host backend"].setText(host_backend)
-        warning = current_host_backend_warning(self.state)
+        warning = current_setup_warning(self.state)
         self.runtime_warning.setText(f"⚠ {warning}" if warning else "")
         self.runtime_warning.setVisible(bool(warning))
         self.values["Proton override"].setText(
@@ -817,7 +825,8 @@ class VetWindow(QDialog):
         self.values["Launch Options"].setText(self.state["launch_options"] or "Empty")
         self._mark_current_backend()
         self.backend_note.setText(
-            "Choose how to apply the change, then pick a backend."
+            "Choose how to apply the change, then pick a backend. "
+            "Venus supports Proton 10 or older."
         )
         self._reload_proton_choices()
         if self.state["launch_options_error"]:
@@ -826,7 +835,16 @@ class VetWindow(QDialog):
             self._show_status("")
         self._update_diagnostic_panel()
         self.stack.setCurrentWidget(self.home_panel)
+        self._fit_stack_to_contents()
         self._set_actions_enabled(True)
+
+    def _fit_stack_to_contents(self):
+        heights = [
+            self.stack.widget(index).sizeHint().height()
+            for index in range(self.stack.count())
+        ]
+        if heights:
+            self.stack.setMinimumHeight(max(self.stack.minimumHeight(), *heights))
 
     def _mark_current_backend(self):
         current = self.state["effective_graphics_mode"]
@@ -879,6 +897,7 @@ class VetWindow(QDialog):
 
     def _open_diagnostics(self):
         self._update_diagnostic_panel()
+        self._show_status("")
         self.stack.setCurrentWidget(self.diagnostics_panel)
 
     def _refresh_diagnostics(self):
@@ -926,6 +945,9 @@ class VetWindow(QDialog):
             and self.state["graphics_mode"]
             and not self.state["launch_options_error"]
         )
+        needs_wrapper = bool(
+            self.state and diagnostics_wrapper_required(self.state)
+        )
         if pending:
             if pending_changes:
                 self.diagnostics_title.setText("Setup changed after capture was armed")
@@ -959,19 +981,28 @@ class VetWindow(QDialog):
             self.diagnostics_text.setText(
                 "Capture a Proton log from one launch. After arming it, start the game normally in Steam."
             )
-        else:
-            self.diagnostics_title.setText("Choose a backend first")
+        elif needs_wrapper:
+            self.diagnostics_title.setText("Enable diagnostic capture")
             self.diagnostics_text.setText(
-                "Diagnostics use the Varmint graphics wrapper. Choose Neptune, Neptune DX12, or Venus first."
+                "Venus is already active through Steam defaults. Vet needs the "
+                "Varmint Venus wrapper in Launch Options to capture a Proton log."
             )
-        self.capture_button.setVisible(managed and not pending)
-        self.capture_button.setText(
-            "Capture current setup"
-            if completed and latest_changes
-            else "Capture again"
-            if completed
-            else "Capture next launch"
-        )
+        else:
+            self.diagnostics_title.setText("Diagnostics unavailable")
+            self.diagnostics_text.setText(
+                "Fix the current Launch Options before capturing diagnostics."
+            )
+        self.capture_button.setVisible((managed and not pending) or needs_wrapper)
+        if needs_wrapper:
+            self.capture_button.setText("Enable capture")
+        else:
+            self.capture_button.setText(
+                "Capture current setup"
+                if completed and latest_changes
+                else "Capture again"
+                if completed
+                else "Capture next launch"
+            )
         self.report_button.setText(
             "View previous report" if completed and latest_changes else "View report"
         )
@@ -979,6 +1010,18 @@ class VetWindow(QDialog):
         self.cancel_capture_button.setVisible(bool(pending))
 
     def _arm_diagnostics(self):
+        if diagnostics_wrapper_required(self.state):
+            plan = override_plan(
+                self.state,
+                launch_options=transform_launch_options(
+                    self.state["launch_options"], "venus"
+                ),
+            )
+            configure_manually(plan)
+            self._show_status(
+                "Launch Options copied. Paste them in Steam Properties, then return here."
+            )
+            return
         try:
             self.service.arm_diagnostics(self.state["appid"])
             self._update_diagnostic_panel()
@@ -1088,39 +1131,46 @@ class VetWindow(QDialog):
         else:
             self.manual_button.setText(
                 "Copy && Open Steam"
-                if recommendation.graphics_mode
+                if plan["changes"]["launch_options"]
                 else "Open Steam Properties"
             )
+        self.guide_button.setVisible(
+            has_guide and recommendation.setup == "assisted" and has_changes
+        )
         self.auto_button.setVisible(
             recommendation.setup == "automatic" and actionable and has_changes
         )
         self.details_button.setVisible(True)
         self._show_status("")
         self.stack.setCurrentWidget(self.recommend_panel)
+        self._fit_stack_to_contents()
         self._set_actions_enabled(True)
 
     def _choose_backend(self, mode):
         self._mark_current_backend()
-        if mode == self.state["effective_graphics_mode"]:
-            self._show_status(f"Steam already uses {display_graphics(mode)}.")
-            return
         try:
-            options = transform_launch_options(self.state["launch_options"], mode)
+            plan = switch_backend_plan(self.state, mode)
         except VetError as exception:
             self._show_error(str(exception))
             return
-        plan = override_plan(self.state, launch_options=options)
+        if not any(plan["changes"].values()):
+            self._show_status(f"Steam already uses {display_graphics(mode)}.")
+            return
         if self.backend_automatic:
-            if not any(plan["changes"].values()):
-                self._show_status(f"Steam already uses {display_graphics(mode)}.")
-                return
             self.prepared = (None, self.state, None, None, plan)
             self._show_confirmation(plan, self.backend_panel)
             return
-        configure_manually(plan, copy_launch_options=True)
-        self._show_status(
-            "Launch Options copied. Paste them in the Steam Properties window."
-        )
+        configure_manually(plan)
+        if plan["changes"]["proton"]:
+            self._show_status(
+                "Steam Properties opened. Apply the Launch Options and Proton selection."
+                if plan["changes"]["launch_options"]
+                else "Steam Properties opened. Select Proton 10 in Compatibility."
+            )
+        else:
+            self._show_status(
+                "Launch Options copied. Paste them in the Steam Properties window."
+            )
 
     def _manual_proton(self):
         plan = override_plan(self.state, proton=self.proton_combo.currentData())
@@ -1147,16 +1197,32 @@ class VetWindow(QDialog):
         if facts and facts.guide_markdown and (
             recommendation.setup == "manual" or not any(plan["changes"].values())
         ):
-            GuideDialog(facts.guide_markdown, self).exec()
+            self._open_setup_guide()
             return
-        if configure_manually(
-            plan, copy_launch_options=bool(recommendation.graphics_mode)
-        ):
-            self._show_status(
-                "Steam Properties opened. Apply the copied configuration there."
-            )
+        if configure_manually(plan):
+            if plan["changes"]["launch_options"] and plan["changes"]["proton"]:
+                self._show_status(
+                    "Launch Options copied. Paste them in General and select "
+                    f"{display_proton(plan['after']['proton'])} in Compatibility."
+                )
+            elif plan["changes"]["launch_options"]:
+                self._show_status(
+                    "Launch Options copied. Paste them in Steam Properties."
+                )
+            else:
+                self._show_status(
+                    "Steam Properties opened. Select "
+                    f"{display_proton(plan['after']['proton'])} in Compatibility."
+                )
         else:
             self._show_status("Steam already has this configuration.")
+
+    def _open_setup_guide(self):
+        if not self.prepared:
+            return
+        facts = self.prepared[2].varmint_doc.facts
+        if facts and facts.guide_markdown:
+            GuideDialog(facts.guide_markdown, self).exec()
 
     def _confirm_recommendation(self):
         self._show_confirmation(self.prepared[4], self.recommend_panel)
@@ -1181,6 +1247,7 @@ class VetWindow(QDialog):
         self.confirm_text.setText(message)
         self.confirm_return_panel = return_panel
         self.stack.setCurrentWidget(self.confirm_panel)
+        self._fit_stack_to_contents()
 
     def _cancel_confirmation(self):
         self.stack.setCurrentWidget(self.confirm_return_panel or self.home_panel)

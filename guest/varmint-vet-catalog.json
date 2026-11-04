@@ -94,6 +94,29 @@
     },
     {
       "appids": [
+        409710
+      ],
+      "guide": "docs/games/bioshock-remastered.md",
+      "guide_markdown": "# Running BioShock Remastered in Varmint\n\nBioShock Remastered is playable in Varmint using Venus and Proton 10.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 409710\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton 10.0\nRenderer:       Venus\nHost backend:    MoltenVK\nLaunch options: Unchanged\n```\n\n### 1. Select Proton 10\n\nIn Steam:\n\n1. Open **Properties** for BioShock Remastered.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 10.0**.\n\n### 2. Start the game\n\nLaunch BioShock Remastered normally from Steam. Venus is the default renderer,\nso no launch options are required.\n\n## Tested configuration\n\n```text\nBioShock Remastered\nSteam App ID 409710\nProton 10.0\n32-bit DirectX 11\nVenus\n```\n",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "venus",
+          "host_backend": "MoltenVK",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_10",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "BioShock Remastered"
+    },
+    {
+      "appids": [
         3132990
       ],
       "guide": "docs/games/black-myth-wukong-benchmark.md",

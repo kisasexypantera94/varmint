@@ -1284,15 +1284,20 @@ class DeterministicRecommendationProvider:
             and item["api"] == api
             and item["value"] in GRAPHICS_ARGUMENTS
         ]
+        architecture = {"x86": "32-bit", "x64": "64-bit"}.get(
+            research.external.architecture
+        )
+        api = f"Direct3D {', '.join(map(str, sorted(versions)))}"
+        capability = f"{architecture} {api}" if architecture else api
         message = (
-            f"Based on the full game's Direct3D {', '.join(map(str, sorted(versions)))} support."
+            f"Based on the full game's {capability} support."
             if parent
-            else f"Based on Direct3D {', '.join(map(str, sorted(versions)))} support."
+            else f"Based on {capability} support."
         )
         return self._recommendation(
             state,
             mode,
-            None,
+            "proton_10" if mode == "venus" else None,
             arguments,
             {},
             reason,
@@ -1377,6 +1382,16 @@ def display_proton(proton):
     return f"Proton {match.group(1)}" if match else proton
 
 
+def venus_supports_proton(proton):
+    match = re.fullmatch(r"proton_(\d+)(?:-arm64)?", proton or "")
+    if not match:
+        return False
+    version = match.group(1)
+    if version == "10" or len(version) == 1:
+        return int(version) <= 10
+    return version[0] in "23456"
+
+
 def current_host_backend_warning(state):
     if (
         state.get("effective_graphics_mode") == "neptune-dx12"
@@ -1387,6 +1402,31 @@ def current_host_backend_warning(state):
             "Change the host backend in the Varmint launcher and restart the VM."
         )
     return None
+
+
+def current_setup_warning(state):
+    host_warning = current_host_backend_warning(state)
+    if host_warning:
+        return host_warning
+    proton = state.get("effective_proton")
+    if (
+        state.get("effective_graphics_mode") == "venus"
+        and proton
+        and not venus_supports_proton(proton)
+    ):
+        return (
+            "Venus is supported with Proton 10 or older. This game currently uses "
+            f"{display_proton(proton)}. Select Proton 10 in Steam Compatibility."
+        )
+    return None
+
+
+def diagnostics_wrapper_required(state):
+    return (
+        state.get("effective_graphics_mode") == "venus"
+        and not state.get("graphics_mode")
+        and not state.get("launch_options_error")
+    )
 
 
 def host_backend_warning(state, recommendation):
@@ -1532,10 +1572,16 @@ class VetService:
         state = self.game_state(appid)
         if state["launch_options_error"]:
             raise VetError("diagnostics_unavailable", state["launch_options_error"])
+        if diagnostics_wrapper_required(state):
+            raise VetError(
+                "diagnostics_unavailable",
+                "Venus is active through Steam defaults, but diagnostic capture "
+                "needs the Varmint Venus wrapper in Launch Options.",
+            )
         if not state["graphics_mode"]:
             raise VetError(
                 "diagnostics_unavailable",
-                "Choose a Varmint graphics backend before capturing diagnostics.",
+                "Diagnostic capture needs the Varmint graphics wrapper in Launch Options.",
             )
         if self.steam.game_running(appid):
             raise VetError(

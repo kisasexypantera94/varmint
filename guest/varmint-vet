@@ -44,11 +44,12 @@ def notify_recommendation(service, game):
         return
     if not (recommendation.graphics_mode or recommendation.proton):
         return
-    if not any(plan["changes"].values()) and not plan.get("host_warning"):
-        return
-    message = (
-        plan.get("host_warning") or f"Vet found a recommended setup for {game['name']}."
-    )
+    if plan.get("host_warning"):
+        message = plan["host_warning"]
+    elif any(plan["changes"].values()):
+        message = f"Vet found a recommended setup for {game['name']}."
+    else:
+        message = f"{game['name']} is already set up as recommended."
     output, status = notification(
         [
             "notify-send",

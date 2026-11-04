@@ -9,7 +9,7 @@ Game-specific Proton versions, graphics backends, launch options and workarounds
 Varmint has two main graphics backends:
 
 - Venus - the default backend.
-- Neptune - the preferred backend for supported 64-bit DirectX 11 games.
+- Neptune - the preferred backend for supported 64-bit DirectX 11 and 12 games.
 
 Venus and native Vulkan use MoltenVK on the host. Neptune DirectX 11 can use
 either DXMT or D3DMetal; DXMT is the default recommendation. Neptune DX12
@@ -53,7 +53,7 @@ varmint-graphics neptune-dx12 %command%
 
 In this mode Neptune also handles the game's DirectX 11 devices, such as launchers, video playback and overlays.
 
-DirectX 12 needs D3DMetal: in the Varmint window, set DirectX to D3DMetal. If your build of Varmint doesn't include D3DMetal, the window links to Apple's download and lets you locate it after downloading.
+DirectX 12 needs D3DMetal and macOS 26.4 or later. In the Varmint window, set DirectX to D3DMetal. If your build of Varmint doesn't include D3DMetal, the window links to Apple's download and lets you locate it after downloading.
 
 The backend applies to the whole VM: with D3DMetal selected, DirectX 11 games also run on D3DMetal instead of DXMT.
 

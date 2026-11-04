@@ -2,12 +2,12 @@
   <img src="./assets/icon.png" width="100">
 </p>
 
-# varmint
+# Varmint
 Varmint is a lightweight virtual machine for Macs, built on top of Hypervisor.framework.
 
 The current focus is gaming. It runs Linux with hardware-accelerated graphics, making it possible to play Windows and Linux games on Apple Silicon Macs.
 
-It supports two graphics backends: Venus for Vulkan and Neptune for DirectX.
+Varmint provides Venus for Vulkan and Neptune for DirectX 11 and 12 games.
 
 ## How to use
 1. Download the [latest release](https://github.com/kisasexypantera94/varmint/releases), extract it and move `Varmint.app` to Applications.
@@ -23,19 +23,21 @@ It supports two graphics backends: Venus for Vulkan and Neptune for DirectX.
 
 5. Open Steam, wait for it to finish setting up, then sign in and install a game.
 
-## Controllers
-Game controllers that macOS supports as gamepads (GameController.framework) appear in the VM automatically, including ones connected while it runs. Each shows up as an Xbox 360 controller with analog triggers, which Steam, SDL and Proton games handle without configuration; games' rumble plays on controllers that expose haptics to macOS.
+See [Using Varmint](docs/using-varmint.md) for keyboard shortcuts, clipboard sharing and other VM basics.
 
-With **DualSense passthrough** checked in a VM's settings, a DualSense or DualSense Edge is passed through as itself instead: Linux's own driver and Steam get its touchpad, motion sensors, light bar, rumble and adaptive triggers. This needs Input Monitoring access for Varmint (System Settings → Privacy & Security); without it, the DualSense appears as an Xbox 360 controller like the others.
+## Controllers
+Game controllers supported by macOS work automatically, even when connected after the VM starts. They appear as Xbox 360 controllers, with rumble where available.
+
+Turn on **DualSense passthrough** in the launcher settings to use a DualSense with its extra features. It needs Input Monitoring access in System Settings → Privacy & Security, otherwise, the controller falls back to Xbox 360 mode.
 
 ## Games
 
 Compatibility varies between games and graphics paths:
 - Use Venus for DX9 and 32-bit DX11 games.
 - For 64-bit DX11 games, try Neptune first and use Venus as a fallback.
-- Proton 10 is the recommended baseline for Venus, while Neptune also works well with Proton Experimental.
-- Neptune also runs with Proton's ARM64 builds, which can help games that crash at startup on regular Proton.
-- For 64-bit DX12 games, use Neptune's DX12 mode with the D3DMetal backend. DX12 has been tested on fewer games than DX11.
+- For 64-bit DX12 games, use Neptune's DX12 mode with D3DMetal. D3DMetal requires macOS 26.4 or later, and DX12 has been tested on fewer games than DX11.
+- Proton 10 is the recommended baseline. Many Neptune games also work with Proton Experimental.
+- Neptune also works with Proton's ARM64 builds, which can help games that crash at startup on regular Proton.
 
 See [Running games in Varmint](docs/games/common.md) for general setup and troubleshooting.
 
@@ -64,7 +66,7 @@ The games below have been tested. Click a game name for its tested configuration
 | [Red Comrades 2: For the Great Justice. Reloaded](docs/games/red-comrades-reloaded.md)  |      ✅ |               🟢 |
 | [Red Comrades Save the Galaxy: Reloaded](docs/games/red-comrades-reloaded.md)           |      ✅ |               🟢 |
 | [Counter-Strike 2](docs/games/counter-strike-2.md)                                      |      ✅ |               🟡 |
-| [Stoneshard Demo](docs/games/stoneshard.md)                                                  |      ✅ |               🟢 |
+| [Stoneshard Demo](docs/games/stoneshard.md)                                             |      ✅ |               🟢 |
 | [Assassin's Creed II](docs/games/assassins-creed-2.md)                                  |      ✅ |               🟢 |
 | [SnowRunner](docs/games/snowrunner.md)                                                  |      ✅ |               🟢 |
 | [Grand Theft Auto IV](docs/games/grand-theft-auto-iv.md)                                |      ✅ |               🟡 |
@@ -85,6 +87,7 @@ The games below have been tested. Click a game name for its tested configuration
 | [Risk of Rain 2](docs/games/risk-of-rain-2.md)                                          |      ✅ |               🟢 |
 | [Batman: Arkham Asylum](docs/games/batman-arkham-asylum.md)                             |      ✅ |               🟢 |
 | [Warframe](docs/games/warframe.md)                                                      |      ✅ |               🟢 |
+| [BioShock Remastered](docs/games/bioshock-remastered.md)                               |      ✅ |               🟢 |
 
 ## Demos
 |                                                       The Witcher 3: Wild Hunt                                                       |                                                       Dragon's Dogma: Dark Arisen                                                       |
@@ -100,7 +103,7 @@ The games below have been tested. Click a game name for its tested configuration
 DirectX through Neptune:
 
 ```text
-guest DirectX => Mesa Neptune => virglrenderer => DXMT => Metal
+guest DirectX => Mesa Neptune => virglrenderer => DXMT/D3DMetal => Metal
 ```
 
 Vulkan:
@@ -115,7 +118,7 @@ OpenGL:
 guest OpenGL => Mesa VirGL => virglrenderer => ANGLE => Metal
 ```
 
-Neptune is currently the preferred path for supported DirectX 11 games. Venus remains the general-purpose Vulkan path and is used by DXVK and other Vulkan applications.
+Neptune is the preferred path for supported 64-bit DirectX 11 and 12 games. Venus remains the general-purpose Vulkan path and is used by DXVK and other Vulkan applications.
 
 ## Building from source
 Requires macOS 26 or later, Xcode, Rust and Docker.
@@ -131,5 +134,5 @@ Varmint relies on several forks maintained by the UTM project, particularly in t
 Huge thanks to the UTM contributors for making this work possible.
 
 ## Resources
-* [Booting AArch64 Linux](https://docs.kernel.org/arch/arm64/booting.html)
-* [VIRTIO](https://docs.oasis-open.org/virtio/virtio/v1.3/csd01/virtio-v1.3-csd01.html)
+- [Booting AArch64 Linux](https://docs.kernel.org/arch/arm64/booting.html)
+- [VIRTIO](https://docs.oasis-open.org/virtio/virtio/v1.3/csd01/virtio-v1.3-csd01.html)

@@ -213,6 +213,22 @@ class ProtonNameTests(unittest.TestCase):
     def test_non_proton_tool_has_no_key(self):
         self.assertIsNone(vet.official_proton_key("Proton EasyAntiCheat Runtime"))
 
+    def test_venus_accepts_official_proton_10_or_older(self):
+        for proton in ("proton_10", "proton_10-arm64", "proton_9", "proton_63"):
+            with self.subTest(proton=proton):
+                self.assertTrue(vet.venus_supports_proton(proton))
+
+    def test_venus_rejects_newer_or_unversioned_proton(self):
+        for proton in (
+            "proton_11",
+            "proton_experimental",
+            "proton_hotfix",
+            "GE-Proton10-20",
+            None,
+        ):
+            with self.subTest(proton=proton):
+                self.assertFalse(vet.venus_supports_proton(proton))
+
 
 class VdfTests(unittest.TestCase):
     PATH = (*vet.Steam.APP_PATH, "123", "LaunchOptions")
@@ -577,6 +593,20 @@ class UiFlowTests(unittest.TestCase):
         open_properties.assert_called_once_with(123)
         self.assertIn("Paste into General", notify.call_args.args[1])
 
+    def test_manual_proton_change_does_not_copy_unchanged_launch_options(self):
+        self.plan["after"] = {"launch_options": "%command%", "proton": "proton_10"}
+        self.plan["changes"] = {"launch_options": False, "proton": True}
+        with (
+            mock.patch.object(actions, "copy_to_clipboard") as copy,
+            mock.patch.object(actions, "open_game_properties") as open_properties,
+            mock.patch.object(actions, "notify") as notify,
+        ):
+            actions.configure_manually(self.plan)
+        copy.assert_not_called()
+        open_properties.assert_called_once_with(123)
+        self.assertEqual(notify.call_args.args[0], "Steam Properties opened")
+        self.assertIn("select Proton 10", notify.call_args.args[1])
+
     def test_notifications_expire(self):
         with (
             mock.patch.object(actions, "notification_icon", return_value="/icon.svg"),
@@ -593,6 +623,51 @@ class UiFlowTests(unittest.TestCase):
             plan["after"], {"launch_options": "%command%", "proton": "proton_10"}
         )
         self.assertEqual(plan["changes"], {"launch_options": False, "proton": True})
+
+    def test_switching_to_venus_adds_proton_10_when_needed(self):
+        state = {
+            "appid": 123,
+            "launch_options": "varmint-graphics neptune %command%",
+            "graphics_mode": "neptune",
+            "effective_graphics_mode": "neptune",
+            "proton": None,
+            "effective_proton": "proton_experimental",
+        }
+        plan = actions.switch_backend_plan(state, "venus")
+        self.assertEqual(plan["after"]["proton"], "proton_10")
+        self.assertEqual(
+            plan["changes"], {"launch_options": True, "proton": True}
+        )
+
+    def test_switching_to_venus_preserves_supported_proton(self):
+        state = {
+            "appid": 123,
+            "launch_options": "varmint-graphics neptune %command%",
+            "graphics_mode": "neptune",
+            "effective_graphics_mode": "neptune",
+            "proton": "proton_9",
+            "effective_proton": "proton_9",
+        }
+        plan = actions.switch_backend_plan(state, "venus")
+        self.assertEqual(plan["after"]["proton"], "proton_9")
+        self.assertEqual(
+            plan["changes"], {"launch_options": True, "proton": False}
+        )
+
+    def test_current_venus_can_correct_only_proton(self):
+        state = {
+            "appid": 123,
+            "launch_options": "",
+            "graphics_mode": None,
+            "effective_graphics_mode": "venus",
+            "proton": None,
+            "effective_proton": "proton_experimental",
+        }
+        plan = actions.switch_backend_plan(state, "venus")
+        self.assertEqual(
+            plan["changes"], {"launch_options": False, "proton": True}
+        )
+        self.assertEqual(plan["after"], {"launch_options": "", "proton": "proton_10"})
 
 
 class FakeHttp:
@@ -774,11 +849,11 @@ Launch options: varmint-graphics neptune-dx12 %command% --launcher-skip"""
             (GUEST / "varmint-vet-catalog.json").read_text(encoding="utf-8")
         )
         self.assertEqual(compiled, checked_in)
-        self.assertEqual(len(compiled["games"]), 41)
+        self.assertEqual(len(compiled["games"]), 42)
         profiles = [
             profile for game in compiled["games"] for profile in game["profiles"]
         ]
-        self.assertEqual(len(profiles), 49)
+        self.assertEqual(len(profiles), 50)
         self.assertEqual(sum(profile["setup"] == "manual" for profile in profiles), 7)
         self.assertEqual(sum(profile["setup"] == "assisted" for profile in profiles), 6)
         self.assertEqual(
@@ -1009,6 +1084,23 @@ class PolicyTests(unittest.TestCase):
                     (backend, setup),
                 )
 
+    def test_generic_venus_policy_recommends_proton_10(self):
+        for versions in ([9], [11]):
+            with self.subTest(versions=versions):
+                recommendation = self.provider.recommend(
+                    self.game, self.state, external(versions, "x86")
+                )
+                self.assertEqual(recommendation.proton, "proton_10")
+
+    def test_generic_policy_explains_executable_architecture(self):
+        recommendation = self.provider.recommend(
+            self.game, self.state, external([11], "x86")
+        )
+        self.assertEqual(
+            recommendation.message,
+            "Based on 32-bit Direct3D 11 support.",
+        )
+
     def test_generic_policy_notes_unverified_launcher_compatibility(self):
         recommendation = self.provider.recommend(
             self.game, self.state, external([11], "x64")
@@ -1131,9 +1223,13 @@ class MonitorFlowTests(unittest.TestCase):
         )
         notification.assert_not_called()
 
-    def test_already_configured_game_stays_quiet(self):
+    def test_already_configured_game_shows_ready_notification(self):
         notification = self.call_notification(self.recommendation(changed=False))
-        notification.assert_not_called()
+        notification.assert_called_once()
+        self.assertEqual(
+            notification.call_args.args[0][-1],
+            "Test Game is already set up as recommended.",
+        )
 
     def test_host_backend_mismatch_shows_notification(self):
         notification = self.call_notification(
@@ -1406,8 +1502,18 @@ class DiagnosticTests(unittest.TestCase):
         steam.proton_selection.return_value = None
         steam.effective_proton.return_value = "proton_experimental"
         service = vet.VetService(steam=steam, diagnostics=self.store)
-        with self.assertRaisesRegex(vet.VetError, "Choose a Varmint graphics backend"):
+        with self.assertRaisesRegex(vet.VetError, "Venus is active through Steam defaults"):
             service.arm_diagnostics(123)
+
+    def test_implicit_venus_requires_a_diagnostics_wrapper(self):
+        state = {
+            "graphics_mode": None,
+            "effective_graphics_mode": "venus",
+            "launch_options_error": None,
+        }
+        self.assertTrue(vet.diagnostics_wrapper_required(state))
+        state["graphics_mode"] = "venus"
+        self.assertFalse(vet.diagnostics_wrapper_required(state))
 
     def test_service_arms_managed_game(self):
         steam = mock.Mock()
@@ -1486,6 +1592,30 @@ class StateOwnershipTests(unittest.TestCase):
         state["host_neptune_backend"] = "D3DMetal"
         self.assertIsNone(vet.current_host_backend_warning(state))
 
+    def test_current_venus_setup_warns_about_unsupported_proton(self):
+        state = {
+            "effective_graphics_mode": "venus",
+            "effective_proton": "proton_experimental",
+        }
+        warning = vet.current_setup_warning(state)
+        self.assertIn("Venus is supported with Proton 10 or older", warning)
+        self.assertIn("Proton Experimental", warning)
+
+    def test_current_venus_setup_accepts_proton_10(self):
+        state = {
+            "effective_graphics_mode": "venus",
+            "effective_proton": "proton_10",
+        }
+        self.assertIsNone(vet.current_setup_warning(state))
+
+    def test_current_setup_warning_keeps_host_backend_diagnostics(self):
+        state = {
+            "effective_graphics_mode": "neptune-dx12",
+            "effective_proton": "proton_experimental",
+            "host_neptune_backend": "DXMT",
+        }
+        self.assertIn("needs D3DMetal", vet.current_setup_warning(state))
+
     def test_dx11_setup_does_not_show_an_immediate_host_warning(self):
         state = {
             "effective_graphics_mode": "neptune",
@@ -1532,6 +1662,21 @@ class StateOwnershipTests(unittest.TestCase):
         plan = service.plan(state, recommendation)
         self.assertFalse(plan["changes"]["launch_options"])
         self.assertEqual(plan["after"]["launch_options"], "")
+
+    def test_venus_proton_recommendation_changes_only_proton(self):
+        steam = self.FakeSteam()
+        steam.options = ""
+        service = vet.VetService(steam=steam)
+        state = service.game_state(123)
+        recommendation = vet.Recommendation(
+            "venus", "proton_10", [], [], {}, "test", "high", "", "", []
+        )
+        plan = service.plan(state, recommendation)
+        self.assertEqual(
+            plan["changes"], {"launch_options": False, "proton": True}
+        )
+        self.assertEqual(plan["after"]["launch_options"], "")
+        self.assertEqual(plan["after"]["proton"], "proton_10")
 
     def test_venus_recommendation_keeps_required_launch_arguments(self):
         steam = self.FakeSteam()

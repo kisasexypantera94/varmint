@@ -3,7 +3,12 @@
 from pathlib import Path
 import subprocess
 
-from varmint_vet import VetError, display_proton
+from varmint_vet import (
+    VetError,
+    display_proton,
+    transform_launch_options,
+    venus_supports_proton,
+)
 
 
 NOT_SET = object()
@@ -76,9 +81,9 @@ def notify(title, message):
         pass
 
 
-def configure_manually(plan, copy_launch_options=False):
+def configure_manually(plan):
     instructions = []
-    if copy_launch_options or plan["changes"]["launch_options"]:
+    if plan["changes"]["launch_options"]:
         copy_to_clipboard(plan["after"]["launch_options"])
         instructions.append("Paste into General → Launch Options.")
     if plan["changes"]["proton"]:
@@ -91,9 +96,10 @@ def configure_manually(plan, copy_launch_options=False):
     if not instructions:
         return False
     open_game_properties(plan["appid"])
-    copied = copy_launch_options or plan["changes"]["launch_options"]
     notify(
-        "Launch Options copied" if copied else "Steam Properties opened",
+        "Launch Options copied"
+        if plan["changes"]["launch_options"]
+        else "Steam Properties opened",
         " ".join(instructions),
     )
     return True
@@ -116,3 +122,13 @@ def override_plan(state, launch_options=NOT_SET, proton=NOT_SET):
             "proton": target_proton != state["proton"],
         },
     }
+
+
+def switch_backend_plan(state, mode):
+    launch_options = NOT_SET
+    if mode != state["effective_graphics_mode"]:
+        launch_options = transform_launch_options(state["launch_options"], mode)
+    proton = NOT_SET
+    if mode == "venus" and not venus_supports_proton(state["effective_proton"]):
+        proton = "proton_10"
+    return override_plan(state, launch_options=launch_options, proton=proton)
