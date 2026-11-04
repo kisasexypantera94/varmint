@@ -130,8 +130,10 @@ chroot "$MOUNT_DIR" /bin/sh -eu -c '
   done
   test -f /usr/share/guestos/fex-mesa/graphics_provider.json
   test -x /usr/local/share/varmint/steam-bootstrap/steamrtarm64/steam
-  test -L /usr/local/share/varmint/steam-bootstrap/steamrt64
-  test -f /usr/local/share/varmint/steam-bootstrap/.steam-enable-steamrt64-client
+  test ! -e /usr/local/share/varmint/steam-bootstrap/steamrt64
+  test ! -L /usr/local/share/varmint/steam-bootstrap/steamrt64
+  test ! -e /usr/local/share/varmint/steam-bootstrap/.steam-enable-steamrt64-client
+  test ! -L /usr/local/share/varmint/steam-bootstrap/.steam-enable-steamrt64-client
   grep -Fx publicbeta /usr/local/share/varmint/steam-bootstrap/package/beta
   test -x /usr/local/bin/steam-edge-resize
   test -x /usr/local/bin/varmint-steam

@@ -166,10 +166,9 @@ install_steam() {
 
     run_as_user mkdir -p \
         "$steam_root/package" \
+        "$steam_root/steamrt64" \
         "$home_dir/.steam"
 
-    run_as_user ln -sfn steamrtarm64 "$steam_root/steamrt64"
-    run_as_user touch "$steam_root/.steam-enable-steamrt64-client"
     run_as_user sh -c \
         'printf "%s\n" publicbeta > "$1/package/beta"' \
         sh "$steam_root"

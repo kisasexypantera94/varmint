@@ -94,8 +94,6 @@ RUN mkdir -p /opt/steam-bootstrap/package && \
         /opt/steam-bootstrap/steamrtarm64/vulkandriverquery \
         /opt/steam-bootstrap/steamrtarm64/steamsysinfo && \
     test -x /opt/steam-bootstrap/steamrtarm64/steam && \
-    ln -sfn steamrtarm64 /opt/steam-bootstrap/steamrt64 && \
-    touch /opt/steam-bootstrap/.steam-enable-steamrt64-client && \
     printf '%s\n' "$STEAM_BRANCH" > /opt/steam-bootstrap/package/beta && \
     rm -f /tmp/steam-arm64.manifest /tmp/steam-arm64.zip
 

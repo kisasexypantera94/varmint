@@ -4,6 +4,8 @@ set -u
 STEAM_ROOT="$HOME/.local/share/Steam"
 CLIENT_DIR="$STEAM_ROOT/steamrtarm64"
 CLIENT="$CLIENT_DIR/steam"
+STEAMRT64_DIR="$STEAM_ROOT/steamrt64"
+STEAMRT64_MARKER="$STEAM_ROOT/.steam-enable-steamrt64-client"
 MARKER="$STEAM_ROOT/package/steam_client_publicbeta_linuxarm64.installed"
 
 # Keep Proton's generated per-game FEX configuration and only override
@@ -14,6 +16,35 @@ export STEAM_FEX_TSOENABLED=0
 if [ ! -x "$CLIENT" ]; then
     printf '%s\n' "varmint-steam: Steam client is missing: $CLIENT" >&2
     exit 1
+fi
+
+# Varmint 0.4.0 linked steamrt64 to steamrtarm64. The ARM64 manifest owns
+# both paths independently, so updates through that link could replace ARM64
+# libraries with their x86-64 counterparts.
+if [ -L "$STEAMRT64_DIR" ]; then
+    steamrt64_target=$(readlink "$STEAMRT64_DIR") || exit 1
+    case "$steamrt64_target" in
+        steamrtarm64|"$CLIENT_DIR")
+            rm -f "$STEAMRT64_MARKER" || exit 1
+            rm -f "$STEAMRT64_DIR" || exit 1
+            ;;
+        *)
+            printf '%s\n' \
+                "varmint-steam: refusing to replace unexpected steamrt64 link: $steamrt64_target" \
+                >&2
+            exit 1
+            ;;
+    esac
+fi
+
+if [ -e "$STEAMRT64_DIR" ]; then
+    if [ ! -d "$STEAMRT64_DIR" ]; then
+        printf '%s\n' \
+            "varmint-steam: steamrt64 is not a directory: $STEAMRT64_DIR" >&2
+        exit 1
+    fi
+else
+    mkdir -p "$STEAMRT64_DIR" || exit 1
 fi
 
 # Steam's graphical bootstrap updater dlopens "libGLX.so" rather than the
@@ -28,7 +59,7 @@ cd "$CLIENT_DIR" || exit 1
 
 # Normal launches after the full public beta ARM64 client has been installed.
 if [ -f "$MARKER" ]; then
-    exec "$CLIENT" -noverifyfiles "$@"
+    exec "$CLIENT" "$@"
 fi
 
 # First launch: warn once about the known rendering glitches in Steam's
@@ -60,7 +91,7 @@ rc=$?
 # If the bootstrap exits after completing the installation, start the
 # installed client immediately.
 if [ -f "$MARKER" ]; then
-    exec "$CLIENT" -noverifyfiles "$@"
+    exec "$CLIENT" "$@"
 fi
 
 exit "$rc"
