@@ -1,12 +1,15 @@
 """Qt interface for Vet."""
 
 from datetime import datetime, timezone
+import json
 import math
+import os
 from pathlib import Path
 import threading
 
 from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QGuiApplication, QIcon, QTextBlockFormat, QTextCursor
+from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -759,6 +762,8 @@ class VetWindow(QDialog):
         return frame
 
     def _populate_games(self, selected_appid):
+        self.game_list.blockSignals(True)
+        self.game_list.clear()
         selected = None
         for game in self.games:
             item = QListWidgetItem(game["name"])
@@ -767,8 +772,17 @@ class VetWindow(QDialog):
             if game["appid"] == selected_appid:
                 selected = item
         if self.games:
-            self.game_list.setCurrentItem(selected or self.game_list.item(0))
+            selected = selected or self.game_list.item(0)
+            self.game_list.setCurrentItem(selected)
+            self._filter_games(self.search.text())
+            self.game_list.blockSignals(False)
+            if not self.state or self.state["appid"] != selected.data(
+                Qt.ItemDataRole.UserRole
+            )["appid"]:
+                self._game_selected(selected, None)
         else:
+            self.game_list.blockSignals(False)
+            self.state = None
             self.game_title.setText("No installed games")
             self.game_subtitle.setText(
                 "Steam did not report any fully installed games."
@@ -873,6 +887,19 @@ class VetWindow(QDialog):
         self.proton_combo.setCurrentIndex(max(index, 0))
 
     def _refresh_from_steam(self):
+        try:
+            games = self.service.steam.installed_games()
+        except Exception:
+            games = self.games
+        if [(game["appid"], game["name"]) for game in games] != [
+            (game["appid"], game["name"]) for game in self.games
+        ]:
+            current = self.game_list.currentItem()
+            selected_appid = (
+                current.data(Qt.ItemDataRole.UserRole)["appid"] if current else None
+            )
+            self.games = games
+            self._populate_games(selected_appid)
         current = self.game_list.currentItem()
         if current is None:
             return
@@ -894,6 +921,34 @@ class VetWindow(QDialog):
         self._show_game_state(game, state)
         if not state["launch_options_error"]:
             self._show_status("Updated from Steam.")
+
+    def activate_request(self, selected_appid=None, diagnostic_run_id=None):
+        current = self.game_list.currentItem()
+        current_appid = (
+            current.data(Qt.ItemDataRole.UserRole)["appid"] if current else None
+        )
+        target_appid = selected_appid or current_appid
+        if selected_appid:
+            self.search.clear()
+        try:
+            self.games = self.service.steam.installed_games()
+        except Exception:
+            pass
+        self._populate_games(target_appid)
+        if target_appid:
+            for index in range(self.game_list.count()):
+                item = self.game_list.item(index)
+                if item.data(Qt.ItemDataRole.UserRole)["appid"] == target_appid:
+                    if item == self.game_list.currentItem():
+                        self._game_selected(item, None)
+                    else:
+                        self.game_list.setCurrentItem(item)
+                    break
+        if diagnostic_run_id:
+            self._show_diagnostic_report(diagnostic_run_id)
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
 
     def _open_diagnostics(self):
         self._update_diagnostic_panel()
@@ -1389,6 +1444,64 @@ def run(service=None, selected_appid=None, diagnostic_run_id=None):
         application.setWindowIcon(QIcon(icon))
     if scheme := color_scheme_path():
         application.setProperty("KDE_COLOR_SCHEME_PATH", scheme)
+    request = {
+        "appid": selected_appid,
+        "diagnostic_run_id": diagnostic_run_id,
+    }
+    server_name = f"varmint-vet-{os.getuid()}"
+    client = QLocalSocket()
+    client.connectToServer(server_name)
+    if client.waitForConnected(200):
+        client.write((json.dumps(request) + "\n").encode())
+        client.waitForBytesWritten(500)
+        client.disconnectFromServer()
+        return 0
+
+    server = QLocalServer(application)
+    if not server.listen(server_name):
+        client.connectToServer(server_name)
+        if client.waitForConnected(500):
+            client.write((json.dumps(request) + "\n").encode())
+            client.waitForBytesWritten(500)
+            client.disconnectFromServer()
+            return 0
+        QLocalServer.removeServer(server_name)
+        if not server.listen(server_name):
+            raise RuntimeError(f"Could not open Vet instance socket: {server.errorString()}")
+
     window = VetWindow(service or VetService(), selected_appid, diagnostic_run_id)
+
+    clients = {}
+
+    def read_request(socket):
+        buffer = clients.get(socket)
+        if buffer is None:
+            return
+        buffer.extend(bytes(socket.readAll()))
+        while b"\n" in buffer:
+            line, _, remainder = buffer.partition(b"\n")
+            buffer = bytearray(remainder)
+            clients[socket] = buffer
+            try:
+                message = json.loads(line)
+                if not isinstance(message, dict):
+                    continue
+                window.activate_request(
+                    message.get("appid"), message.get("diagnostic_run_id")
+                )
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+
+    def accept_requests():
+        while server.hasPendingConnections():
+            socket = server.nextPendingConnection()
+            clients[socket] = bytearray()
+            socket.readyRead.connect(lambda socket=socket: read_request(socket))
+            socket.disconnected.connect(lambda socket=socket: clients.pop(socket, None))
+            read_request(socket)
+
+    server.newConnection.connect(accept_requests)
     window.show()
-    return application.exec()
+    result = application.exec()
+    server.close()
+    return result
