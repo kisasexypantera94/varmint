@@ -35,7 +35,21 @@ When launching the game from Steam, select the **DirectX 11** option.
 
 DirectX 11 through DXMT remains the recommended path.
 
-## DirectX 12 alternative
+## D3DMetal alternatives
+
+D3DMetal also supports the DirectX 11 path:
+
+```text
+Profile:        dx11-d3dmetal
+Recommendation: Alternative
+Evidence:       Tested
+Setup:          Automatic
+Runtime:        Proton
+Proton version: Proton Experimental
+Renderer:       Neptune
+Host backend:    D3DMetal
+Launch options: varmint-graphics neptune %command%
+```
 
 DirectX 12 also works through D3DMetal:
 
@@ -51,7 +65,7 @@ Host backend:    D3DMetal
 Launch options: varmint-graphics neptune-dx12 %command% -dx12
 ```
 
-Select **D3DMetal** in the Varmint launcher before starting the VM, then use the launch options above.
+Select **D3DMetal** in the Varmint launcher before starting the VM, then use the launch options for the DirectX version you want.
 
 ## Known issues
 

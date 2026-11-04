@@ -46,8 +46,6 @@ The games below have been tested. Click a game name for its tested configuration
 | Game                                                                                    | Status | Setup Difficulty |
 | --------------------------------------------------------------------------------------- | -----: | ---------------: |
 | [The Witcher 3: Wild Hunt](docs/games/the-witcher-3.md)                                 |      ✅ |               🟢 |
-| [Stellar Blade Demo](docs/games/stellar-blade-demo.md)                                 |      ✅ |               🟡 |
-| [Black Myth: Wukong Benchmark Tool](docs/games/black-myth-wukong-benchmark.md)          |      ✅ |               🟡 |
 | [The Witcher: Enhanced Edition](docs/games/the-witcher-enhanced-edition.md)             |      ✅ |               🟢 |
 | [Dragon's Dogma: Dark Arisen](docs/games/dragons-dogma-dark-arisen.md)                  |      ✅ |               🟡 |
 | [Fallout: New Vegas](docs/games/fallout-new-vegas.md)                                   |      ✅ |               🟢 |
@@ -80,6 +78,7 @@ The games below have been tested. Click a game name for its tested configuration
 | [The Elder Scrolls V: Skyrim Special Edition](docs/games/skyrim-special-edition.md)     |      ✅ |               🟢 |
 | [Dark Deception](docs/games/dark-deception.md)                                          |      ✅ |               🟢 |
 | [Resident Evil 2 "R.P.D. Demo"](docs/games/resident-evil-2-rpd-demo.md)                 |      ✅ |               🟢 |
+| [Resident Evil 3: Raccoon City Demo](docs/games/resident-evil-3-raccoon-city-demo.md)   |      ✅ |               🟢 |
 | [FINAL FANTASY XV WINDOWS EDITION PLAYABLE DEMO](docs/games/final-fantasy-xv-demo.md)   |      ✅ |               🟢 |
 | [The Dark Pictures Anthology: The Devil in Me Demo](docs/games/the-dark-pictures-the-devil-in-me-demo.md) |      ✅ |               🟢 |
 | [Ghostrunner Demo](docs/games/ghostrunner-demo.md)                                      |      ✅ |               🟢 |
@@ -87,7 +86,9 @@ The games below have been tested. Click a game name for its tested configuration
 | [Risk of Rain 2](docs/games/risk-of-rain-2.md)                                          |      ✅ |               🟢 |
 | [Batman: Arkham Asylum](docs/games/batman-arkham-asylum.md)                             |      ✅ |               🟢 |
 | [Warframe](docs/games/warframe.md)                                                      |      ✅ |               🟢 |
-| [BioShock Remastered](docs/games/bioshock-remastered.md)                               |      ✅ |               🟢 |
+| [Stellar Blade Demo](docs/games/stellar-blade-demo.md)                                  |      ✅ |               🟢 |
+| [Black Myth: Wukong Benchmark Tool](docs/games/black-myth-wukong-benchmark.md)          |      ✅ |               🟢 |
+| [BioShock Remastered](docs/games/bioshock-remastered.md)                                |      ✅ |               🟢 |
 
 ## Demos
 |                                                       The Witcher 3: Wild Hunt                                                       |                                                       Dragon's Dogma: Dark Arisen                                                       |

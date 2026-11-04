@@ -28,7 +28,7 @@
         33230
       ],
       "guide": "docs/games/assassins-creed-2.md",
-      "guide_markdown": "# Running Assassin's Creed II in Varmint\n\nAssassin's Creed II is playable in Varmint using Proton 9.\n\nProton 10 currently fails during startup in the Ubisoft launcher, so Proton 9 should be selected explicitly.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 33230\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton 9.0\nRenderer:       Venus\nHost backend:    MoltenVK\nLaunch options: Unchanged\n```\n\n### 1. Select Proton 9\n\nIn Steam:\n\n1. Open **Properties** for Assassin's Creed II.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 9.0**.\n\n### 2. Start the game\n\nLaunch Assassin's Creed II normally from Steam.\n\nThe Ubisoft launcher can be unreliable on startup. If it shows an error such as `Failed to...`, click **Try Again** a few times. It usually starts successfully after that.\n\nIf the launcher says it could not verify the game, click **Stop**, then start the game again from Steam.\n\nNo additional launch options or configuration is required for the tested setup.\n\n## Known issues\n\n### White screen after startup\n\nIf the game gets stuck on a white screen after startup, verify the installed game files in Steam:\n\n1. Open **Properties** for Assassin's Creed II.\n2. Open **Installed Files**.\n3. Click **Verify integrity of game files**.\n\nA corrupted or incomplete game installation can cause this symptom and may look like a graphics or compatibility issue.\n\n",
+      "guide_markdown": "# Running Assassin's Creed II in Varmint\n\nAssassin's Creed II is playable in Varmint using Proton 9.\n\nProton 10 currently fails during startup in the Ubisoft launcher, so Proton 9 should be selected explicitly.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 33230\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton 9.0\nRenderer:       Venus\nHost backend:    MoltenVK\nLaunch options: Unchanged\n```\n\n### 1. Select Proton 9\n\nIn Steam:\n\n1. Open **Properties** for Assassin's Creed II.\n2. Open **Compatibility**.\n3. Under **Select compatibility tool**, select **Proton 9.0**.\n\n### 2. Start the game\n\nLaunch Assassin's Creed II normally from Steam.\n\nThe Ubisoft launcher can be unreliable on startup. If it shows an error such as `Failed to...`, click **Try Again** or **Continue** or **Go Offline** a few times. It usually starts successfully after that.\n\nIf the launcher says it could not verify the game, click **Stop**, then start the game again from Steam.\n\nNo additional launch options or configuration is required for the tested setup.\n\n## Known issues\n\n### White screen after startup\n\nIf the game gets stuck on a white screen after startup, verify the installed game files in Steam:\n\n1. Open **Properties** for Assassin's Creed II.\n2. Open **Installed Files**.\n3. Click **Verify integrity of game files**.\n\nA corrupted or incomplete game installation can cause this symptom and may look like a graphics or compatibility issue.\n\n",
       "profiles": [
         {
           "environment": {},
@@ -235,7 +235,7 @@
         548430
       ],
       "guide": "docs/games/deep-rock-galactic.md",
-      "guide_markdown": "# Running Deep Rock Galactic in Varmint\n\nDeep Rock Galactic is playable in Varmint using Neptune.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 548430\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton Experimental\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: varmint-graphics neptune %command%\n```\n\n### 1. Enable Neptune\n\nSet the following Steam launch options:\n\n```text\nvarmint-graphics neptune %command%\n```\n\nNo additional configuration is required.\n\n### 2. Select DirectX 11\n\nWhen launching the game from Steam, select the **DirectX 11** option.\n\nDirectX 11 through DXMT remains the recommended path.\n\n## DirectX 12 alternative\n\nDirectX 12 also works through D3DMetal:\n\n```text\nProfile:        dx12\nRecommendation: Alternative\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton Experimental\nRenderer:       Neptune DX12\nHost backend:    D3DMetal\nLaunch options: varmint-graphics neptune-dx12 %command% -dx12\n```\n\nSelect **D3DMetal** in the Varmint launcher before starting the VM, then use the launch options above.\n\n## Known issues\n\n### FPS drops in some Space Rig scenes\n\nPerformance can drop sharply in the Space Rig when looking at certain scenes.\n\nThis has been investigated and is caused by a storm of occlusion queries in those scenes.\n\nThe issue appears to be specific to particular areas and viewing angles in the Space Rig. Similar performance drops were not observed during missions in testing.\n\n## Tested configuration\n\n```text\nDeep Rock Galactic\nProton Experimental\nDirectX 11\nNeptune\nDXMT\n```\n",
+      "guide_markdown": "# Running Deep Rock Galactic in Varmint\n\nDeep Rock Galactic is playable in Varmint using Neptune.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 548430\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton Experimental\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: varmint-graphics neptune %command%\n```\n\n### 1. Enable Neptune\n\nSet the following Steam launch options:\n\n```text\nvarmint-graphics neptune %command%\n```\n\nNo additional configuration is required.\n\n### 2. Select DirectX 11\n\nWhen launching the game from Steam, select the **DirectX 11** option.\n\nDirectX 11 through DXMT remains the recommended path.\n\n## D3DMetal alternatives\n\nD3DMetal also supports the DirectX 11 path:\n\n```text\nProfile:        dx11-d3dmetal\nRecommendation: Alternative\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton Experimental\nRenderer:       Neptune\nHost backend:    D3DMetal\nLaunch options: varmint-graphics neptune %command%\n```\n\nDirectX 12 also works through D3DMetal:\n\n```text\nProfile:        dx12\nRecommendation: Alternative\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton Experimental\nRenderer:       Neptune DX12\nHost backend:    D3DMetal\nLaunch options: varmint-graphics neptune-dx12 %command% -dx12\n```\n\nSelect **D3DMetal** in the Varmint launcher before starting the VM, then use the launch options for the DirectX version you want.\n\n## Known issues\n\n### FPS drops in some Space Rig scenes\n\nPerformance can drop sharply in the Space Rig when looking at certain scenes.\n\nThis has been investigated and is caused by a storm of occlusion queries in those scenes.\n\nThe issue appears to be specific to particular areas and viewing angles in the Space Rig. Similar performance drops were not observed during missions in testing.\n\n## Tested configuration\n\n```text\nDeep Rock Galactic\nProton Experimental\nDirectX 11\nNeptune\nDXMT\n```\n",
       "profiles": [
         {
           "environment": {},
@@ -247,6 +247,19 @@
           "launch_args": [],
           "proton": "proton_experimental",
           "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        },
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune",
+          "host_backend": "D3DMetal",
+          "id": "dx11-d3dmetal",
+          "launch_args": [],
+          "proton": "proton_experimental",
+          "recommendation": "alternative",
           "runtime": "proton",
           "setup": "automatic"
         },
@@ -711,6 +724,29 @@
         }
       ],
       "title": "Resident Evil 2 \"R.P.D. Demo\""
+    },
+    {
+      "appids": [
+        1173690
+      ],
+      "guide": "docs/games/resident-evil-3-raccoon-city-demo.md",
+      "guide_markdown": "# Running Resident Evil 3: Raccoon City Demo in Varmint\n\nResident Evil 3: Raccoon City Demo is playable in Varmint using Neptune.\n\n## Quick setup\n\nUse the following configuration:\n\n```text\nSteam App IDs: 1173690\nProfile:        default\nRecommendation: Recommended\nEvidence:       Tested\nSetup:          Automatic\nRuntime:        Proton\nProton version: Proton Experimental\nRenderer:       Neptune\nHost backend:    DXMT\nLaunch options: varmint-graphics neptune %command%\n```\n\n### Enable Neptune\n\nSet the Steam launch options to:\n\n```text\nvarmint-graphics neptune %command%\n```\n\nNo additional setup is required.\n\n## Tested configuration\n\n```text\nResident Evil 3: Raccoon City Demo\nProton Experimental\nDirectX 11\nNeptune\nDXMT\n```\n",
+      "profiles": [
+        {
+          "environment": {},
+          "evidence": "tested",
+          "game_version": null,
+          "graphics_mode": "neptune",
+          "host_backend": "DXMT",
+          "id": "default",
+          "launch_args": [],
+          "proton": "proton_experimental",
+          "recommendation": "recommended",
+          "runtime": "proton",
+          "setup": "automatic"
+        }
+      ],
+      "title": "Resident Evil 3: Raccoon City Demo"
     },
     {
       "appids": [

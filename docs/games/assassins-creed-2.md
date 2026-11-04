@@ -33,7 +33,7 @@ In Steam:
 
 Launch Assassin's Creed II normally from Steam.
 
-The Ubisoft launcher can be unreliable on startup. If it shows an error such as `Failed to...`, click **Try Again** a few times. It usually starts successfully after that.
+The Ubisoft launcher can be unreliable on startup. If it shows an error such as `Failed to...`, click **Try Again** or **Continue** or **Go Offline** a few times. It usually starts successfully after that.
 
 If the launcher says it could not verify the game, click **Stop**, then start the game again from Steam.
 

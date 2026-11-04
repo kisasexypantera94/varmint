@@ -723,7 +723,10 @@ Launch options: varmint-graphics neptune-dx12 %command% --launcher-skip"""
         )
         match, warnings = provider.find(548430, "A title Vet must not need to match")
         self.assertEqual((match.confidence, warnings), ("exact", []))
+        self.assertEqual(match.facts.profile, "default")
+        self.assertEqual(match.facts.recommendation, "recommended")
         self.assertEqual(match.facts.graphics_mode, "neptune")
+        self.assertEqual(match.facts.host_backend, "DXMT")
         self.assertEqual(match.facts.proton, "proton_experimental")
         self.assertEqual(match.facts.launch_args, [])
         self.assertIn("# Running Deep Rock Galactic", match.facts.guide_markdown)
@@ -849,11 +852,11 @@ Launch options: varmint-graphics neptune-dx12 %command% --launcher-skip"""
             (GUEST / "varmint-vet-catalog.json").read_text(encoding="utf-8")
         )
         self.assertEqual(compiled, checked_in)
-        self.assertEqual(len(compiled["games"]), 42)
+        self.assertEqual(len(compiled["games"]), 43)
         profiles = [
             profile for game in compiled["games"] for profile in game["profiles"]
         ]
-        self.assertEqual(len(profiles), 50)
+        self.assertEqual(len(profiles), 52)
         self.assertEqual(sum(profile["setup"] == "manual" for profile in profiles), 7)
         self.assertEqual(sum(profile["setup"] == "assisted" for profile in profiles), 6)
         self.assertEqual(
@@ -884,7 +887,7 @@ Launch options: varmint-graphics neptune-dx12 %command% --launcher-skip"""
         for profile in profiles:
             with self.subTest(profile=profile["id"]):
                 if profile.get("graphics_mode") == "neptune":
-                    self.assertEqual(profile["host_backend"], "DXMT")
+                    self.assertIn(profile["host_backend"], {"DXMT", "D3DMetal"})
                 elif profile.get("graphics_mode") == "neptune-dx12":
                     self.assertEqual(profile["host_backend"], "D3DMetal")
                 elif (
