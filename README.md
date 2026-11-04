@@ -7,7 +7,7 @@ Varmint is a lightweight virtual machine for Macs, built on top of Hypervisor.fr
 
 The current focus is gaming. It runs Linux with hardware-accelerated graphics, making it possible to play Windows and Linux games on Apple Silicon Macs.
 
-Varmint provides Venus for Vulkan and Neptune for DirectX 11 and 12 games.
+Varmint supports Vulkan and Direct3D games through two graphics paths, Venus and Neptune. The best path depends on the game.
 
 ## How to use
 1. Download the [latest release](https://github.com/kisasexypantera94/varmint/releases), extract it and move `Varmint.app` to Applications.
