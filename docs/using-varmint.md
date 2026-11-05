@@ -44,8 +44,8 @@ data.
 Varmint automatically synchronizes text between the macOS and Linux
 clipboards.
 
-Copy and paste with `⌘C` and `⌘V` on macOS, or `Ctrl+C` and `Ctrl+V` in Linux.
-Konsole uses `Ctrl+Shift+C` and `Ctrl+Shift+V` instead.
+Copy and paste with `⌘C` and `⌘V` on macOS, or `Ctrl+C` and `Ctrl+V` in
+Linux applications other than Konsole.
 
 To move text between macOS and Linux, copy it on one side, switch focus, then
 paste it on the other.
@@ -53,7 +53,7 @@ paste it on the other.
 The shared clipboard carries text, not files or images. Its maximum size is
 16 MiB. If the previous clipboard value appears, wait briefly and copy again.
 
-## Copying commands in Konsole
+### Konsole shortcuts
 
 Terminal shortcuts differ from normal desktop applications:
 
